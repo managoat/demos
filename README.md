@@ -31,7 +31,9 @@ Server-side requirements, same as any external Fountain client:
 
 ```
 API_CORS_ORIGINS=http://localhost:5174     # or wherever you host the build
-OAUTH_CLIENTS=dns-desk|http://localhost:5174   # only for "Sign in with Fountain"
+
+# only for "Sign in with Fountain" — JSON, redirect URIs match exactly:
+OAUTH_CLIENTS='[{"id":"dns-desk","name":"DNS Desk","redirect_uris":["http://localhost:5174/"]}]'
 ```
 
 ## How it works: the desk protocol

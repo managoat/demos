@@ -4,7 +4,7 @@ import { beginLogin } from "../lib/oauth";
 import { normalizeBaseUrl, type Settings } from "../lib/settings";
 
 export function Setup(props: { error: string | null; onPaste: (s: Settings) => void }) {
-  const [baseUrl, setBaseUrl] = useState("https://fountain.jakegaylor.com");
+  const [baseUrl, setBaseUrl] = useState("https://fountain.inevitable.fyi");
   const [showPaste, setShowPaste] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState(false);
