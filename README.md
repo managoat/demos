@@ -68,10 +68,16 @@ conversation is the system of record; **Zones** is a view of the newest
 ## Development
 
 ```bash
-bun test           # protocol, ACP block parsing, SSE parsing
+bun test           # protocol, ACP block parsing, SSE parsing, render smoke
 bun run typecheck
 bun run build      # tsc + vite
 ```
+
+To work on the UI without a live Fountain, run the mock
+(`bun run mock`), start the app through the dev proxy
+(`FOUNTAIN_PROXY=http://localhost:8787 bun run dev`), and open
+`http://localhost:5174/dev-seed.html` once to point the app at it — you land
+on a desk with a zone and a plan awaiting approval.
 
 No state outside the browser: settings in `localStorage`
 (`dns-desk.settings`), the chosen teammate per Fountain URL
