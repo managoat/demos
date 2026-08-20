@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><title>dev seed</title><script>
+// Dev-only: point the app at the mock server (see mock/server.ts). Refuses
+// to touch settings anywhere but localhost so it is inert in a deployed build.
+if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
+  localStorage.setItem("mission-control.settings", JSON.stringify({ baseUrl: location.origin, apiKey: "test", via: "paste" }));
+  localStorage.setItem("mission-control.crew", JSON.stringify({ [location.origin]: { coordinatorId: "agent-coord", workerId: "agent-worker" } }));
+  document.write("seeded — open <a href='/'>the app</a>");
+} else {
+  document.write("dev-only page; does nothing here");
+}
+</script>
