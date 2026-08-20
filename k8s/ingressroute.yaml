@@ -1,0 +1,38 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: mission-control
+  namespace: mission-control
+  labels:
+    app: mission-control
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`mission.inevitable.fyi`)"
+      kind: Rule
+      services:
+        - name: mission-control
+          port: 80
+  tls:
+    secretName: mission-control-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: mission-control-http
+  namespace: mission-control
+  labels:
+    app: mission-control
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: "Host(`mission.inevitable.fyi`)"
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: mission-control
+          port: 80
