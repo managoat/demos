@@ -1,0 +1,38 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: table-talk
+  namespace: table-talk
+  labels:
+    app: table-talk
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`tables.inevitable.fyi`)"
+      kind: Rule
+      services:
+        - name: table-talk
+          port: 80
+  tls:
+    secretName: table-talk-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: table-talk-http
+  namespace: table-talk
+  labels:
+    app: table-talk
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: "Host(`tables.inevitable.fyi`)"
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: table-talk
+          port: 80
