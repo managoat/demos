@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: watchtower-tls
+  namespace: watchtower
+spec:
+  secretName: watchtower-tls
+  issuerRef:
+    name: letsencrypt-production
+    kind: ClusterIssuer
+  dnsNames:
+    - watchtower.inevitable.fyi
