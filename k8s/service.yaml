@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: repo-sage
+  namespace: repo-sage
+  labels:
+    app: repo-sage
+spec:
+  type: ClusterIP
+  selector:
+    app: repo-sage
+  ports:
+    - port: 80
+      targetPort: 8080

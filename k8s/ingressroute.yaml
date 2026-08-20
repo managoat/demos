@@ -1,0 +1,38 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: repo-sage
+  namespace: repo-sage
+  labels:
+    app: repo-sage
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`reposage.inevitable.fyi`)"
+      kind: Rule
+      services:
+        - name: repo-sage
+          port: 80
+  tls:
+    secretName: repo-sage-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: repo-sage-http
+  namespace: repo-sage
+  labels:
+    app: repo-sage
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: "Host(`reposage.inevitable.fyi`)"
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: repo-sage
+          port: 80
