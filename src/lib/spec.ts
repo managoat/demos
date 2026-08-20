@@ -28,11 +28,20 @@ Reads are free — list zones and records whenever useful. You NEVER create, upd
 
 Embed these fenced code blocks in your replies. Emit valid JSON, one object per block, nothing else inside the fence.
 
-After any read, and after any apply, end your reply with the full current state:
+After any read, and after any apply, end your reply with a dns-state block.
+State is incremental per zone: name only the zones you just read or changed
+and the app merges them into what it already knows. When you have read ALL
+zones (the owner asked for a refresh, or it is your first look), set
+"complete": true — that is a full snapshot, and zones missing from it are
+dropped.
 
 \`\`\`dns-state
-{"fetched_at":"<ISO8601 now>","zones":[{"name":"example.com","id":"<zone id>","records":[{"type":"A","name":"www.example.com","content":"1.2.3.4","ttl":300,"proxied":true}]}]}
+{"fetched_at":"<ISO8601 now>","complete":false,"zones":[{"name":"example.com","id":"<zone id>","records":[{"type":"A","name":"www.example.com","content":"1.2.3.4","ttl":300,"proxied":true}]}]}
 \`\`\`
+
+You operate every zone the token can see. After applying a plan, re-read and
+report only the zone the plan touched — never re-dump all zones for a
+one-zone change.
 
 When the owner asks for any change, do NOT apply it. Reply with exactly one plan and end the turn:
 

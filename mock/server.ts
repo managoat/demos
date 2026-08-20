@@ -16,7 +16,7 @@ const chunk = (text: string) =>
 const STATE_V1 = `Here is everything the token can see.
 
 \`\`\`dns-state
-{"fetched_at":"2026-08-19T16:00:00Z","zones":[{"name":"example.com","id":"z1","records":[{"type":"A","name":"www.example.com","content":"203.0.113.10","ttl":1,"proxied":true},{"type":"MX","name":"example.com","content":"mail.example.com","ttl":300,"priority":10},{"type":"TXT","name":"_dmarc.example.com","content":"v=DMARC1; p=quarantine","ttl":300}]}]}
+{"fetched_at":"2026-08-19T16:00:00Z","complete":true,"zones":[{"name":"example.com","id":"z1","records":[{"type":"A","name":"www.example.com","content":"203.0.113.10","ttl":1,"proxied":true},{"type":"MX","name":"example.com","content":"mail.example.com","ttl":300,"priority":10},{"type":"TXT","name":"_dmarc.example.com","content":"v=DMARC1; p=quarantine","ttl":300}]}]}
 \`\`\``;
 
 const PLAN = `That's one new record. Plan below — nothing applied.

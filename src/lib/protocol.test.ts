@@ -100,7 +100,7 @@ describe("foldConversation", () => {
     expect(view.plans).toHaveLength(1);
   });
 
-  test("newest state wins", () => {
+  test("newest report of a zone wins", () => {
     const state2 = STATE.replace("1.2.3.4", "9.9.9.9");
     const view = foldConversation([
       { prompt: "state", reply: STATE },
@@ -108,5 +108,26 @@ describe("foldConversation", () => {
     ]);
     expect(view.state!.zones[0]!.records[0]!.content).toBe("9.9.9.9");
     expect(view.stateTurnIndex).toBe(1);
+  });
+
+  test("a partial state merges: other zones stay as last reported", () => {
+    const other = '```dns-state\n{"fetched_at":"2026-08-19T01:00:00Z","zones":[{"name":"other.io","records":[{"type":"A","name":"other.io","content":"7.7.7.7"}]}]}\n```';
+    const view = foldConversation([
+      { prompt: "read all", reply: STATE },
+      { prompt: "read other.io", reply: other },
+    ]);
+    expect(view.state!.zones.map((z) => z.name)).toEqual(["example.com", "other.io"]);
+    expect(view.state!.fetched_at).toBe("2026-08-19T01:00:00Z");
+  });
+
+  test("a complete snapshot drops zones absent from it", () => {
+    const other = '```dns-state\n{"zones":[{"name":"other.io","records":[]}]}\n```';
+    const full = '```dns-state\n{"complete":true,"zones":[{"name":"example.com","records":[]}]}\n```';
+    const view = foldConversation([
+      { prompt: "read", reply: STATE },
+      { prompt: "read other", reply: other },
+      { prompt: "refresh everything", reply: full },
+    ]);
+    expect(view.state!.zones.map((z) => z.name)).toEqual(["example.com"]);
   });
 });

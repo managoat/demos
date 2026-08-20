@@ -23,9 +23,10 @@ teammate already running the `dns-desk` agent, or let the app hire one: it
 creates the agent with the built-in operating rules and adds it to your team
 with the vault you choose.
 
-The vault must hold `CLOUDFLARE_API_TOKEN` — make it a token scoped to just
-the zones the desk should manage (Zone → DNS → Edit). That scoping, not the
-prompt, is the real blast-radius control.
+The vault must hold `CLOUDFLARE_API_TOKEN` (Zone → DNS → Edit). The desk
+operates every zone the token can see, so the token's zone list — not the
+prompt — is the real blast-radius control: scope it to exactly the zones the
+desk should manage, whether that is one zone or all of them.
 
 Server-side requirements, same as any external Fountain client:
 
@@ -48,8 +49,13 @@ replies (`src/lib/protocol.ts`; the agent's side of the contract is
 `src/lib/spec.ts` — change one, change both):
 
     ```dns-state
-    {"fetched_at":"…","zones":[{"name":"example.com","id":"…","records":[…]}]}
+    {"fetched_at":"…","complete":false,"zones":[{"name":"example.com","id":"…","records":[…]}]}
     ```
+
+State is incremental per zone: a block updates the zones it names and the app
+merges it into what it already knows, so applying a one-zone change re-reads
+one zone, not the fleet. `"complete": true` marks a full snapshot (an
+explicit refresh) — zones absent from it are dropped.
 
     ```dns-plan
     {"id":"plan-x7k2","zone":"example.com","summary":"…","changes":[{"op":"create","type":"A","name":"demo.example.com","content":"203.0.113.7","ttl":1,"proxied":false}]}

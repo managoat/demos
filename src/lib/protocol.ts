@@ -28,6 +28,8 @@ export interface DnsZone {
 export interface DnsState {
   fetched_at?: string;
   zones: DnsZone[];
+  /** true = a full snapshot: zones absent from it no longer exist */
+  complete?: boolean;
 }
 
 export interface PlanChange {
@@ -122,13 +124,20 @@ export interface DeskView {
  * Fold a conversation into what the desk shows. `turns` is oldest-first:
  * each entry is the user's prompt plus the agent's full reply text.
  *
+ * State accumulates per zone: a dns-state block updates the zones it names
+ * and leaves the rest as last reported, so an apply only re-reads the zone
+ * it touched. A block marked `complete: true` is a full snapshot — zones
+ * absent from it are dropped.
+ *
  * Status is derived, never stored: a dns-result names the outcome; an
  * APPROVE/REJECT message after the plan marks it approved/rejected while the
  * apply is still running; a newer plan with no outcome supersedes an older
  * undecided one (the agent re-plans rather than applying stale diffs).
  */
 export function foldConversation(turns: Array<{ prompt: string; reply: string }>): DeskView {
-  let state: DnsState | null = null;
+  let zones = new Map<string, DnsZone>();
+  let fetchedAt: string | undefined;
+  let sawState = false;
   let stateTurnIndex: number | null = null;
   const plans = new Map<string, PlanCard>();
   const decisions = new Map<string, "approve" | "reject">();
@@ -139,7 +148,10 @@ export function foldConversation(turns: Array<{ prompt: string; reply: string }>
     if (decision) decisions.set(decision.planId, decision.verb);
     for (const block of parseBlocks(turn.reply)) {
       if (block.kind === "state") {
-        state = block.state;
+        sawState = true;
+        if (block.state.complete) zones = new Map();
+        for (const z of block.state.zones) zones.set(z.name, z);
+        if (block.state.fetched_at) fetchedAt = block.state.fetched_at;
         stateTurnIndex = i;
       } else if (block.kind === "plan") {
         plans.set(block.plan.id, { plan: block.plan, status: "awaiting", detail: null, turnIndex: i });
@@ -167,6 +179,9 @@ export function foldConversation(turns: Array<{ prompt: string; reply: string }>
   cards.forEach((c, i) => {
     if (c.status === "awaiting" && i < lastAwaiting) c.status = "superseded";
   });
+  const state: DnsState | null = sawState
+    ? { zones: [...zones.values()].sort((a, b) => a.name.localeCompare(b.name)), ...(fetchedAt ? { fetched_at: fetchedAt } : {}) }
+    : null;
   return { state, stateTurnIndex, plans: cards };
 }
 
@@ -218,6 +233,7 @@ function asState(v: Record<string, unknown>): DnsState | null {
   const state: DnsState = { zones };
   const fetched = str(v.fetched_at);
   if (fetched) state.fetched_at = fetched;
+  if (v.complete === true) state.complete = true;
   return state;
 }
 

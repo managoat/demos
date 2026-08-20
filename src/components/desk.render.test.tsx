@@ -43,12 +43,12 @@ describe("Zones", () => {
     expect(html).toContain("1.2.3.4");
     expect(html).toContain("auto");
     expect(html).toContain("proxied");
-    expect(html).toContain("As the desk last read it");
+    expect(html).toContain("1 zone as the desk last read them");
   });
 
   test("no state yet: says so, refresh still offered", () => {
     const html = renderToString(<Zones state={null} onRefresh={() => undefined} refreshing={false} />);
     expect(html).toContain("has not reported zone state yet");
-    expect(html).toContain("Refresh from Cloudflare");
+    expect(html).toContain("Refresh all zones");
   });
 });
