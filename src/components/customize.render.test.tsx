@@ -107,18 +107,27 @@ describe("customize panel", () => {
     expect(html).toContain("How to set one up");
   });
 
-  test("the tool field shows what answers before they act, from the agent's own policy", () => {
-    // fountain#939. Nothing set is "let them run it", which is what every
-    // teammate did before the policy existed.
+  // The selector that set this is withdrawn (fountain#996): "always" means
+  // three different things across the runtimes and, for one shape of command,
+  // nothing at all. These two tests are the contract that replaced it — no way
+  // to set one here, and no silence about one set elsewhere.
+  test("nothing here can set a permission policy, and a teammate without one says nothing about it", () => {
     const html = renderToString(<Profile client={client} teammate={teammate} onClose={() => {}} />);
+    expect(html).not.toContain("Before they run a tool");
+    expect(html).not.toContain("Ask me first");
+    expect(html).not.toContain("Let them run it");
+    // the whole control is gone, not merely disabled
+    expect(html).not.toContain('value="auto_deny"');
+  });
+
+  test("a policy set outside this app is shown, read-only, and says where to change it", () => {
+    const asking = { ...teammate, agent: { ...agent, permission_policy: { default: "ask" as const } } };
+    const html = renderToString(<Profile client={client} teammate={asking} onClose={() => {}} />);
     expect(html).toContain("Before they run a tool");
     expect(html).toContain("Ask me first");
-    expect(html).toContain("five minutes");
-    expect(html).toContain('<option value="auto_allow" selected=""');
-
-    const asking = { ...teammate, agent: { ...agent, permission_policy: { default: "ask" as const } } };
-    const askingHtml = renderToString(<Profile client={client} teammate={asking} onClose={() => {}} />);
-    expect(askingHtml).toContain('<option value="ask" selected=""');
+    expect(html).toContain("fountain acp --permission");
+    // read-only: no control to change it with
+    expect(html).not.toContain('<option value="ask"');
   });
 
   test("an empty teammate renders both tabs with nothing yet", () => {
