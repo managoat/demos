@@ -11,6 +11,7 @@ import { addInstantTeammate } from "./lib/instant";
 import { Routines } from "./components/Routines";
 import { Palette, type PaletteChoice } from "./components/Palette";
 import { teamManifest } from "./lib/manifest";
+import { forgetPerson, identifyPerson } from "./lib/analytics";
 import { Onboarding } from "./components/Onboarding";
 import { Shortcuts } from "./components/Shortcuts";
 import { History } from "./components/History";
@@ -52,6 +53,9 @@ export function App() {
           saveSettings(s);
           setSettings(s);
           setEmail(me.email);
+          // The Fountain user id, which is the distinct id the server captures
+          // under — this is what files a recording under the right account.
+          identifyPerson(me.id);
         } catch {
           setOauthError("Signed in, but that Fountain could not be reached.");
         }
@@ -95,6 +99,8 @@ export function App() {
       onSignOut={() => {
         if (settings.via === "oauth") void revoke(settings.baseUrl, settings.apiKey);
         clearSettings();
+        // Or the next person to use this browser is recorded as the last one.
+        forgetPerson();
         setSettings(null);
       }}
     />

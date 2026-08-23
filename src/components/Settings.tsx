@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { FountainClient, describeError } from "../api/client";
 import { normalizeBaseUrl, type Settings } from "../lib/settings";
 import { beginLogin } from "../lib/oauth";
+import { identifyPerson } from "../lib/analytics";
 
 interface Props {
   initial: Settings | null;
@@ -26,6 +27,9 @@ export function SettingsScreen({ initial, error: initialError, onConnected, onCa
     const settings: Settings = { baseUrl: normalizeBaseUrl(baseUrl), apiKey: apiKey.trim(), via: "paste" };
     try {
       const me = await new FountainClient(settings).me();
+      // The other door a key comes through. Identifying at both means a pasted
+      // key is as well attributed as an OAuth sign-in.
+      identifyPerson(me.id);
       onConnected(settings, me.email);
     } catch (err) {
       setError(describeError(err));
