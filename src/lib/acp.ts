@@ -56,6 +56,30 @@ export interface PermissionOption {
   optionId: string;
   name: string;
   kind: string;
+  /** what picking it changes beyond this one call; empty for most options */
+  effects: PermissionEffect[];
+}
+
+/**
+ * What an option changes beyond the call being asked about.
+ *
+ * The agent sends this on the option itself, as `_meta.permission.changes`,
+ * and it is the only place the **scope** of "always" is ever stated. That
+ * matters more than it sounds: measured against claude-agent-acp 0.66 on
+ * 2026-08-22, "Always Allow" writes a rule matching the *exact command line*
+ * into `.claude/settings.local.json` in the teammate's sandbox — so the same
+ * tool with a different argument asks again, and the rule dies with the
+ * sandbox. A button labelled "Always Allow" over a rule that narrow promises
+ * something the agent will not deliver, which is why this is carried through
+ * rather than dropped.
+ *
+ * Advisory, like `kind`: it is never sent back and never decides anything.
+ */
+export interface PermissionEffect {
+  /** the agent's own wording, e.g. ``Allow Bash calls matching `curl …` `` */
+  description: string;
+  /** ACP's lifetime scope — `persistent`, `session` — or null if unstated */
+  scope: string | null;
 }
 
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
@@ -209,7 +233,35 @@ function permissionOptions(raw: unknown): PermissionOption[] {
     if (!isObj(o)) continue;
     const optionId = str(o.optionId);
     if (!optionId) continue;
-    out.push({ optionId, name: str(o.name) || optionId, kind: str(o.kind) || "" });
+    out.push({
+      optionId,
+      name: str(o.name) || optionId,
+      kind: str(o.kind) || "",
+      effects: permissionEffects(o._meta),
+    });
+  }
+  return out;
+}
+
+/**
+ * The scope of an option, from its `_meta.permission.changes`.
+ *
+ * A change with no `description` is skipped rather than described from its
+ * parts: the agent writes that sentence itself, and inventing one risks
+ * saying "allows Bash" where the rule is far narrower — exactly the
+ * over-promise this exists to prevent. Agents that send no metadata (codex's
+ * "Allow for Session", opencode) yield an empty list and no note is shown.
+ */
+function permissionEffects(meta: unknown): PermissionEffect[] {
+  if (!isObj(meta) || !isObj(meta.permission)) return [];
+  const changes = meta.permission.changes;
+  if (!Array.isArray(changes)) return [];
+  const out: PermissionEffect[] = [];
+  for (const c of changes) {
+    if (!isObj(c)) continue;
+    const description = str(c.description);
+    if (!description) continue;
+    out.push({ description, scope: isObj(c.lifetime) ? str(c.lifetime.scope) : null });
   }
   return out;
 }

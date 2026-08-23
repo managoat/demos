@@ -497,3 +497,4 @@ button.added:hover { color: var(--danger); border-color: color-mix(in srgb, var(
 .preview.waiting { color: var(--warn); }
 .unread-dot.waiting { background: var(--warn); }
 .ask-option.chosen { background: var(--bg-2); }
+.ask-effects { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; overflow-wrap: anywhere; }

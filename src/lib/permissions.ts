@@ -20,6 +20,7 @@
  * refuses whatever is still open. All three land here the same way.
  */
 import type { LogEvent } from "../api/types";
+import type { PermissionOption } from "./acp";
 
 /** How a request ended. Unknown strings are possible — a newer server may add one. */
 export type Outcome = "answered" | "timeout" | "turn_ended" | (string & {});
@@ -154,6 +155,48 @@ export function describeResolution(r: PermissionResolution, options: { optionId:
       return "Denied — the turn ended first";
     default:
       return "Resolved";
+  }
+}
+
+/**
+ * What an option changes beyond this one call, in one line.
+ *
+ * The scope half is the point. "Always Allow" is the agent's label, not its
+ * behaviour: claude writes a rule matching the exact command line into the
+ * teammate's sandbox, so the same tool with a different argument asks again
+ * and the rule is gone once the sandbox is. Someone who answers "always" and
+ * is asked again a minute later has been told the truth by the agent and had
+ * it withheld by us — the metadata was in the request all along.
+ *
+ * Only the agent's own wording is shown. Where it says nothing, we say
+ * nothing: no scope suffix is guessed from a `kind`.
+ */
+export function describeEffects(option: PermissionOption): string | null {
+  const lines = option.effects.map((e) => {
+    const scope = describeScope(e.scope);
+    return scope ? `${e.description} — ${scope}` : e.description;
+  });
+  return lines.length > 0 ? lines.join("; ") : null;
+}
+
+/**
+ * ACP's lifetime scope, in words.
+ *
+ * `persistent` is deliberately not called "forever": the rule is written to
+ * a file inside the teammate's sandbox, which outlives the turn and does not
+ * outlive the sandbox. `session` is left as the protocol's own word rather
+ * than translated into a number of turns — how long an agent's session lasts
+ * is the agent's business, and guessing it here would be the same
+ * over-promise one level down.
+ */
+function describeScope(scope: string | null): string | null {
+  switch (scope) {
+    case "persistent":
+      return "saved in the sandbox";
+    case "session":
+      return "this session only";
+    default:
+      return null;
   }
 }
 

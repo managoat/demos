@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assistantText, blocksForTurn } from "./acp";
+import { assistantText, blocksForTurn, type Block } from "./acp";
 import type { LogEvent } from "../api/types";
 
 function acp(update: unknown, id = 1): LogEvent {
@@ -140,9 +140,9 @@ describe("blocksForTurn", () => {
         name: "Bash",
         summary: "command=rm -rf build",
         options: [
-          { optionId: "allow", name: "Allow once", kind: "allow_once" },
-          { optionId: "always", name: "Always allow Bash", kind: "allow_always" },
-          { optionId: "no", name: "Reject", kind: "reject_once" },
+          { optionId: "allow", name: "Allow once", kind: "allow_once", effects: [] },
+          { optionId: "always", name: "Always allow Bash", kind: "allow_always", effects: [] },
+          { optionId: "no", name: "Reject", kind: "reject_once", effects: [] },
         ],
         startedAt: "2026-08-22T00:00:00Z",
       },
@@ -174,9 +174,98 @@ describe("blocksForTurn", () => {
         name: "tool",
         summary: "",
         // `name` falls back to the id so a button is never unlabelled
-        options: [{ optionId: "no", name: "no", kind: "reject_once" }],
+        options: [{ optionId: "no", name: "no", kind: "reject_once", effects: [] }],
         startedAt: "2026-08-22T00:00:00Z",
       },
+    ]);
+  });
+
+
+  // The payload below is verbatim from production (claude-agent-acp 0.66,
+  // 2026-08-22): the scope of "Always Allow" is the exact command line, and
+  // the rule is written into the sandbox. Dropping this metadata is what made
+  // the card promise more than the agent delivers.
+  test("an option's scope metadata is carried through, not dropped", () => {
+    const ask: LogEvent = {
+      id: 12,
+      kind: "output",
+      stream: "acp",
+      data: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "0.6eaa186850a999ba",
+        method: "session/request_permission",
+        params: {
+          toolCall: { title: "curl https://example.com", kind: "execute" },
+          options: [
+            { optionId: "reject", name: "Deny", kind: "reject_once" },
+            { optionId: "allow", name: "Allow Once", kind: "allow_once" },
+            {
+              optionId: "allow_always",
+              name: "Always Allow",
+              kind: "allow_always",
+              _meta: {
+                permission: {
+                  version: 1,
+                  changes: [
+                    {
+                      type: "policy_rule",
+                      operation: "add",
+                      ruleBehavior: "allow",
+                      description: 'Allow Bash calls matching curl -sS https://example.com',
+                      lifetime: { scope: "persistent", storage: "project_local" },
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      }),
+      stage: null,
+      state: null,
+      turn_id: "t",
+      ts: "2026-08-22T00:00:00Z",
+    };
+    const block = blocksForTurn([ask], "claude")[0] as Extract<Block, { kind: "permission" }>;
+    expect(block.options.map((o) => o.effects)).toEqual([
+      [],
+      [],
+      [{ description: "Allow Bash calls matching curl -sS https://example.com", scope: "persistent" }],
+    ]);
+  });
+
+  test("a change the agent did not describe is skipped rather than described for it", () => {
+    const ask: LogEvent = {
+      id: 13,
+      kind: "output",
+      stream: "acp",
+      data: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "7",
+        method: "session/request_permission",
+        params: {
+          options: [
+            // codex's session grant: `_meta`, but nothing under `permission`
+            { optionId: "a", name: "Allow for Session", kind: "allow_always", _meta: { codex: { decision: "acceptForSession" } } },
+            // a change with no wording of its own, and one with no lifetime
+            {
+              optionId: "b",
+              name: "Amend policy",
+              kind: "allow_always",
+              _meta: { permission: { changes: [{ type: "policy_rule" }, { description: "Allow commands starting with curl" }] } },
+            },
+          ],
+        },
+      }),
+      stage: null,
+      state: null,
+      turn_id: "t",
+      ts: "2026-08-22T00:00:00Z",
+    };
+    const block = blocksForTurn([ask], "claude")[0] as Extract<Block, { kind: "permission" }>;
+    expect(block.options.map((o) => o.effects)).toEqual([
+      [],
+      [{ description: "Allow commands starting with curl", scope: null }],
     ]);
   });
 

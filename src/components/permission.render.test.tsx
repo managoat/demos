@@ -13,8 +13,8 @@ const request: PermissionBlock = {
   name: "Bash",
   summary: "command=rm -rf build",
   options: [
-    { optionId: "allow", name: "Allow once", kind: "allow_once" },
-    { optionId: "no", name: "Reject", kind: "reject_once" },
+    { optionId: "allow", name: "Allow once", kind: "allow_once", effects: [] },
+    { optionId: "no", name: "Reject", kind: "reject_once", effects: [] },
   ],
   startedAt: "2026-08-22T00:00:00Z",
 };
@@ -50,6 +50,37 @@ describe("PermissionCard", () => {
     const html = card({ request: { ...request, options: [] } });
     expect(html).not.toContain("ask-option");
     expect(html).toContain("offered no options");
+  });
+
+
+  // What "Always Allow" really grants is far narrower than the label, and the
+  // agent says so in the option's own metadata. Showing it is the difference
+  // between answering once and being surprised by the next prompt.
+  test("an option that reaches past this call says how far, in the agent's words", () => {
+    const html = card({
+      request: {
+        ...request,
+        options: [
+          ...request.options,
+          {
+            optionId: "allow_always",
+            name: "Always Allow",
+            kind: "allow_always",
+            effects: [
+              { description: "Allow Bash calls matching rm -rf build", scope: "persistent" },
+            ],
+          },
+        ],
+      },
+    });
+    expect(html).toContain("Allow Bash calls matching rm -rf build");
+    expect(html).toContain("saved in the sandbox");
+    // and it is a note, not a fourth button
+    expect(html.match(/class="ask-option /g)).toHaveLength(3);
+  });
+
+  test("options the agent described nothing about add no note", () => {
+    expect(card()).not.toContain("ask-effects");
   });
 
   test("a resolved request shows how it ended and has nothing to click", () => {

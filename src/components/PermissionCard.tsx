@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { PermissionBlock } from "../lib/feed";
-import { describeResolution, describeTimeout, optionTone, type PermissionResolution } from "../lib/permissions";
+import { describeEffects, describeResolution, describeTimeout, optionTone, type PermissionResolution } from "../lib/permissions";
 
 /**
  * A teammate asking for permission, inline in the thread (fountain#940).
@@ -114,6 +114,7 @@ export function PermissionCard({
               </button>
             ))}
           </div>
+          <PermissionScopes request={request} />
           <div className="ask-outcome muted small">
             {sent
               ? "Sent — waiting for the agent to pick it up."
@@ -125,6 +126,31 @@ export function PermissionCard({
       )}
       {failed && <div className="ask-outcome error-inline small">{failed}</div>}
     </div>
+  );
+}
+
+/**
+ * What the buttons that reach past this one call actually do.
+ *
+ * Only options the agent described are listed, so most cards show nothing.
+ * The one that does is "Always Allow", whose scope is much narrower than its
+ * label — see `describeEffects`. This sits above the deadline line rather
+ * than inside a tooltip because it is the thing someone needs *before* they
+ * click, and a tooltip is not there on a phone.
+ */
+function PermissionScopes({ request }: { request: PermissionBlock }) {
+  const scoped = request.options
+    .map((o) => ({ option: o, text: describeEffects(o) }))
+    .filter((s): s is { option: (typeof request.options)[number]; text: string } => s.text !== null);
+  if (scoped.length === 0) return null;
+  return (
+    <ul className="ask-effects muted small">
+      {scoped.map(({ option, text }) => (
+        <li key={option.optionId}>
+          <b>{option.name}</b> {text}
+        </li>
+      ))}
+    </ul>
   );
 }
 
