@@ -22,6 +22,7 @@ import { startBody, type StartInput } from "./lib/start";
 import { readSse } from "./lib/sse";
 import { describeError } from "./lib/errors";
 import { feedRead, NO_ACTIVITY } from "./lib/feed";
+import { useDesktopNotify, type DesktopNotify } from "./lib/notify";
 import { retiredMessage } from "./lib/workbench";
 
 export type EventHandler = (ev: UserEvent) => void;
@@ -40,6 +41,12 @@ const LAST_PROJECT = "fountain-workbench.lastProject";
  * distinct project owner, which is what the projects list already spends on
  * every visit, and it stops while the tab is in the background — a survey
  * nobody can see is a request nobody asked for.
+ *
+ * Unless desktop notifications are on (lib/notify.ts), which is precisely the
+ * case where somebody has asked. A browser that stopped surveying the moment
+ * you looked away would be silent for the whole of the time it exists to
+ * cover; a background tab is throttled to about a minute anyway, which is
+ * what this already is.
  */
 const SURVEY_MS = 60_000;
 
@@ -69,6 +76,8 @@ export interface Workbench {
   projectsLoaded: boolean;
   /** Every project you are in, surveyed: what is live in each, and what stopped unread across all of them. */
   activity: ActivityDto;
+  /** The feed on the desktop as well as the bell: what the switch shows, and the switch. */
+  notify: DesktopNotify;
   refreshProjects: () => Promise<ProjectDto[] | null>;
   refreshActivity: () => Promise<void>;
   /** This browser has just read a conversation, so take it out of the feed now rather than at the next survey. */
@@ -135,13 +144,24 @@ export function WorkbenchProvider({ me, onSignOut, children }: { me: Me; onSignO
     void refreshActivity();
   }, [refreshProjects, refreshActivity]);
 
+  // Announcing what each survey turns up that the last did not, once asked to.
+  const notify = useDesktopNotify(activity);
+  const announcing = notify.state === "on";
+
   // See SURVEY_MS: nothing streams across projects, so this is what notices.
   // Coming back to the tab surveys straight away — that is the moment the
-  // question "what happened while I was away" is actually being asked.
+  // question "what happened while I was away" is actually being asked — and
+  // it keeps running while the tab is hidden if there is a desktop
+  // notification waiting on it, which is the case somebody asked for.
+  //
+  // A hidden tab's timers are throttled to about a minute whatever this says,
+  // so BLOCKED_MS is a cadence for a tab on screen. Hidden, a blocked agent is
+  // found up to a minute late — still four of its five minutes left, and the
+  // notification is what makes that minute matter rather than the poll.
   const blocked = activity.waiting.length > 0;
   useEffect(() => {
     const tick = () => {
-      if (document.visibilityState === "visible") void refreshActivity();
+      if (announcing || document.visibilityState === "visible") void refreshActivity();
     };
     const timer = window.setInterval(tick, blocked ? BLOCKED_MS : SURVEY_MS);
     document.addEventListener("visibilitychange", tick);
@@ -149,7 +169,7 @@ export function WorkbenchProvider({ me, onSignOut, children }: { me: Me; onSignO
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [refreshActivity, blocked]);
+  }, [refreshActivity, blocked, announcing]);
 
   const signOut = useCallback(() => {
     void api.signOut().catch(() => undefined);
@@ -157,8 +177,8 @@ export function WorkbenchProvider({ me, onSignOut, children }: { me: Me; onSignO
   }, [onSignOut]);
 
   const value = useMemo<Workbench>(
-    () => ({ me, projects, projectsLoaded, activity, refreshProjects, refreshActivity, markRead, toast, signOut }),
-    [me, projects, projectsLoaded, activity, refreshProjects, refreshActivity, markRead, toast, signOut],
+    () => ({ me, projects, projectsLoaded, activity, notify, refreshProjects, refreshActivity, markRead, toast, signOut }),
+    [me, projects, projectsLoaded, activity, notify, refreshProjects, refreshActivity, markRead, toast, signOut],
   );
 
   return (

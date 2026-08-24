@@ -113,6 +113,22 @@ describe("FeedList", () => {
     expect(html).toContain("Nothing waiting");
   });
 
+  test("the desktop switch says which way it is set, and is absent where the browser has none", () => {
+    // The panel is what you open when you are wondering whether anything
+    // happened, so it is where you are offered the thing that stops you having
+    // to wonder — including when there is nothing waiting at all.
+    const on = renderToStaticMarkup(<FeedList activity={NO_ACTIVITY} here={null} now={T0} desktop="on" onDesktop={() => {}} />);
+    expect(on).toContain("desktop · on");
+    expect(on).toContain('aria-pressed="true"');
+    const blocked = renderToStaticMarkup(<FeedList activity={NO_ACTIVITY} here={null} now={T0} desktop="blocked" onDesktop={() => {}} />);
+    // Not "off": the browser refused something that was asked for, and the
+    // panel is where that answer has to be readable.
+    expect(blocked).toContain("desktop · blocked");
+    expect(blocked).toContain("address bar");
+    // A browser with no Notification API is offered nothing at all.
+    expect(render(NO_ACTIVITY)).not.toContain("feed-desktop");
+  });
+
   test("a conversation Fountain has not titled yet still renders as a row", () => {
     const html = render({ projects: {}, dropped: 0, waiting: [], feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0), title: null, itemTitle: null })] });
     expect(html).toContain("Untitled conversation");

@@ -918,7 +918,18 @@ body.resizing-col { cursor: col-resize; user-select: none; }
   background: var(--bg-0); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
   font-family: var(--mono); font-size: 12px;
 }
-.feed-head { padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--bg-1); border-radius: 10px 10px 0 0; }
+.feed-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--bg-1); border-radius: 10px 10px 0 0;
+}
+.feed-desktop {
+  flex: none; padding: 2px 7px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-0); color: var(--muted);
+  font-family: var(--mono); font-size: 10px; line-height: 1.6; white-space: nowrap; cursor: pointer;
+}
+.feed-desktop:hover, .feed-desktop:focus-visible { color: var(--text); border-color: var(--muted); }
+.feed-desktop.on { color: var(--bg-0); background: var(--brand); border-color: var(--brand); }
+.feed-desktop.blocked { color: var(--bad); border-color: var(--bad); }
 .feed-empty { margin: 0; padding: 14px 10px; line-height: 1.5; }
 .feed-group { padding: 4px; border-bottom: 1px solid var(--border); }
 .feed-group:last-of-type { border-bottom: 0; }

@@ -222,7 +222,8 @@ project is, so answering a teammate on your laptop does not leave the same row
 waiting on your desk.
 
 It is a **poll**, once a minute — fifteen seconds while somebody is blocked,
-see below — and only while the tab is on screen. It costs a conversation-list call per distinct project
+see below — and only while the tab is on screen, unless you have asked it to
+speak up on your desktop, also below. It costs a conversation-list call per distinct project
 owner, which is what the projects list already spends on every visit, and both
 facts come out of that one listing: `GET /api/projects/activity` answers what
 is live per project *and* the feed across all of them. Rows are grouped by
@@ -259,6 +260,43 @@ conversation this process has never seen has its stage history read once,
 directly, before the stream is joined onto the end of it — once, not once a
 minute. The right shape is still a held-request count on the conversation
 record, which would delete all of this; that is filed as an ask on Fountain.
+
+**And all of it on your desktop, when the tab is not in front of you.** The
+bell's limit is that it is on a screen: a badge is only a notification to
+somebody looking at the window it is in, and being somewhere else is the case
+the whole feed is for. That matters most for the half that expires — an agent
+can sit blocked for its whole five minutes behind a tab you are not looking at,
+and be denied by Fountain before you ever see the number go up. The switch in
+the panel's head — **desktop · off** — turns each survey's news into the
+browser's own notification, over whatever you are actually doing.
+
+It is off until you click it, because a browser will not let a page announce
+anything until somebody has said yes and the asking has to happen in a click;
+if the browser refuses, the switch reads **blocked** and says where to change
+that, rather than snapping back to off and leaving you wondering why nothing
+arrives. The preference is this browser's, like the theme: saying "notify me
+here" is a fact about here, and it should not follow you to the laptop.
+
+Only what is *new since the last survey* is announced. Everything in a feed is
+unread by definition, so a browser that spoke about what it found on arrival
+would ring once for every conversation you had already looked at and decided to
+leave — every time you opened a tab. A blocked agent is announced ahead of
+anything that merely finished, says what it wants to run and how long is left,
+and is announced again if it is still blocked a couple of minutes later — the
+one repeat in here, because that one is running out and the first notice may
+have been missed. More than three finishes between two surveys and it says how
+many instead of stacking them up: eight notifications in a corner is not eight
+times the news, it is a wall somebody swipes away with the feed inside it.
+
+Each carries an id as its tag, so two open tabs replace each other rather than
+saying everything twice, and clicking one brings the window forward and opens
+that thread. With this on, the survey keeps running while the tab is hidden —
+that being exactly the stretch it exists to cover, though a hidden tab's timers
+are throttled to about a minute whatever the interval says, so the fifteen-second
+cadence is for a tab on screen. What it cannot do is reach a browser that is
+*closed*: that wants a service worker and a push subscription, which wants a
+server holding them, and none of that is here. This is the open tab telling you
+about itself while you look elsewhere.
 
 **And you can unblock it where it asked.** An agent under an `ask` permission
 stops before the tool runs, and Fountain puts the ask on the conversation as a
@@ -577,6 +615,7 @@ src/
   lib/turns.ts       fold a log feed into turns for the chat view
   lib/digest.ts      a work item's stage stream → what happened since you last looked
   lib/feed.ts        the same question across every project: what stopped unread and who is blocked, and where
+  lib/notify.ts      that feed on the desktop: what is new since the last survey, and the permission behind it
   lib/details.ts     what a conversation runs with: its computer, its skills and MCP servers, the policy in force
   lib/board.ts       the items as columns, and which drags between them are real writes
   lib/blocks.ts      arrange server-parsed blocks (from fountain-conversations)

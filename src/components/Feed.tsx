@@ -29,6 +29,12 @@
  * is how you end up back where this started. See src/lib/feed.ts for why read
  * state and not a per-browser mark.
  *
+ * The switch in its head is the same feed on the desktop (src/lib/notify.ts):
+ * a badge only reaches somebody who is looking at this window, and being
+ * somewhere else is the case the whole thing is for. It is in here rather than
+ * in settings because this panel is what you open when you are wondering
+ * whether anything happened, which is the moment you want to stop wondering.
+ *
  * `FeedList` is the render and takes everything it shows, so it can be tested
  * without a DOM; `Feed` is the button, the store and the open/closed state.
  */
@@ -36,6 +42,7 @@ import { useEffect, useRef, useState } from "react";
 import { useWorkbench } from "../store";
 import { href, useRoute } from "../router";
 import { feedCount, feedGroups, feedSummary, feedTitle, feedWaiting, feedWhere, waitingWhat, waitingWho } from "../lib/feed";
+import { desktopHint, desktopLabel, type NotifyState } from "../lib/notify";
 import { timeLeft } from "../lib/digest";
 import { relativeTime } from "../lib/sidebar";
 import type { ActivityDto } from "../lib/api";
@@ -45,12 +52,17 @@ export function FeedList({
   here,
   now = Date.now(),
   onPick,
+  desktop = null,
+  onDesktop,
 }: {
   activity: ActivityDto;
   /** The project being looked at, whose rows sink to the bottom. */
   here: string | null;
   now?: number;
   onPick?: () => void;
+  /** Desktop notifications, or null where this browser has none to offer. */
+  desktop?: NotifyState | null;
+  onDesktop?: () => void;
 }) {
   const groups = feedGroups(activity.feed, here);
   const waiting = feedWaiting(activity, now);
@@ -58,6 +70,18 @@ export function FeedList({
     <div className="feed-menu" role="dialog" aria-label="Waiting on you, and finished and unread">
       <div className="feed-head">
         <span className="strong">{feedSummary(activity, now)}</span>
+        {desktop && (
+          <button
+            type="button"
+            className={`feed-desktop ${desktop}`}
+            onClick={onDesktop}
+            aria-pressed={desktop === "on"}
+            title={desktopHint(desktop)}
+            aria-label={desktopHint(desktop)}
+          >
+            {desktopLabel(desktop)}
+          </button>
+        )}
       </div>
       {waiting.length > 0 && (
         <div className="feed-group waiting">
@@ -120,7 +144,7 @@ export function FeedList({
 }
 
 export function Feed() {
-  const { activity, refreshActivity } = useWorkbench();
+  const { activity, refreshActivity, notify } = useWorkbench();
   const route = useRoute();
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -185,7 +209,16 @@ export function Feed() {
           </span>
         )}
       </button>
-      {open && <FeedList activity={activity} here={here} now={now} onPick={() => setOpen(false)} />}
+      {open && (
+        <FeedList
+          activity={activity}
+          here={here}
+          now={now}
+          onPick={() => setOpen(false)}
+          desktop={notify.state}
+          onDesktop={notify.toggle}
+        />
+      )}
     </div>
   );
 }
