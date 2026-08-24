@@ -2,18 +2,19 @@
 
 A dev workstation on the [Fountain](https://github.com/BinaryBourbon/fountain) API.
 
-**Projects → work items → agents.** You work on "fix foo" in project Fountain,
-pull members of your team into it, and talk to each one. A member is a named
-preset — an agent plus the environment and vault it runs with — so "the team"
-is the set of agent/env/vault combinations you reach for, and a work item is
-where you pick which of them to bring in.
+**Projects → work items → teammates.** A project is an environment and a
+vault — the computer its work gets. You work on "fix foo" in project Fountain,
+pull teammates into it, and talk to each one. The team is simply your Fountain
+agents; adding a teammate to a work item is picking an agent, and then you
+prompt.
 
-Each member's conversation gets its own computer. When a Fountain supports it
-(ADR 0023, *one sandbox, many conversations*), "**+ Here**" on a computer that
-is already up opens a second conversation with the same member on the same
-machine: shared checkout and disk, separate transcript. Against an older
+Each teammate's conversation gets its own computer. When a Fountain supports
+it (ADR 0023, *one sandbox, many conversations*), "**+ Here**" on a computer
+that is already up opens a second conversation with the same teammate on the
+same machine: shared checkout and disk, separate transcript. Against an older
 Fountain the button still works; the conversation starts on a new computer and
-the app says so.
+the app says so. The sandbox identity `(agent, environment, vault)` falls out
+of the tree — same project, same agent — which is what makes sharing legal.
 
 Hosted at **https://jakegaylor.com/fountain-workbench/** — sign in with any
 Fountain that lists that origin in `API_CORS_ORIGINS` and registers the
@@ -21,12 +22,14 @@ Fountain that lists that origin in `API_CORS_ORIGINS` and registers the
 
 ## How it stores things
 
-Fountain has no project or work-item primitive, so the tree (projects, items,
-members) lives in this browser's `localStorage`. A conversation's membership
+Fountain has no project or work-item primitive, so the tree (projects with
+their environment + vault, items with their teammates) lives in this browser's
+`localStorage`. A conversation's membership
 is recorded on the server in its `channel_id` as `workbench:<project>/<item>`,
 which is what makes the tree recoverable: a fresh browser rebuilds every
-project and item that ever had a conversation from the conversation list
-alone; only names are lost, and those get placeholders until edited.
+project (with its environment and vault) and item (with its teammates) that
+ever had a conversation from the conversation list alone; only names are
+lost, and those get placeholders until edited.
 
 The API is reached through [`@agentshit/fountain-sdk`](https://www.npmjs.com/package/@agentshit/fountain-sdk).
 The one thing the SDK does not do for a browser is the user-wide event stream
@@ -55,12 +58,12 @@ src/
   App.tsx            sign-in gate, OAuth callback, route switch
   store.tsx          SDK client, conversation list, one SSE stream, the persisted tree
   router.ts          hash routes
-  lib/workbench.ts   the model: projects, items, members; channel ids; reconcile
+  lib/workbench.ts   the model: projects, items, teammates; channel ids; reconcile
   lib/turns.ts       fold a log feed into turns for the chat view
   lib/blocks.ts      arrange server-parsed blocks (from fountain-conversations)
   lib/markdown.tsx   allow-list markdown → React nodes, no innerHTML
   pages/             Projects, Project, WorkItem, Team
-  components/        Thread, StartDialog, Blocks, Settings, Layout
+  components/        Thread, StartDialog, EnvVaultFields, Blocks, Settings, Layout
 ```
 
 ## Licence

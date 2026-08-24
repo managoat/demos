@@ -1,18 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  EMPTY,
-  addItem,
-  addMember,
-  addProject,
-  assignMember,
-  channelFor,
-  memberFor,
-  normalize,
-  parseChannel,
-  reconcile,
-  removeMember,
-  removeProject,
-} from "./workbench";
+import { EMPTY, addItem, addProject, addTeammate, agentFits, channelFor, normalize, parseChannel, reconcile, removeProject, removeTeammate } from "./workbench";
 
 describe("channel ids", () => {
   test("round-trip", () => {
@@ -30,44 +17,56 @@ describe("channel ids", () => {
 });
 
 describe("reconcile", () => {
-  test("recovers a project and item from a conversation's channel", () => {
-    const s = reconcile(EMPTY, [{ channel_id: "workbench:p1/w1", title: "Coder: Fix foo", inserted_at: "2026-08-23T00:00:00Z" }]);
+  test("recovers a project (with its env + vault) and item (with its teammate) from a conversation", () => {
+    const s = reconcile(EMPTY, [
+      { channel_id: "workbench:p1/w1", title: "Coder: Fix foo", inserted_at: "2026-08-23T00:00:00Z", agent_id: "a1", environment_id: "e1", vault_id: "v1" },
+    ]);
     expect(s.projects.map((p) => p.id)).toEqual(["p1"]);
+    expect(s.projects[0]!.environmentId).toBe("e1");
+    expect(s.projects[0]!.vaultId).toBe("v1");
     expect(s.items).toHaveLength(1);
     expect(s.items[0]!.title).toBe("Fix foo");
     expect(s.items[0]!.projectId).toBe("p1");
+    expect(s.items[0]!.agentIds).toEqual(["a1"]);
+  });
+  test("adds a teammate the browser has not seen on a known item", () => {
+    const [s1, p] = addProject(EMPTY, { name: "Fountain" });
+    const [s2, w] = addItem(s1, p.id, "fix foo");
+    const s3 = reconcile(s2, [{ channel_id: channelFor(p.id, w.id), agent_id: "a9" }]);
+    expect(s3.items[0]!.agentIds).toEqual(["a9"]);
   });
   test("returns the same object when nothing is missing", () => {
-    const [s1, p] = addProject(EMPTY, "Fountain");
+    const [s1, p] = addProject(EMPTY, { name: "Fountain" });
     const [s2, w] = addItem(s1, p.id, "fix foo");
-    expect(reconcile(s2, [{ channel_id: channelFor(p.id, w.id) }])).toBe(s2);
-    expect(reconcile(s2, [{ channel_id: "fountain:team" }, { channel_id: null }])).toBe(s2);
+    const s3 = addTeammate(s2, w.id, "a1");
+    expect(reconcile(s3, [{ channel_id: channelFor(p.id, w.id), agent_id: "a1" }])).toBe(s3);
+    expect(reconcile(s3, [{ channel_id: "fountain:team" }, { channel_id: null }])).toBe(s3);
   });
 });
 
 describe("mutations", () => {
   test("removing a project removes its items", () => {
-    const [s1, p] = addProject(EMPTY, "Fountain");
+    const [s1, p] = addProject(EMPTY, { name: "Fountain" });
     const [s2] = addItem(s1, p.id, "fix foo");
     expect(removeProject(s2, p.id).items).toHaveLength(0);
   });
-  test("removing a member unassigns it everywhere", () => {
-    const [s1, p] = addProject(EMPTY, "Fountain");
+  test("teammates are a set", () => {
+    const [s1, p] = addProject(EMPTY, { name: "Fountain" });
     const [s2, w] = addItem(s1, p.id, "fix foo");
-    const [s3, m] = addMember(s2, { name: "Coder", agentId: "a1", environmentId: null, vaultId: null, notes: "" });
-    const s4 = assignMember(assignMember(s3, w.id, m.id), w.id, m.id);
-    expect(s4.items[0]!.memberIds).toEqual([m.id]);
-    expect(removeMember(s4, m.id).items[0]!.memberIds).toEqual([]);
+    const s3 = addTeammate(addTeammate(s2, w.id, "a1"), w.id, "a1");
+    expect(s3.items[0]!.agentIds).toEqual(["a1"]);
+    expect(removeTeammate(s3, w.id, "a1").items[0]!.agentIds).toEqual([]);
   });
 });
 
 describe("normalize", () => {
   test("drops items whose project is gone and fills defaults", () => {
-    const s = normalize({ projects: [{ id: "p" }], items: [{ id: "w", projectId: "p" }, { id: "x", projectId: "gone" }], members: [{ id: "m", agentId: "a" }] });
+    const s = normalize({ projects: [{ id: "p" }], items: [{ id: "w", projectId: "p" }, { id: "x", projectId: "gone" }] });
     expect(s.projects[0]!.name).toBe("Untitled project");
+    expect(s.projects[0]!.environmentId).toBeNull();
     expect(s.items.map((w) => w.id)).toEqual(["w"]);
     expect(s.items[0]!.status).toBe("open");
-    expect(s.members[0]!.environmentId).toBeNull();
+    expect(s.items[0]!.agentIds).toEqual([]);
   });
   test("garbage is an empty state", () => {
     expect(normalize("nope")).toEqual(EMPTY);
@@ -75,16 +74,12 @@ describe("normalize", () => {
   });
 });
 
-describe("memberFor", () => {
-  const members = [
-    { id: "m1", name: "Coder", agentId: "a1", environmentId: null, vaultId: null, notes: "" },
-    { id: "m2", name: "Coder+gh", agentId: "a1", environmentId: null, vaultId: "v1", notes: "" },
-    { id: "m3", name: "Coder@prod", agentId: "a1", environmentId: "e2", vaultId: null, notes: "" },
-  ];
-  test("matches through the agent's default environment", () => {
-    expect(memberFor(members, { agent_id: "a1", environment_id: "e1", vault_id: null }, "e1")?.id).toBe("m1");
-    expect(memberFor(members, { agent_id: "a1", environment_id: "e1", vault_id: "v1" }, "e1")?.id).toBe("m2");
-    expect(memberFor(members, { agent_id: "a1", environment_id: "e2", vault_id: null }, "e1")?.id).toBe("m3");
-    expect(memberFor(members, { agent_id: "a9", environment_id: "e1", vault_id: null }, "e1")).toBeNull();
+describe("agentFits", () => {
+  test("empty allowlists admit anything; set ones must include the project's choice", () => {
+    expect(agentFits({}, { environmentId: "e1", vaultId: "v1" }).ok).toBe(true);
+    expect(agentFits({ allowed_environment_ids: ["e2"] }, { environmentId: "e1", vaultId: null }).ok).toBe(false);
+    expect(agentFits({ allowed_environment_ids: ["e2"] }, { environmentId: null, vaultId: null }).ok).toBe(true);
+    expect(agentFits({ allowed_vault_ids: ["v1"] }, { environmentId: null, vaultId: "v1" }).ok).toBe(true);
+    expect(agentFits({ allowed_vault_ids: ["v2"] }, { environmentId: null, vaultId: "v1" }).ok).toBe(false);
   });
 });

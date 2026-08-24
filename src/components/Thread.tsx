@@ -14,12 +14,11 @@ import { describeError } from "../lib/errors";
 import { BlockView } from "./Blocks";
 import { StatusPill } from "./StatusPill";
 import { AgentAvatar } from "./AgentAvatar";
-import { memberFor } from "../lib/workbench";
 
 const HISTORY_STREAMS: Stream[] = ["acp", "stdout", "stage"];
 
 export function Thread({ conversationId, onClose }: { conversationId: string; onClose?: () => void }) {
-  const { fountain, conversations, agents, subscribe, toast, refresh, state } = useStore();
+  const { fountain, conversations, agents, subscribe, toast, refresh } = useStore();
   const listed = conversations.find((c) => c.id === conversationId) ?? null;
   const [fetched, setFetched] = useState<Conversation | null>(null);
   const conversation = listed ?? fetched;
@@ -33,8 +32,7 @@ export function Thread({ conversationId, onClose }: { conversationId: string; on
   const stickToBottom = useRef(true);
 
   const agent = conversation?.agent_id ? agents.get(conversation.agent_id) ?? null : null;
-  const member = conversation ? memberFor(state.members, conversation, agent?.environment_id) : null;
-  const who = member?.name ?? agent?.name ?? conversation?.runtime ?? "agent";
+  const who = agent?.name ?? conversation?.runtime ?? "agent";
 
   // Load: the record if the list has not got it, the turns, and the history.
   useEffect(() => {

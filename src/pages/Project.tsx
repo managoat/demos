@@ -5,9 +5,10 @@ import { href, navigate } from "../router";
 import { TwoStep } from "../components/Thread";
 import { AgentAvatar } from "../components/AgentAvatar";
 import { formatTime } from "../lib/format";
+import { EnvVaultFields } from "../components/EnvVaultFields";
 
 export function Project({ projectId }: { projectId: string }) {
-  const { state, update, conversations, agents } = useStore();
+  const { state, update, conversations, agents, environments, vaults } = useStore();
   const project = state.projects.find((p) => p.id === projectId);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -50,7 +51,7 @@ export function Project({ projectId }: { projectId: string }) {
     const working = convs.filter((c) => c.status === "running" || c.status === "pending").length;
     const unread = convs.some((c) => c.unread);
     const latest = convs.reduce((m, c) => ((c.last_active_at ?? "") > m ? c.last_active_at ?? "" : m), "");
-    const members = w.memberIds.map((id) => state.members.find((m) => m.id === id)).filter((m): m is NonNullable<typeof m> => !!m);
+    const teammates = w.agentIds.map((id) => agents.get(id)).filter((a): a is NonNullable<typeof a> => !!a);
     return (
       <li key={w.id}>
         <a className="conv-row" href={href.item(project.id, w.id)}>
@@ -66,10 +67,9 @@ export function Project({ projectId }: { projectId: string }) {
             </div>
           </div>
           <div className="stack-avatars">
-            {members.map((m) => {
-              const a = agents.get(m.agentId);
-              return a ? <AgentAvatar key={m.id} agent={a} size={22} /> : null;
-            })}
+            {teammates.map((a) => (
+              <AgentAvatar key={a.id} agent={a} size={22} />
+            ))}
           </div>
           <div className="conv-side">
             <span className="time muted">{formatTime(latest || w.createdAt)}</span>
@@ -88,7 +88,7 @@ export function Project({ projectId }: { projectId: string }) {
       <div className="page-header">
         {editing ? (
           <form
-            className="row grow"
+            className="stack tight grow"
             onSubmit={(e) => {
               e.preventDefault();
               setEditing(false);
@@ -96,15 +96,27 @@ export function Project({ projectId }: { projectId: string }) {
           >
             <input value={project.name} onChange={(e) => update((s) => updateProject(s, project.id, { name: e.target.value }))} />
             <input value={project.notes} onChange={(e) => update((s) => updateProject(s, project.id, { notes: e.target.value }))} placeholder="Notes" />
-            <button type="submit" className="secondary small">
-              Done
-            </button>
+            <EnvVaultFields
+              environmentId={project.environmentId ?? ""}
+              vaultId={project.vaultId ?? ""}
+              onEnvironment={(id) => update((s) => updateProject(s, project.id, { environmentId: id || null }))}
+              onVault={(id) => update((s) => updateProject(s, project.id, { vaultId: id || null }))}
+            />
+            <p className="muted small">Changing these affects conversations started from now on; running ones keep their computer.</p>
+            <div className="row end">
+              <button type="submit" className="secondary small">
+                Done
+              </button>
+            </div>
           </form>
         ) : (
           <>
             <div>
               <h1>{project.name}</h1>
-              {project.notes && <div className="muted small">{project.notes}</div>}
+              <div className="muted small">
+                env {project.environmentId ? environments.get(project.environmentId)?.name ?? "?" : "each agent's own"} · vault {project.vaultId ? vaults.get(project.vaultId)?.name ?? "?" : "none"}
+                {project.notes ? ` · ${project.notes}` : ""}
+              </div>
             </div>
             <button className="secondary small" onClick={() => setEditing(true)}>
               Edit

@@ -1,11 +1,11 @@
 /**
- * One work item: who is on it, the conversations it has (grouped by the
- * computer they run on), and the open thread.
+ * One work item: the teammates on it, the conversations it has (grouped by
+ * the computer they run on), and the open thread.
  */
 import { useMemo, useState } from "react";
 import { useStore } from "../store";
-import type { Conversation } from "../types";
-import { assignMember, channelFor, memberFor, unassignMember, updateItem, type Member } from "../lib/workbench";
+import type { Agent, Conversation } from "../types";
+import { addTeammate, agentFits, channelFor, removeTeammate, updateItem } from "../lib/workbench";
 import { href, navigate } from "../router";
 import { Thread, TwoStep } from "../components/Thread";
 import { StartDialog, type JoinTarget } from "../components/StartDialog";
@@ -17,14 +17,14 @@ interface Computer {
   key: string;
   sandbox: Conversation["sandbox"] | null;
   conversations: Conversation[];
-  member: Member | null;
+  agent: Agent | null;
 }
 
 export function WorkItem({ projectId, itemId, conversationId }: { projectId: string; itemId: string; conversationId: string | null }) {
-  const { state, update, conversations, agents, fountain, toast, refresh } = useStore();
+  const { state, update, conversations, agents, environments, vaults, fountain, toast, refresh } = useStore();
   const project = state.projects.find((p) => p.id === projectId);
   const item = state.items.find((w) => w.id === itemId && w.projectId === projectId);
-  const [dialog, setDialog] = useState<{ join: JoinTarget | null; memberId: string | null } | null>(null);
+  const [dialog, setDialog] = useState<{ join: JoinTarget | null; agentId: string | null } | null>(null);
   const [editing, setEditing] = useState(false);
   const [pick, setPick] = useState("");
 
@@ -42,8 +42,7 @@ export function WorkItem({ projectId, itemId, conversationId }: { projectId: str
       const key = c.sandbox_id ?? `conv:${c.id}`;
       let comp = byKey.get(key);
       if (!comp) {
-        const agent = c.agent_id ? agents.get(c.agent_id) : undefined;
-        comp = { key, sandbox: c.sandbox ?? null, conversations: [], member: memberFor(state.members, c, agent?.environment_id) };
+        comp = { key, sandbox: c.sandbox ?? null, conversations: [], agent: c.agent_id ? agents.get(c.agent_id) ?? null : null };
         byKey.set(key, comp);
       }
       comp.conversations.push(c);
@@ -51,12 +50,12 @@ export function WorkItem({ projectId, itemId, conversationId }: { projectId: str
     }
     // Live computers first, then by most recent activity.
     return [...byKey.values()].sort((a, b) => {
-      const la = a.sandbox && a.sandbox.status !== "terminated" && a.sandbox.status !== "failed" ? 0 : 1;
-      const lb = b.sandbox && b.sandbox.status !== "terminated" && b.sandbox.status !== "failed" ? 0 : 1;
+      const la = isLive(a) ? 0 : 1;
+      const lb = isLive(b) ? 0 : 1;
       if (la !== lb) return la - lb;
       return latest(b).localeCompare(latest(a));
     });
-  }, [convs, agents, state.members]);
+  }, [convs, agents]);
 
   if (!project || !item) {
     return (
@@ -71,8 +70,11 @@ export function WorkItem({ projectId, itemId, conversationId }: { projectId: str
     );
   }
 
-  const onItem = item.memberIds.map((id) => state.members.find((m) => m.id === id)).filter((m): m is Member => !!m);
-  const available = state.members.filter((m) => !item.memberIds.includes(m.id));
+  const team = [...agents.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const onItem = item.agentIds.map((id) => agents.get(id)).filter((a): a is Agent => !!a);
+  const available = team.filter((a) => !item.agentIds.includes(a.id));
+  const envName = project.environmentId ? environments.get(project.environmentId)?.name ?? "?" : "each agent's own";
+  const vaultName = project.vaultId ? vaults.get(project.vaultId)?.name ?? "?" : "none";
 
   return (
     <div className={`item-layout ${conversationId ? "with-thread" : ""}`}>
@@ -109,13 +111,16 @@ export function WorkItem({ projectId, itemId, conversationId }: { projectId: str
                   {item.status === "done" ? "Reopen" : "Mark done"}
                 </button>
               </div>
+              <div className="muted small">
+                env {envName} · vault {vaultName}
+              </div>
             </>
           )}
         </div>
 
         <section className="item-section">
           <div className="row">
-            <h2 className="h2 grow">Members</h2>
+            <h2 className="h2 grow">Teammates</h2>
             {available.length > 0 && (
               <select
                 className="compact"
@@ -123,48 +128,53 @@ export function WorkItem({ projectId, itemId, conversationId }: { projectId: str
                 onChange={(e) => {
                   const id = e.target.value;
                   setPick("");
-                  if (id) update((s) => assignMember(s, item.id, id));
+                  if (id) update((s) => addTeammate(s, item.id, id));
                 }}
               >
-                <option value="">+ Add member…</option>
-                {available.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
+                <option value="">+ Add…</option>
+                {available.map((a) => {
+                  const f = agentFits(a, project);
+                  return (
+                    <option key={a.id} value={a.id} disabled={!f.ok}>
+                      {a.name}
+                      {f.ok ? "" : ` — ${f.reason}`}
+                    </option>
+                  );
+                })}
               </select>
             )}
           </div>
-          {state.members.length === 0 && (
+          {team.length === 0 && (
             <p className="muted small">
-              No members yet. <a href={href.team()}>Define your team</a> — each member is an agent plus an environment and a vault.
+              No agents on this Fountain yet. <a href={href.team()}>See the team</a>.
             </p>
           )}
           <ul className="member-list">
-            {onItem.map((m) => {
-              const agent = agents.get(m.agentId);
-              const active = convs.filter((c) => memberFor([m], c, agent?.environment_id) && c.status !== "terminated").length;
+            {onItem.map((a) => {
+              const fit = agentFits(a, project);
+              const live = convs.filter((c) => c.agent_id === a.id && c.status !== "terminated").length;
               return (
-                <li key={m.id} className="member-row">
-                  {agent && <AgentAvatar agent={agent} size={28} />}
+                <li key={a.id} className="member-row">
+                  <AgentAvatar agent={a} size={28} />
                   <div className="min0 grow">
-                    <div className="strong ellipsis">{m.name}</div>
+                    <div className="strong ellipsis">{a.name}</div>
                     <div className="muted small ellipsis">
-                      {agent?.name ?? "missing agent"}
-                      {active ? ` · ${active} live` : ""}
+                      {a.runtime}
+                      {live ? ` · ${live} live` : ""}
+                      {fit.ok ? "" : ` · ${fit.reason}`}
                     </div>
                   </div>
-                  <button className="small" onClick={() => setDialog({ join: null, memberId: m.id })} disabled={!agent}>
+                  <button className="small" onClick={() => setDialog({ join: null, agentId: a.id })} disabled={!fit.ok} title={fit.ok ? "New conversation on a new computer" : fit.reason}>
                     Talk
                   </button>
-                  <button className="icon" title="Remove from this item" onClick={() => update((s) => unassignMember(s, item.id, m.id))}>
+                  <button className="icon" title="Remove from this item" onClick={() => update((s) => removeTeammate(s, item.id, a.id))}>
                     ×
                   </button>
                 </li>
               );
             })}
           </ul>
-          <button className="secondary small" onClick={() => setDialog({ join: null, memberId: null })} disabled={state.members.length === 0}>
+          <button className="secondary small" onClick={() => setDialog({ join: null, agentId: null })} disabled={team.length === 0}>
             + Start a conversation
           </button>
         </section>
@@ -173,17 +183,17 @@ export function WorkItem({ projectId, itemId, conversationId }: { projectId: str
           <h2 className="h2">Conversations</h2>
           {computers.length === 0 && <p className="muted small">None yet.</p>}
           {computers.map((comp) => {
-            const live = comp.sandbox && comp.sandbox.status !== "terminated" && comp.sandbox.status !== "failed";
+            const live = isLive(comp);
             const runtime = comp.conversations[0]?.runtime;
             const busy = comp.conversations.some((c) => c.status === "running" || c.status === "pending");
             return (
               <div className={`computer ${live ? "live" : "gone"}`} key={comp.key}>
                 <div className="computer-head">
-                  <span className="computer-icon">🖥</span>
+                  {comp.agent ? <AgentAvatar agent={comp.agent} size={26} /> : <span className="computer-icon">🖥</span>}
                   <div className="min0 grow">
                     <div className="strong ellipsis">
-                      {comp.member?.name ?? agents.get(comp.conversations[0]?.agent_id ?? "")?.name ?? runtime}
-                      {comp.sandbox ? <span className="muted small"> · {comp.sandbox.sprite_name}</span> : null}
+                      {comp.agent?.name ?? runtime}
+                      {comp.sandbox ? <span className="muted small"> · 🖥 {comp.sandbox.sprite_name}</span> : null}
                     </div>
                     <div className="muted small">
                       {comp.sandbox ? `${comp.sandbox.provider ?? ""} · ${comp.sandbox.status}` : "no computer"}
@@ -191,12 +201,11 @@ export function WorkItem({ projectId, itemId, conversationId }: { projectId: str
                       {busy ? " · busy" : ""}
                     </div>
                   </div>
-                  {live && comp.sandbox && (
+                  {live && comp.sandbox && comp.agent && (
                     <button
                       className="secondary small"
-                      title="Another conversation with the same member on this computer"
-                      onClick={() => setDialog({ join: { sandboxId: comp.sandbox!.id, label: comp.sandbox!.sprite_name, member: comp.member }, memberId: comp.member?.id ?? null })}
-                      disabled={!comp.member}
+                      title="Another conversation with the same teammate on this computer"
+                      onClick={() => setDialog({ join: { sandboxId: comp.sandbox!.id, label: comp.sandbox!.sprite_name, agentId: comp.agent!.id }, agentId: comp.agent!.id })}
                     >
                       + Here
                     </button>
@@ -247,15 +256,19 @@ export function WorkItem({ projectId, itemId, conversationId }: { projectId: str
           <div className="centered muted">
             <div>
               <p className="strong">Pick a conversation, or start one.</p>
-              <p className="small">A member gets its own computer; “+ Here” opens a second conversation on a computer that is already up.</p>
+              <p className="small">A teammate gets its own computer; “+ Here” opens a second conversation on a computer that is already up.</p>
             </div>
           </div>
         )}
       </div>
 
-      {dialog && <StartDialog item={item} join={dialog.join} initialMemberId={dialog.memberId} onClose={() => setDialog(null)} />}
+      {dialog && <StartDialog project={project} item={item} join={dialog.join} initialAgentId={dialog.agentId} onClose={() => setDialog(null)} />}
     </div>
   );
+}
+
+function isLive(c: Computer): boolean {
+  return !!c.sandbox && c.sandbox.status !== "terminated" && c.sandbox.status !== "failed";
 }
 
 function latest(c: Computer): string {

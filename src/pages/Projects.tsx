@@ -4,16 +4,19 @@ import { addProject, parseChannel, removeProject } from "../lib/workbench";
 import { href } from "../router";
 import { TwoStep } from "../components/Thread";
 import { formatTime } from "../lib/format";
+import { EnvVaultFields } from "../components/EnvVaultFields";
 
 export function Projects() {
-  const { state, update, conversations } = useStore();
+  const { state, update, conversations, environments, vaults } = useStore();
   const [name, setName] = useState("");
   const [notes, setNotes] = useState("");
+  const [environmentId, setEnvironmentId] = useState("");
+  const [vaultId, setVaultId] = useState("");
 
   function create(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
-    update((s) => addProject(s, name, notes)[0]);
+    update((s) => addProject(s, { name, notes, environmentId: environmentId || null, vaultId: vaultId || null })[0]);
     setName("");
     setNotes("");
   }
@@ -36,7 +39,7 @@ export function Projects() {
       {state.projects.length === 0 ? (
         <div className="empty card">
           <p className="strong">No projects yet.</p>
-          <p className="muted">A project holds work items; a work item is where you pull in members and talk to them.</p>
+          <p className="muted">A project is an environment and a vault — the computer its work gets — and holds work items, where you pull in teammates.</p>
         </div>
       ) : (
         <ul className="conv-list">
@@ -52,8 +55,8 @@ export function Projects() {
                       {(live.get(p.id) ?? 0) > 0 && <span className="pill running">{live.get(p.id)} working</span>}
                     </div>
                     <div className="conv-sub muted">
-                      {open} open · {items.length - open} done
-                      {p.notes ? ` · ${p.notes}` : ""}
+                      {open} open · {items.length - open} done · env {p.environmentId ? environments.get(p.environmentId)?.name ?? "?" : "agent's own"} · vault{" "}
+                      {p.vaultId ? vaults.get(p.vaultId)?.name ?? "?" : "none"}
                     </div>
                   </div>
                   <div className="conv-side">
@@ -73,6 +76,7 @@ export function Projects() {
           Name
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Fountain" required />
         </label>
+        <EnvVaultFields environmentId={environmentId} vaultId={vaultId} onEnvironment={setEnvironmentId} onVault={setVaultId} />
         <label>
           Notes <span className="hint">Where the code is, what it is. Shown to you, not sent to agents.</span>
           <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="github.com/BinaryBourbon/fountain" />
