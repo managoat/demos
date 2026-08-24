@@ -23,6 +23,17 @@ describe("renderMarkdown", () => {
     );
   });
 
+  test("a checklist is boxes, ticked and not", () => {
+    expect(html("- [ ] todo\n- [x] done")).toBe(
+      '<ul><li class="md-task"><input type="checkbox" disabled="" readOnly=""/><span>todo</span></li>' +
+        '<li class="md-task"><input type="checkbox" disabled="" readOnly="" checked=""/><span>done</span></li></ul>',
+    );
+  });
+
+  test("brackets that are not a checklist stay text", () => {
+    expect(html("- [wip] todo")).toBe("<ul><li>[wip] todo</li></ul>");
+  });
+
   test("bare urls become links and trailing punctuation stays out", () => {
     expect(html("see https://x.y/z.")).toBe(
       '<p>see <a href="https://x.y/z" target="_blank" rel="noreferrer noopener">https://x.y/z</a>.</p>',

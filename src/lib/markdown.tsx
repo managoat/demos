@@ -77,6 +77,17 @@ export function renderMarkdown(src: string): ReactNode[] {
           text += "\n" + lines[i]!.trim();
           i++;
         }
+        // a checklist: "- [ ] thing" / "- [x] thing" — a box, not brackets
+        const task = /^\[([ xX])\]\s+/.exec(text);
+        if (task) {
+          items.push(
+            <li key={k()} className="md-task">
+              <input type="checkbox" checked={task[1] !== " "} disabled readOnly />
+              <span>{inline(text.slice(task[0].length))}</span>
+            </li>,
+          );
+          continue;
+        }
         items.push(<li key={k()}>{inline(text)}</li>);
       }
       out.push(ordered ? <ol key={k()}>{items}</ol> : <ul key={k()}>{items}</ul>);

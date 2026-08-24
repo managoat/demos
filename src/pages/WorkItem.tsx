@@ -3,12 +3,19 @@
  * the team a click away, and the conversations it has — each on its computer
  * — linking into the thread. Prompting an agent from here is what puts them
  * on the item; "+" on one only earmarks them.
+ *
+ * The notes are the briefing whoever picks the item up reads — a teammate
+ * over MCP (`list_work_items`) as much as a person here — so they are
+ * markdown on the read path: a checklist, a repro block, a link to the PR.
+ * The editor stays a textarea, and saves on a pause, not on a keystroke.
  */
 import { useMemo, useState } from "react";
 import { useProject } from "../store";
 import type { Agent } from "../types";
 import { agentFits, channelIsItem } from "../lib/workbench";
 import { computerLabel, computersOf, relativeTime } from "../lib/sidebar";
+import { useDraft } from "../lib/draft";
+import { renderMarkdown } from "../lib/markdown";
 import { href } from "../router";
 import { TwoStep } from "../components/Thread";
 import { CloseControls, ItemStatusPill } from "../components/ItemStatus";
@@ -22,6 +29,13 @@ export function WorkItem({ itemId }: { itemId: string }) {
   const item = items.find((w) => w.id === itemId);
   const [dialog, setDialog] = useState<{ agentId: string | null } | null>(null);
   const [editing, setEditing] = useState(false);
+
+  // What is saved, against what the fields show: one PATCH per pause in the
+  // typing, and another member's edit still lands on a field nobody is in.
+  const record = useMemo(() => ({ title: item?.title ?? "", notes: item?.notes ?? "" }), [item?.title, item?.notes]);
+  const { draft, edit, flush } = useDraft(record, (v) => {
+    if (item) void updateItem(item.id, v);
+  });
 
   const convs = useMemo(() => conversations.filter((c) => channelIsItem(c.channel_id, project.id, itemId)), [conversations, project.id, itemId]);
   const computers = useMemo(() => computersOf(convs, sandboxes), [convs, sandboxes]);
@@ -49,18 +63,25 @@ export function WorkItem({ itemId }: { itemId: string }) {
 
   return (
     <div className="page narrow">
-      <div className="page-header">
+      <div className="page-header top">
         {editing ? (
           <form
             className="stack tight grow"
             onSubmit={(e) => {
               e.preventDefault();
+              flush();
               setEditing(false);
             }}
           >
-            <input value={item.title} onChange={(e) => void updateItem(item.id, { title: e.target.value })} />
-            <textarea rows={4} value={item.notes} onChange={(e) => void updateItem(item.id, { notes: e.target.value })} placeholder="Notes" />
+            <input value={draft.title} onChange={(e) => edit({ ...draft, title: e.target.value })} />
+            <textarea
+              rows={10}
+              value={draft.notes}
+              onChange={(e) => edit({ ...draft, notes: e.target.value })}
+              placeholder={"The briefing whoever picks this up reads.\n\n## Repro\n```\nbun test foo\n```\n- [ ] a checklist\n- a link: https://…"}
+            />
             <div className="row end">
+              <span className="muted small grow">Markdown. Saved as you stop typing.</span>
               <button type="submit" className="secondary small">
                 Done
               </button>
@@ -73,7 +94,7 @@ export function WorkItem({ itemId }: { itemId: string }) {
                 <a href={href.project(project.id)}>{project.name}</a> · env {envName} · vault {vaultName}
               </div>
               <h1>{item.title}</h1>
-              {item.notes && <p className="muted small pre">{item.notes}</p>}
+              {item.notes.trim() && <div className="md notes">{renderMarkdown(item.notes)}</div>}
             </div>
             <div className="row">
               <ItemStatusPill status={item.status} />

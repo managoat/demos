@@ -314,6 +314,8 @@ code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background:
 .page.narrow { max-width: 720px; width: 100%; margin: 0 auto; }
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
 .page-header h1 { margin: 0; font-size: 20px; }
+/* when the left of the header is tall (a briefing), the buttons stay at its top */
+.page-header.top { align-items: flex-start; }
 
 /* index */
 .conv-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg-1); }
@@ -385,8 +387,13 @@ button.secondary.on { background: var(--bg-2); }
 /* inside a sent bubble the code block is a shade of the bubble, not a slab */
 .bubble.you .md pre.md-code { background: rgba(0,0,0,0.25); color: var(--on-brand); }
 .md code { background: rgba(127,127,127,0.18); }
+.md li.md-task { list-style: none; margin-left: -20px; display: flex; align-items: baseline; gap: 6px; }
+.md li.md-task input { margin: 0; }
 .md blockquote { margin: 4px 0; padding-left: 10px; border-left: 3px solid var(--border); color: var(--text-2); }
 .md a { color: inherit; text-decoration: underline; }
+/* a work item's notes: a briefing, so it reads as prose next to the title */
+.md.notes { color: var(--text-2); font-size: 13px; line-height: 1.5; margin-top: 6px; max-width: 80ch; }
+.md.notes > :first-child { margin-top: 0; }
 
 /* blocks (timeline) & details */
 .block { align-self: stretch; }

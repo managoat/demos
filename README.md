@@ -17,6 +17,15 @@ the thread. On an item that already exists, the whole team is a row of chips
 under its teammates: click one and write the prompt. ("+" on a chip only
 earmarks them, for an item you are staffing before there is anything to say.)
 
+**The notes are the briefing.** A work item's notes are what whoever picks it
+up starts from — a person reading the item, or a teammate reading
+`list_work_items` over MCP — so they render as markdown: headings, a fenced
+repro, `- [ ]` checklists, links. It is the app's own allow-list renderer
+(`src/lib/markdown.tsx`, React nodes, never innerHTML), so nothing written
+into an item can become markup. Writing them stays a plain textarea, and the
+save follows a pause in the typing rather than every keystroke
+(`src/lib/draft.ts`).
+
 **A screenshot is a prompt.** Paste one into a composer or drop it on the
 thread and it goes with the words — "here is what it looks like, fix it"
 beats describing a layout in prose. Thumbnails sit above what you are typing
@@ -270,6 +279,7 @@ src/
   lib/turns.ts       fold a log feed into turns for the chat view
   lib/blocks.ts      arrange server-parsed blocks (from fountain-conversations)
   lib/markdown.tsx   allow-list markdown → React nodes, no innerHTML
+  lib/draft.ts       a field's draft and the debounced save behind it
   lib/theme.ts       the palette list; the blocks themselves are in styles.css
   pages/             Projects, Project (items, people), WorkItem, Team, Cost
   components/        Thread, Palette (⌘K), StartDialog, Attachments, EnvVaultFields, Blocks, ItemStatus, SignIn, Layout
