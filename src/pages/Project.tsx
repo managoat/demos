@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useProject, useWorkbench } from "../store";
-import { channelFor } from "../lib/workbench";
+import { channelIsItem } from "../lib/workbench";
 import { href, navigate } from "../router";
 import { TwoStep } from "../components/Thread";
 import { AgentAvatar } from "../components/AgentAvatar";
@@ -43,7 +43,7 @@ export function Project() {
   const vaultName = project.vaultId ? vaults.get(project.vaultId)?.name ?? "?" : "none";
 
   const row = (w: (typeof items)[number]) => {
-    const convs = conversations.filter((c) => c.channel_id === channelFor(project.id, w.id));
+    const convs = conversations.filter((c) => channelIsItem(c.channel_id, project.id, w.id));
     const working = convs.filter((c) => c.status === "running" || c.status === "pending").length;
     const unread = convs.some((c) => c.unread);
     const latest = convs.reduce((m, c) => ((c.last_active_at ?? "") > m ? c.last_active_at ?? "" : m), "");

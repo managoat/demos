@@ -12,11 +12,12 @@
  *
  * The tree lives on the workbench server (server/), shared between the
  * project's members; a conversation's membership is also recorded on
- * Fountain, in its `channel_id`, as `workbench:<project>/<item>`
- * (shared/channel.ts), which is what makes the tree recoverable from the
- * conversation list alone.
+ * Fountain, in its `channel_id`, as `workbench:<project>/<item>/<tag>`
+ * (shared/channel.ts — one channel per conversation, since a Fountain
+ * channel binds only one), which is what makes the tree recoverable from
+ * the conversation list alone.
  */
-export { channelFor, channelPrefix, conversationTitle, newId, parseChannel } from "../../shared/channel";
+export { channelFor, channelIsItem, channelPrefix, conversationTitle, newId, parseChannel } from "../../shared/channel";
 export type { ItemDto as WorkItem, ProjectDto as Project } from "./api";
 
 /**

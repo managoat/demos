@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useProject } from "../store";
 import type { Agent, Conversation, SandboxRecord } from "../types";
-import { agentFits, channelFor } from "../lib/workbench";
+import { agentFits, channelIsItem } from "../lib/workbench";
 import { href, navigate } from "../router";
 import { Thread, TwoStep } from "../components/Thread";
 import { StartDialog, type JoinTarget } from "../components/StartDialog";
@@ -40,7 +40,7 @@ export function WorkItem({ itemId, conversationId }: { itemId: string; conversat
   const convs = useMemo(
     () =>
       conversations
-        .filter((c) => c.channel_id === channelFor(project.id, itemId))
+        .filter((c) => channelIsItem(c.channel_id, project.id, itemId))
         .sort((a, b) => (a.inserted_at ?? "").localeCompare(b.inserted_at ?? "")),
     [conversations, project.id, itemId],
   );

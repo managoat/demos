@@ -7,8 +7,8 @@
  * URL and never holds a Fountain key. What it can reach:
  *
  *   GET  /api/conversations                 the owner's list, only `workbench:<project>/…`
- *   POST /api/conversations                 start one; channel must be an item of this project,
- *                                           environment and vault are the project's, not the caller's
+ *   POST /api/conversations                 start one; channel must name an item of this project and is
+ *                                           re-minted per conversation; environment and vault are the project's
  *   *    /api/conversations/:id/…           get, turns, events, prompts, read, interrupt, terminate,
  *                                           requests, tree, stream — after checking :id is in the project
  *   GET  /api/sandboxes/:id                 one computer, if a conversation of the project is on it
@@ -20,7 +20,7 @@
  * Everything else is 404. The conversation → project map is cached, since
  * a `channel_id` does not change.
  */
-import { channelFor, channelPrefix, parseChannel } from "../shared/channel";
+import { channelPrefix, newConversationChannel, parseChannel } from "../shared/channel";
 import { authenticate, ownerClient, projectAccess, type AppContext } from "./context";
 import type { ProjectRow, Role } from "./db";
 import type { ConversationSummary, FountainClient } from "./fountain";
@@ -136,9 +136,11 @@ async function startConversation(ctx: AppContext, { project, client }: Scope, re
   if (typeof body.agent_id !== "string" || !body.agent_id) throw new HttpError(422, "agent_required", "Pick a teammate.");
 
   // The computer is the project's: whatever the caller sent, the project decides.
+  // The channel is this conversation's own (see shared/channel.ts): a shared one
+  // would hand the binding to the newcomer and unbind the conversation before it.
   const out: Record<string, unknown> = {
     agent_id: body.agent_id,
-    channel_id: channelFor(project.id, item.id),
+    channel_id: newConversationChannel(project.id, item.id),
     fresh: true,
   };
   if (typeof body.title === "string") out.title = body.title;

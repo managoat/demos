@@ -290,6 +290,8 @@ describe("the project-scoped proxy", () => {
     expect(res.status).toBe(201);
     const sent = posted[posted.length - 1]!;
     expect(sent.key).toBe("key-alice");
+    // Its own channel on the item — never the item's bare channel, which a second conversation would take over.
+    expect(sent.body.channel_id).toMatch(new RegExp(`^workbench:${projectId}/${itemId}/[0-9a-f]{12}$`));
     expect(sent.body.environment_id).toBe("e1");
     expect(sent.body.vault_id).toBe("v1");
     expect(sent.body.prompt).toBe("go");

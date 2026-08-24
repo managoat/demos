@@ -48,8 +48,8 @@ browser ──(session cookie)──▶ workbench server ──(owner's Fountain
   (teammates) — lives in the server's SQLite database, `server/db.ts`.
 - **Fountain through a project.** The browser's SDK client for a project has
   base URL `/f/<project>`; the server (`server/proxy.ts`) forwards to Fountain
-  on the owner's key and admits only conversations whose `channel_id` is
-  `workbench:<project>/<item>`: it filters the list, checks every
+  on the owner's key and admits only conversations whose `channel_id` starts
+  with `workbench:<project>/`: it filters the list, checks every
   per-conversation call, forces the project's environment and vault on a new
   conversation, and lets a member see only the project's environment and
   vault (the owner sees all). The owner's user-wide event stream
@@ -57,8 +57,10 @@ browser ──(session cookie)──▶ workbench server ──(owner's Fountain
   with `event: workbench` records mixed in when another member changes an
   item or a setting — so every open screen follows along.
 - **Recovery.** A conversation's membership is also recorded on Fountain, in
-  its `channel_id`, so the tree is recoverable from the conversation list
-  alone: "Recover from Fountain" rebuilds any project and item your
+  its `channel_id`, as `workbench:<project>/<item>/<tag>` — one channel per
+  conversation, because a Fountain channel binds a single conversation and a
+  second one opened on it would unbind the first. So the tree is recoverable
+  from the conversation list alone: "Recover from Fountain" rebuilds any project and item your
   conversations name, and listing a project's conversations fills in items
   and teammates it did not know about. A browser that held the tree from
   before the server existed is offered a one-time import (ids are kept, so
