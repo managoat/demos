@@ -478,6 +478,26 @@ bun run start                        # serve dist/ + API from one process, as in
 
 `FOUNTAIN_URL=… bun run server` points a local server at another Fountain.
 
+### Test
+
+`bun test` runs three kinds of test. Pure functions — most of `src/lib` and
+all of `shared/` — are tested directly. The server is tested against a fake
+Fountain stood up with `Bun.serve` in `server/app.test.ts`; anything that
+changes what the proxy admits belongs there. And the browser half runs in a
+document: `bunfig.toml` preloads happy-dom (`test/preload.ts`), so a test can
+mount a tree, drive it, and unmount it.
+
+`test/render.tsx` is what mounting looks like — `mount` for a component,
+`renderHook` for a hook, `step` for doing something to a mounted tree and
+`wait` for letting a real timer fire. Each wraps React's `act`, so by the time
+a call returns the effects it scheduled have run. `src/lib/draft.hook.test.tsx`
+is the worked example: `useDraft`'s three rules, each of which needs a second
+render to show at all. So a hook's behaviour is a test now — it does not have
+to be pinned in a comment and hoped for.
+
+The pure-function tests stay as they are. The point of the document is to
+reach the other half, not to move what already works.
+
 ## Layout
 
 ```
@@ -515,6 +535,9 @@ src/
   lib/theme.ts       the palette list; the blocks themselves are in styles.css
   pages/             Projects, Project (items as a list or a board, people), WorkItem, Team, Cost
   components/        Thread, ThreadFind (⌘F), DetailsPanel, Board, ItemDigest, Feed (🔔), Palette (⌘K), StartDialog, Attachments, EnvVaultFields, Blocks, ItemStatus, SignIn, Layout
+test/
+  preload.ts         a document for the test run (happy-dom), loaded by bunfig.toml
+  render.tsx         mount a component or a hook and drive it, inside React's act
 ```
 
 ## Licence
