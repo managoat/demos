@@ -46,6 +46,52 @@ export interface Me {
   fountainUrl: string;
 }
 
+// ── cost (server/cost.ts) ────────────────────────────────────────────────
+// Your own account and the projects you own. The bill is account-wide and
+// period-scoped; the breakdown is per project and lifetime. They are two
+// different measurements of two different things, so the view never adds them.
+
+/** Fountain's `GET /api/account/billing` document, passed through as it comes — hence snake_case. */
+export interface Billing {
+  status?: string | null;
+  trial_ends_at?: string | null;
+  current_period_end?: string | null;
+  cancel_at_period_end?: boolean;
+  period?: { start?: string; end?: string; source?: string };
+  plan?: { name?: string; slug?: string; monthly_cents?: number; included_turn_hours?: number };
+  usage?: { conversations?: number; turns?: number; turn_hours?: number; turn_hours_included?: number; turn_hours_remaining?: number; sandbox_minutes?: number };
+}
+
+export interface CostBucket {
+  conversations: number;
+  turns: number;
+  input: number;
+  output: number;
+  lastActiveAt: string | null;
+}
+
+export interface ItemCost extends CostBucket {
+  id: string;
+  /** Null for an item deleted here whose conversations still name it. */
+  title: string | null;
+  status: "open" | "done" | null;
+}
+
+export interface ProjectCost extends CostBucket {
+  id: string;
+  name: string;
+  memberCount: number;
+  items: ItemCost[];
+}
+
+export interface Cost {
+  billing: Billing | null;
+  billingUnavailable: "disabled" | "error" | null;
+  projects: ProjectCost[];
+  elsewhere: CostBucket;
+  total: CostBucket;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -85,6 +131,9 @@ export const api = {
   signIn: (apiKey: string) => call<Me>("POST", "/api/session", { apiKey }),
   signOut: () => call<{ ok: true }>("DELETE", "/api/session"),
   myResources: () => data(call<{ data: { environments: Environment[]; vaults: Vault[] } }>("GET", "/api/me/resources")),
+  // Your own bill and your own projects. Not `/f/<project>/…`: the proxy is the
+  // member boundary, and a bill does not belong on the far side of it.
+  cost: () => data(call<{ data: Cost }>("GET", "/api/me/cost")),
 
   projects: () => data(call<{ data: ProjectDto[] }>("GET", "/api/projects")),
   activity: () => data(call<{ data: Record<string, Activity> }>("GET", "/api/projects/activity")),

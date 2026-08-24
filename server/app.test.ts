@@ -19,6 +19,8 @@ interface FakeConv {
   sandbox_id: string | null;
   status: string;
   inserted_at: string;
+  turn_count?: number;
+  usage_total?: { input: number; output: number };
 }
 
 const KEYS: Record<string, { id: string; email: string }> = {
@@ -50,6 +52,8 @@ const prompted: { prompt?: string; images?: unknown[] }[] = [];
 /** Conversations this fake was asked to terminate; one whose id starts with `stuck` refuses. */
 const terminated: string[] = [];
 let streamEvents: { conversation_id: string; id: number }[] = [];
+/** An instance with billing switched off answers 404 there; flip this to be one. */
+let billingEnabled = true;
 
 function whose(req: Request): string | null {
   const auth = req.headers.get("authorization") ?? "";
@@ -123,6 +127,17 @@ const fountain = Bun.serve({
       const narrow = q === "leaky" || !only.length ? null : only[only.length - 1];
       const all = (hits[key] ?? []).filter((h) => h.snippet.includes(q) && (!narrow || h.conversation_id === narrow));
       return Response.json({ data: all.slice(offset, offset + limit), meta: { limit, offset, has_more: offset + limit < all.length } });
+    }
+    if (path === "/api/account/billing") {
+      if (!billingEnabled) return Response.json({ error: "not_found", billing: "disabled" }, { status: 404 });
+      return Response.json({
+        data: {
+          status: "active",
+          period: { start: "2026-08-01T00:00:00Z", end: "2026-09-01T00:00:00Z", source: "subscription" },
+          plan: { name: "Team", slug: "team", monthly_cents: 9900, included_turn_hours: 100 },
+          usage: { conversations: 12, turns: 40, turn_hours: 7.5, turn_hours_included: 100, turn_hours_remaining: 92.5, sandbox_minutes: 900 },
+        },
+      });
     }
     if (path === "/api/agents") return Response.json({ data: [{ id: "a1", name: "Coder" }] });
     if (path === "/api/environments") return Response.json({ data: [{ id: "e1", name: "one" }, { id: "e2", name: "two" }] });
@@ -882,5 +897,113 @@ describe("the MCP server", () => {
     const missing = await rpc("key-bob", "tools/list", undefined, { "x-fountain-conversation-id": "m1" });
     expect(missing.status).toBe(404);
     expect(((await missing.json()) as { error: string }).error).toBe("no_conversation");
+  });
+});
+
+// ── the owner's cost view ────────────────────────────────────────────────
+
+describe("what a project cost, for the owner who paid for it", () => {
+  const goneItem = "deleteditem";
+
+  beforeAll(() => {
+    billingEnabled = true;
+    const conv = (id: string, channel: string | null, turns: number, input: number, output: number, at: string): FakeConv => ({
+      id,
+      channel_id: channel,
+      title: null,
+      agent_id: "a1",
+      environment_id: "e1",
+      vault_id: "v1",
+      sandbox_id: "sbX",
+      status: "idle",
+      inserted_at: at,
+      turn_count: turns,
+      usage_total: { input, output },
+    });
+    convs["key-alice"] = [
+      conv("k1", `workbench:${projectId}/${itemId}/aaaaaaaaaaaa`, 3, 1000, 500, "2026-08-10T00:00:00Z"),
+      conv("k2", `workbench:${projectId}/${itemId}/bbbbbbbbbbbb`, 2, 200, 100, "2026-08-12T00:00:00Z"),
+      // The work item is long deleted here; its conversations still name it, and its spend still happened.
+      conv("k3", `workbench:${projectId}/${goneItem}/cccccccccccc`, 1, 50, 25, "2026-08-11T00:00:00Z"),
+      conv("k4", "fountain:team", 4, 70, 30, "2026-08-13T00:00:00Z"),
+      // A workbench channel naming a project that is not hers is not hers to attribute.
+      conv("k5", "workbench:bobproj/bobitem", 1, 10, 5, "2026-08-09T00:00:00Z"),
+    ];
+    convs["key-bob"] = [conv("kb1", "workbench:bobproj/bobitem", 6, 900, 400, "2026-08-14T00:00:00Z")];
+  });
+
+  afterAll(() => {
+    billingEnabled = true;
+  });
+
+  const costOf = async (who: string) => (await (await call(who, "GET", "/api/me/cost")).json()).data as import("./cost").CostDto;
+
+  test("no session, no bill", async () => {
+    expect((await call(null, "GET", "/api/me/cost")).status).toBe(401);
+  });
+
+  test("the bill is the account's, as Fountain reports it — never per project, because Fountain does not attribute it", async () => {
+    const cost = await costOf("alice");
+    expect(cost.billingUnavailable).toBeNull();
+    expect(cost.billing!.plan!.name).toBe("Team");
+    expect(cost.billing!.usage!.turn_hours).toBe(7.5);
+    expect(cost.billing!.period!.source).toBe("subscription");
+  });
+
+  test("the breakdown sums the conversations by the work item their channel names", async () => {
+    const cost = await costOf("alice");
+    const p = cost.projects.find((x) => x.id === projectId)!;
+    expect(p.conversations).toBe(3);
+    expect(p.turns).toBe(6);
+    expect(p.input).toBe(1250);
+    expect(p.output).toBe(625);
+    expect(p.lastActiveAt).toBe("2026-08-12T00:00:00Z");
+
+    const w = p.items.find((x) => x.id === itemId)!;
+    expect([w.conversations, w.turns, w.input, w.output]).toEqual([2, 5, 1200, 600]);
+    // Biggest first: what burned the day is at the top, not wherever it was filed.
+    expect(p.items[0]!.id).toBe(itemId);
+
+    // An item deleted here is still a line, so the project's own total adds up.
+    const gone = p.items.find((x) => x.id === goneItem)!;
+    expect(gone.title).toBeNull();
+    expect(gone.status).toBeNull();
+    expect(gone.input + gone.output).toBe(75);
+
+    // Items nothing ran on are listed at zero rather than left out.
+    expect(p.items.every((x) => typeof x.conversations === "number")).toBe(true);
+  });
+
+  test("what is not a project of yours is not silently folded into one", async () => {
+    const cost = await costOf("alice");
+    // `fountain:team` and a channel naming Bob's project: hers to see on her bill, not hers to attribute.
+    expect(cost.elsewhere.conversations).toBe(2);
+    expect(cost.elsewhere.input + cost.elsewhere.output).toBe(115);
+    expect(cost.total.conversations).toBe(5);
+    expect(cost.total.input).toBe(1330);
+    expect(cost.total.output).toBe(660);
+    // The parts do add up to the whole.
+    const attributed = cost.projects.reduce((n, p) => n + p.conversations, 0);
+    expect(attributed + cost.elsewhere.conversations).toBe(cost.total.conversations);
+  });
+
+  test("a member sees their own account, never the owner's — the bill is not behind the project boundary", async () => {
+    const cost = await costOf("bob");
+    // Bob is a member of Alice's project and owns bobproj. Only what he owns is here.
+    expect(cost.projects.map((p) => p.id)).toEqual(["bobproj"]);
+    expect(cost.projects[0]!.input).toBe(900);
+    // And nothing of Alice's spend reached him.
+    expect(cost.total.conversations).toBe(1);
+    const alice = await costOf("alice");
+    expect(alice.projects.map((p) => p.id)).not.toContain("bobproj");
+  });
+
+  test("billing switched off is said, not faked; the breakdown still stands", async () => {
+    billingEnabled = false;
+    const cost = await costOf("alice");
+    expect(cost.billing).toBeNull();
+    expect(cost.billingUnavailable).toBe("disabled");
+    expect(cost.projects.find((p) => p.id === projectId)!.turns).toBe(6);
+    billingEnabled = true;
   });
 });

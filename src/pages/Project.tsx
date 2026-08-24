@@ -129,9 +129,17 @@ export function Project() {
             {project.notes ? ` · ${project.notes}` : ""}
           </div>
         </div>
-        <a className="button secondary small" href={href.people(project.id)}>
-          {isOwner ? "Settings & sharing" : "People"}
-        </a>
+        <div className="row">
+          {/* The owner pays for everyone's conversations here, so the owner is the one shown what they came to. */}
+          {isOwner && (
+            <a className="button secondary small" href={href.cost()} title="What the work on your account came to, this project included">
+              Cost
+            </a>
+          )}
+          <a className="button secondary small" href={href.people(project.id)}>
+            {isOwner ? "Settings & sharing" : "People"}
+          </a>
+        </div>
       </div>
 
       <form className={`card stack new-form${attachments.dragging ? " dropping" : ""}`} onSubmit={create} {...attachments.dropzone}>

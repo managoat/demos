@@ -2,6 +2,7 @@
  * Hash routes, so the app works from any static host with no rewrite rules:
  *
  *   #/                          all projects (import, recover, new)
+ *   #/cost                      your bill, and the projects you own that it paid for
  *   #/p/:project                the project's work items
  *   #/p/:project/w/:item        one work item: notes, teammates, its conversations
  *   #/p/:project/c/:conv        one conversation, open
@@ -14,6 +15,7 @@ import { useEffect, useState } from "react";
 
 export type Route =
   | { page: "projects" }
+  | { page: "cost" }
   | { page: "project"; projectId: string }
   | { page: "item"; projectId: string; itemId: string }
   | { page: "conversation"; projectId: string; conversationId: string; turnId?: string }
@@ -23,6 +25,7 @@ export type Route =
 export function parseRoute(hash: string): Route {
   const path = hash.replace(/^#/, "").replace(/^\/+/, "").split("?")[0] ?? "";
   const parts = path.split("/").filter(Boolean);
+  if (parts[0] === "cost") return { page: "cost" };
   if (parts[0] === "p" && parts[1]) {
     const projectId = parts[1];
     if (parts[2] === "w" && parts[3]) {
@@ -45,6 +48,7 @@ function conversation(projectId: string, conversationId: string, marker: string 
 
 export const href = {
   projects: () => "#/",
+  cost: () => "#/cost",
   project: (projectId: string) => `#/p/${projectId}`,
   team: (projectId: string) => `#/p/${projectId}/team`,
   people: (projectId: string) => `#/p/${projectId}/people`,

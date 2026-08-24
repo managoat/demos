@@ -35,6 +35,21 @@ vaults, computers and bill. A member never holds the owner's key; the
 workbench server does, and lets the member through only to that project's
 conversations.
 
+**The owner pays, so the owner can see it.** Because every conversation in a
+project runs on the owner's account, the owner is billed for work members
+started, and had no view of what that came to. **Cost** (on the projects page,
+and on a project you own) is that view: your Fountain bill for the period —
+plan, turn hours, sandbox minutes — and underneath it, where the work went,
+per project and per work item, so "this item burned a day of Opus" is visible
+before it burns two. It is your own account and only the projects you own; a
+member sees their own, never yours. It hangs off `/api/me/cost` and
+deliberately not off the project proxy — that is the boundary a member
+crosses, and a bill does not belong on the far side of it. The two numbers are
+kept apart on purpose: Fountain's bill is account-wide and covers one billing
+period, while the breakdown is tokens and turns per conversation over all time.
+Fountain attributes no money to a project, so neither does the page — dividing
+the invoice by token share would be a figure nobody measured.
+
 Each teammate's conversation gets its own computer, and a computer belongs
 to the work item it was started for — the checkout and the disk are that
 item's context, so the sidebar reads work item → computers → conversations.
@@ -221,6 +236,7 @@ server/
   app.ts             the route table
   auth.ts            sign-in: verify the key with Fountain, keep it, issue the session
   projects.ts        projects, members, items; recovery and import
+  cost.ts            your bill, and the projects you own that it paid for
   proxy.ts           Fountain as seen from inside one project, on the owner's key
   mcp.ts             the work items as MCP tools, for an agent holding a Fountain key
   db.ts              SQLite: users, sessions, projects, members, items
@@ -241,7 +257,7 @@ src/
   lib/blocks.ts      arrange server-parsed blocks (from fountain-conversations)
   lib/markdown.tsx   allow-list markdown → React nodes, no innerHTML
   lib/theme.ts       the palette list; the blocks themselves are in styles.css
-  pages/             Projects, Project (items, people), WorkItem, Team
+  pages/             Projects, Project (items, people), WorkItem, Team, Cost
   components/        Thread, Palette (⌘K), StartDialog, Attachments, EnvVaultFields, Blocks, SignIn, Layout
 ```
 

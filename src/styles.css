@@ -839,3 +839,29 @@ body.resizing-col { cursor: col-resize; user-select: none; }
 .theme-swatch .s-brand { background: var(--brand); }
 .theme-swatch .s-ok { background: var(--ok); }
 .theme-swatch.system { background: linear-gradient(90deg, #ffffff 0 50%, #101014 50% 100%); }
+
+/* ── the cost view ──────────────────────────────────────────────────────
+ * The bill as four stats, then one row per project with a bar scaled to
+ * the biggest of them, so the projects compare to each other rather than
+ * to a number nobody can picture.
+ */
+.cost-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
+.cost-stat { display: flex; flex-direction: column; gap: 2px; }
+.cost-stat-value { font-size: 20px; font-weight: 600; }
+.cost-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg-1); }
+.cost-row { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.cost-row:last-child { border-bottom: 0; }
+.cost-head { display: flex; align-items: center; gap: 8px; }
+.cost-toggle { display: inline-flex; align-items: center; gap: 6px; color: inherit; text-decoration: none; }
+.cost-sub { margin-top: 4px; }
+.meter { height: 4px; margin-top: 6px; border-radius: 999px; background: var(--bg-2); overflow: hidden; }
+.meter span { display: block; height: 100%; min-width: 2px; background: var(--brand); border-radius: 999px; }
+.cost-items { list-style: none; margin: 8px 0 2px; padding: 0 0 0 16px; display: flex; flex-direction: column; gap: 1px; }
+.cost-item { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 6px; text-decoration: none; color: inherit; font-size: 13px; }
+.cost-item:hover { background: var(--bg-2); }
+.cost-item-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cost-item-tokens { min-width: 68px; text-align: right; }
+.indent { padding-left: 16px; }
+.elsewhere { margin: 10px 2px 0; }
+.cost-note { margin-top: 16px; }
+.cost-note p { margin: 0; }

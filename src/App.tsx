@@ -14,6 +14,7 @@ import { Shell } from "./components/Shell";
 import { loadLastProject, ProjectProvider, WorkbenchProvider } from "./store";
 import { href, navigate, useRoute } from "./router";
 import { Projects } from "./pages/Projects";
+import { Cost } from "./pages/Cost";
 import { Project } from "./pages/Project";
 import { WorkItem } from "./pages/WorkItem";
 import { Conversation } from "./pages/Conversation";
@@ -124,6 +125,14 @@ function Router() {
     return (
       <Shell>
         <Projects />
+      </Shell>
+    );
+  }
+  // Your account, not a project's: no ProjectProvider, and nothing here goes through the proxy.
+  if (route.page === "cost") {
+    return (
+      <Shell>
+        <Cost />
       </Shell>
     );
   }

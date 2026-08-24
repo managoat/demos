@@ -5,6 +5,7 @@ test("routes", () => {
   expect(parseRoute("")).toEqual({ page: "projects" });
   expect(parseRoute("#/")).toEqual({ page: "projects" });
   expect(parseRoute("#/team")).toEqual({ page: "projects" });
+  expect(parseRoute(href.cost())).toEqual({ page: "cost" });
   expect(parseRoute("#/p/abc")).toEqual({ page: "project", projectId: "abc" });
   expect(parseRoute("#/p/abc/team")).toEqual({ page: "team", projectId: "abc" });
   expect(parseRoute("#/p/abc/people")).toEqual({ page: "people", projectId: "abc" });

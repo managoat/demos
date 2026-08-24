@@ -21,6 +21,9 @@ export interface ConversationSummary {
   inserted_at?: string;
   last_active_at?: string | null;
   updated_at?: string | null;
+  turn_count?: number;
+  /** Running sums over the turns that reported one — lifetime, not per billing period. */
+  usage_total?: { input?: number; output?: number };
   [k: string]: unknown;
 }
 
@@ -34,6 +37,22 @@ export interface SearchHit {
   snippet: string;
   ts: string;
   [k: string]: unknown;
+}
+
+/**
+ * `GET /api/account/billing`: the account's plan and what it has used over the
+ * period Stripe invoices (or the calendar month, when there is no such
+ * period — `period.source` says which). Account-wide: Fountain attributes
+ * none of it to a project, an agent or a conversation.
+ */
+export interface Billing {
+  status?: string | null;
+  trial_ends_at?: string | null;
+  current_period_end?: string | null;
+  cancel_at_period_end?: boolean;
+  period?: { start?: string; end?: string; source?: string };
+  plan?: { name?: string; slug?: string; monthly_cents?: number; included_turn_hours?: number; concurrent_sandboxes?: number; sandbox_limit?: number };
+  usage?: { conversations?: number; turns?: number; turn_hours?: number; turn_hours_included?: number; turn_hours_remaining?: number; sandbox_minutes?: number };
 }
 
 export class FountainHttpError extends Error {
@@ -68,6 +87,22 @@ export class FountainClient {
   /** Who the key belongs to. The one endpoint that answers without the `{data}` envelope. */
   me(): Promise<FountainUser> {
     return this.json<FountainUser>("/api/auth/me");
+  }
+
+  /**
+   * The key-holder's own bill. Null on 404, which is what an instance with
+   * billing switched off answers (carrying `billing: "disabled"`), and also
+   * what a Fountain too old to have the endpoint answers — either way there
+   * is no bill to show, and the caller says so rather than inventing one.
+   */
+  async billing(): Promise<Billing | null> {
+    try {
+      const body = await this.json<{ data: Billing }>("/api/account/billing");
+      return body.data ?? null;
+    } catch (err) {
+      if (err instanceof FountainHttpError && err.status === 404) return null;
+      throw err;
+    }
   }
 
   async conversations(query: Record<string, string> = {}): Promise<ConversationSummary[]> {

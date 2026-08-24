@@ -123,9 +123,15 @@ export function Projects() {
     <div className="page narrow">
       <div className="page-header">
         <h1>Projects</h1>
-        <button className="secondary small" onClick={recover} title="Rebuild projects from the workbench conversations on your Fountain account">
-          Recover from Fountain
-        </button>
+        <div className="row">
+          {/* Your bill and where it went. Only the owner pays, so only the owner's own account is here. */}
+          <a className="button secondary small" href={href.cost()} title="Your Fountain bill, and the projects you own that it paid for">
+            Cost
+          </a>
+          <button className="secondary small" onClick={recover} title="Rebuild projects from the workbench conversations on your Fountain account">
+            Recover from Fountain
+          </button>
+        </div>
       </div>
 
       {legacy && (
