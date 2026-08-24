@@ -1,6 +1,12 @@
 # The environment and agent for working on the workbench itself, on Fountain.
 #
-#   fountain apply -f fountain/manifest.yml
+#   WORKBENCH_TOKEN=ftn_… fountain apply -f fountain/manifest.yml
+#
+# WORKBENCH_TOKEN is a Fountain API key belonging to the workbench's owner —
+# it is what the agent authenticates to the workbench's MCP endpoint with
+# (see `mcp_servers` below). Apply refuses to run without it rather than
+# quietly shipping an agent whose tools 401. Fountain keeps it as an
+# environment secret; rotate with `fountain keys create` + re-apply.
 #
 # In the workbench, make a project with environment `fountain-workbench` and
 # the `jhgaylor` vault (GitHub token + git identity), and pull the
@@ -20,6 +26,12 @@ spec:
     node: "24"
   env_vars:
     LANG: C.UTF-8
+  # Resolved at apply time from the operator's shell; Fountain then has it in
+  # the merged secret map that `mcp_servers` is substituted against at
+  # provision time. On the environment rather than the vault so the agent
+  # works in any project, whichever vault that project supplies.
+  secrets:
+    WORKBENCH_TOKEN: ${WORKBENCH_TOKEN}
   repositories:
     - url: https://github.com/jhgaylor/fountain-workbench
       mount_path: /workspace/fountain-workbench
@@ -90,5 +102,28 @@ spec:
     open one pull request with `gh pr create`, with the gate output you
     actually saw. Never end a turn with work pending — the turn that did the
     work is the turn that states the pushed commit sha.
+
+    The workbench's own work items are yours to file: the `workbench` MCP
+    server (mcp__workbench__*) lists projects and work items and creates
+    them. Use it when a turn turns up work that is not this turn's — a
+    follow-up, something you found and are not fixing, a piece for someone
+    else — instead of leaving it in prose for a person to re-type. Call
+    list_projects first, and list_work_items before you create one, so you
+    add to the list rather than duplicate it; say in your answer what you
+    filed. Marking an item done is deliberately not a tool: that retires
+    the item's conversations and takes their computers down, quite possibly
+    your own.
+  # The work items as tools (server/mcp.ts). `${VAR}` is resolved by Fountain
+  # at provision time, so the sandbox's .mcp.json is written with the key
+  # already in it. Deliberately not `$${FOUNTAIN_TOKEN}` (the sprite's own
+  # per-conversation key, left for the runtime to expand): the endpoint
+  # accepts that key, but the server never registered — every agent whose
+  # MCP servers work here resolves its header this way.
+  mcp_servers:
+    workbench:
+      type: http
+      url: https://workbench.inevitable.fyi/mcp
+      headers:
+        Authorization: "Bearer ${WORKBENCH_TOKEN}"
   permission_policy:
     default: auto_allow

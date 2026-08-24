@@ -1,0 +1,359 @@
+# The environment and agent for jhgaylor/games — small games in LÖVE and
+# PixiJS, and the harness that boots them headless and screenshots them.
+#
+#   fountain apply -f fountain/games.yml
+#
+# In the workbench, make a project with environment `games` and the
+# `jhgaylor` vault (GitHub token + git identity), and pull the `games` agent
+# onto its work items. No vault is defined here: the project supplies one.
+#
+# What the agent knows is split deliberately. The system prompt is the loop —
+# where the checkout is, the gate, one pull request. The three skills are the
+# craft: how to write a LÖVE game, how to write a PixiJS game, and the rule
+# that a pull request which changes what a game looks like carries pictures
+# of it. Skills load when they are relevant, so an agent fixing a Lua bug is
+# not also reading about Vite.
+apiVersion: fountain.dev/v1
+kind: Environment
+metadata:
+  name: games
+spec:
+  networking_type: unrestricted
+  packages:
+    apt:
+      - jq
+      - ripgrep
+      - love
+      - xvfb
+      - libgl1-mesa-dri
+      - luarocks
+    node: "22"
+  env_vars:
+    LANG: C.UTF-8
+    # No sound card and no display in a sandbox; the harness sets these too,
+    # but a game run by hand should not fail on them either.
+    SDL_AUDIODRIVER: dummy
+    LIBGL_ALWAYS_SOFTWARE: "1"
+  repositories:
+    - url: https://github.com/jhgaylor/games
+      mount_path: /workspace/games
+      secret_key: GITHUB_TOKEN
+  setup_script: |
+    set -euxo pipefail
+
+    # gh, for issues and the pull request at the end of the job.
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+    echo "deb [signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      | sudo tee /etc/apt/sources.list.d/github-cli.list
+    sudo apt-get update -qq && sudo apt-get install -y -qq gh
+
+    sudo luarocks install luacheck
+
+    cd /workspace/games
+    npm ci
+    npx playwright install --with-deps chromium
+
+    # Prove the machine can actually do the thing it exists to do: boot a
+    # game of each engine with no display and take a picture of it. If this
+    # fails the sandbox is not ready, and it is better to know now than in
+    # the middle of a pull request.
+    tools/check.sh tools/selftest tools/selftest-web
+    echo 'games ready: tools/check.sh / tools/love-shot / tools/web-shot'
+---
+apiVersion: fountain.dev/v1
+kind: Agent
+metadata:
+  name: games
+spec:
+  runtime: claude
+  model: anthropic/claude-opus-5
+  environment: games
+  description: >
+    Builds small games in jhgaylor/games — LÖVE (Lua) and PixiJS (JS/Vite) —
+    and shows them off. Runs the gate, screenshots what it built, and opens
+    one pull request with the pictures in it.
+  system: |
+    You build games in github.com/jhgaylor/games: small, self-contained
+    games, one directory each, in one of two engines — LÖVE (Lua, a desktop
+    window) or PixiJS (JavaScript on Vite, a page). The checkout is at
+    /workspace/games. LÖVE, Node, Xvfb, luacheck and a headless Chromium are
+    installed, and `gh` is authenticated: `gh issue list`, `gh issue view N`,
+    `gh pr list` all work from inside the checkout.
+
+    Before you touch anything, in this order:
+      1. cd /workspace/games && git fetch origin && git checkout -B <branch> origin/main
+         The sandbox may have warm-started from a checkpoint, so the checkout
+         on disk can be days old. Fetch before you read it.
+      2. Read README.md — the layout, the screenshot script language, and the
+         two arrangements that are load-bearing — then AGENTS.md, which is
+         the loop you are in.
+      3. For a GitHub issue, `gh issue view N --comments` before you plan.
+
+    Start a new game with `tools/new-game.sh love <name>` or
+    `tools/new-game.sh web <name>` rather than from an empty directory: it
+    copies a working selftest, so the screenshot harness is wired up from the
+    first commit instead of being retrofitted after the game already runs.
+
+    The gate, in the foreground, before you push:
+      tools/check.sh
+    Anything you background dies when your turn ends — never leave a game
+    running. Read the output, not the exit code. The gate boots every game
+    headless and screenshots it, so it fails any game that needs a human
+    present to reach its first frame; that is deliberate, and fixing the game
+    is the answer, never skipping the gate.
+
+    Then take the screenshots of what you actually built, commit them under
+    the game's own screenshots/ directory, and put them in the pull request
+    body by commit sha. The screenshots-in-prs skill has the exact shape.
+    A game nobody can see is a game nobody can review.
+
+    Never push to main. Commit with a message that says what changed and why,
+    push a branch, and open one pull request with `gh pr create`, quoting the
+    gate output you actually saw. Never end a turn with work pending — the
+    turn that did the work is the turn that states the pushed commit sha and
+    the pull request URL.
+  permission_policy:
+    default: auto_allow
+  skills:
+    - name: love2d
+      content: |
+        ---
+        name: love2d
+        description: Writing a LÖVE (love2d) game in Lua that runs headless and can be screenshotted — the callbacks, conf.lua, the shot.lua harness, and the shapes that make a game scriptable. Use when building or changing a LÖVE game, or when a LÖVE game will not boot, draw, or screenshot.
+        ---
+
+        # LÖVE games in this repo
+
+        A LÖVE game is a directory with `main.lua`, `conf.lua` and a copy of
+        `shot.lua`. Run it with `love <dir>`. LÖVE 11.5 is installed.
+
+        ## The shape of a game
+
+        `conf.lua` sets the window and, importantly, the save identity —
+        screenshots land in the save directory, so every game needs its own:
+
+        ```lua
+        function love.conf(t)
+          t.identity = "tictactoe"      -- one per game
+          t.window.title = "Tic-tac-toe"
+          t.window.width, t.window.height = 480, 480
+          t.window.resizable = false
+          t.modules.joystick = false
+          t.modules.physics = false
+        end
+        ```
+
+        `main.lua` is the callbacks. `love.load()` once, `love.update(dt)`
+        every frame with the seconds since the last one, `love.draw()` to
+        draw, and the input callbacks. The last line of `main.lua` is always:
+
+        ```lua
+        require("shot").install()
+        ```
+
+        which does nothing unless the environment says to take screenshots.
+
+        ## Two rules that decide whether a game can be screenshotted
+
+        **Handle input in callbacks, never by polling.** The harness pushes
+        real events onto LÖVE's queue, so `love.keypressed`,
+        `love.mousepressed` and `love.textinput` see them exactly as they see
+        a human. It cannot make `love.keyboard.isDown("space")` true, because
+        that reads the physical device. A game that polls in `update` is a
+        game no script can drive.
+
+        **Be deterministic.** `love.math.setRandomSeed(1)` in `love.load` (or
+        take a seed from the environment). Drive animation from the `dt`
+        argument, never from `os.time()` or `os.clock()`. Two runs of the same
+        script should produce byte-identical pictures.
+
+        ## Screenshots
+
+        ```sh
+        tools/love-shot <game-dir> <out-dir> "wait:20 shot:board click:150,150 wait:5 shot:x-plays"
+        ```
+
+        It runs the game under Xvfb with software GL, drives the script at a
+        fixed 60 frames a second, and copies the PNGs out of the save
+        directory. Steps: `wait:N`, `key:<name>`, `text:<char>`,
+        `move:x,y`, `click:x,y`, `shot:<name>`, `quit`. Key names are LÖVE's
+        (`return`, `escape`, `space`, `left`).
+
+        `tools/shot.lua` is the canonical copy of the module and each game
+        holds a duplicate, because LÖVE can only `require` inside the game
+        directory. After changing the canonical one run `tools/sync-shot.sh`;
+        the gate fails when a copy has drifted.
+
+        ## When it goes wrong
+
+        - **"the game never reported a save directory"** — `main.lua` does not
+          end with `require("shot").install()`, or the game errored before
+          reaching it. Run `love <dir>` and read the error screen.
+        - **A blank screenshot** — the game drew nothing on that frame. Add
+          `wait:` frames before the `shot:`; a game that loads assets or
+          animates in needs a moment.
+        - **A click did nothing** — the coordinates are window pixels from the
+          top left, and they are not scaled. Check them against
+          `t.window.width` / `height` in `conf.lua`.
+        - **luacheck complains about a global** — it is usually a typo'd local.
+          `.luacheckrc` already allows `love`.
+    - name: pixijs
+      content: |
+        ---
+        name: pixijs
+        description: Writing a PixiJS v8 game (JavaScript, Vite) that builds, runs in headless Chromium and can be screenshotted — the Application boot, the entry-module rule that deadlocks Pixi, input, and the web-shot harness. Use when building or changing a web game, or when a web game shows no canvas.
+        ---
+
+        # PixiJS games in this repo
+
+        A web game is a directory with `index.html`, `src/main.js`,
+        `vite.config.js` and its own `package.json`, and it is an npm
+        workspace of the repo root — so `npm ci` at the root installs every
+        game, and `npm run dev -w <game>` serves one.
+
+        PixiJS 8 is the renderer. `npm run build -w <game>` produces `dist/`,
+        which is what the screenshot harness serves.
+
+        ## Boot it like this, and not with top-level await
+
+        ```js
+        import { Application, Graphics, Text } from "pixi.js";
+
+        async function main() {
+          const app = new Application();
+          await app.init({ width: 480, height: 480, background: "#101014", antialias: true });
+          document.body.appendChild(app.canvas);
+          // ... build the scene on app.stage
+        }
+
+        main();
+        ```
+
+        **The entry module must not use top-level `await`.** Pixi finishes
+        booting by dynamically importing its browser extensions; Rollup puts
+        that in a second chunk, and that chunk cannot finish evaluating while
+        the entry chunk it was split from is suspended on a top-level await.
+        Nothing throws. `app.init()` simply never resolves, and the page sits
+        there with no canvas and no error in the console — an hour of your
+        life if you do not know it. Put the boot inside `async function
+        main()` and call it. Do not "fix" this with
+        `rollupOptions.output.inlineDynamicImports`, which trades the hang
+        for a temporal-dead-zone error at load.
+
+        ## Drawing and input
+
+        ```js
+        const cell = new Graphics().rect(0, 0, 160, 160).fill("#1e1e26");
+        cell.position.set(x, y);
+        cell.eventMode = "static";              // required, or it gets no events
+        cell.on("pointerdown", () => play(i));
+        app.stage.addChild(cell);
+
+        const label = new Text({ text: "X", style: { fill: "#e34d4d", fontSize: 96 } });
+        label.anchor.set(0.5);
+        ```
+
+        For clicks anywhere, give the stage `eventMode = "static"` and
+        `hitArea = app.screen` and read `e.global`. Keyboard is plain DOM:
+        `window.addEventListener("keydown", ...)`.
+
+        Animate from the ticker's delta — `app.ticker.add((t) => ...)` with
+        `t.deltaTime` — never from `Date.now()`, so a screenshot script is
+        reproducible.
+
+        ## Screenshots
+
+        ```sh
+        tools/web-shot <game-dir> <out-dir> "wait:20 shot:board click:150,150 wait:5 shot:x-plays"
+        ```
+
+        It builds the game, serves `dist/` on a loopback port, drives it in
+        headless Chromium and writes the PNGs. Same steps as the LÖVE
+        harness — `wait:N` counts animation frames — with Chromium key names
+        (`Enter`, `Escape`, `Space`, `ArrowLeft`). `WEB_SHOT_SIZE=640x480`
+        sets the viewport, `WEB_SHOT_VERBOSE=1` echoes the page's console.
+
+        An uncaught exception or a `console.error` in the page fails the run.
+        That is deliberate: it makes the harness a test and not just a
+        camera. Do not silence a real error to get a green run.
+
+        ## When it goes wrong
+
+        - **"waiting for locator('canvas')"** — the canvas never appeared.
+          Nine times in ten it is the top-level await above. Otherwise run
+          with `WEB_SHOT_VERBOSE=1` and read what the page said.
+        - **Nothing responds to clicks** — a display object needs
+          `eventMode = "static"` (and a container needs a `hitArea`).
+        - **The build fails on a bare import** — the game's own
+          `package.json` must list what it imports; the root one only holds
+          the tools.
+    - name: screenshots-in-prs
+      content: |
+        ---
+        name: screenshots-in-prs
+        description: Putting screenshots of a game into a GitHub pull request so they render for a reviewer and keep rendering after the branch is deleted. Use whenever opening or updating a pull request that changes what a game looks like.
+        ---
+
+        # A pull request that changes a game shows the game
+
+        A reviewer decides whether a game is right by looking at it. From a
+        pull request the only way they can do that is if the pictures are in
+        it. This is not a nicety in this repo — it is why the screenshot
+        harness exists at all.
+
+        ## The four steps
+
+        **1. Take them with the harness, into the game's own directory.**
+
+        ```sh
+        tools/love-shot tictactoe tictactoe/screenshots \
+          "wait:20 shot:empty-board click:150,150 wait:5 shot:x-center wait:30 shot:o-replies"
+        # or, for a web game
+        tools/web-shot  tictactoe tictactoe/screenshots "..."
+        ```
+
+        **2. Commit them.**
+
+        ```sh
+        git add tictactoe/screenshots && git commit -m "..."
+        git push -u origin <branch>
+        ```
+
+        **3. Get the sha you actually pushed.**
+
+        ```sh
+        sha=$(git rev-parse HEAD)
+        ```
+
+        **4. Link them by that sha in the pull request body.** A branch name
+        stops resolving the moment the branch is deleted, and a broken image
+        in a merged pull request is a review you cannot reread:
+
+        ```md
+        ## Screenshots
+
+        | an empty board | X takes the centre | O replies |
+        |---|---|---|
+        | ![](https://raw.githubusercontent.com/jhgaylor/games/SHA/tictactoe/screenshots/empty-board.png) | ![](https://raw.githubusercontent.com/jhgaylor/games/SHA/tictactoe/screenshots/x-center.png) | ![](https://raw.githubusercontent.com/jhgaylor/games/SHA/tictactoe/screenshots/o-replies.png) |
+        ```
+
+        Write the body to a file and pass it with `gh pr create --body-file`,
+        so the markdown survives the shell.
+
+        ## Choosing the shots
+
+        Three or four that answer what a reviewer would ask, not a gallery:
+        the starting state, the interesting middle, and the end — a win, a
+        draw, a game over. If you changed one screen, show that screen before
+        and after. Name them for what they show (`x-wins-diagonal`), never
+        `shot1`.
+
+        Two rules for the pictures themselves: take them from a script, so
+        anyone can reproduce them by running the same line, and never hand-
+        edit or crop a PNG afterwards — a screenshot that does not come out
+        of the harness is a claim rather than evidence.
+
+        If a change is genuinely invisible — a refactor, a tool, a test — say
+        so in the pull request. A screenshot of nothing having changed is
+        worse than no screenshot.
