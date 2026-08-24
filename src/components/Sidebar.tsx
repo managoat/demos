@@ -6,6 +6,10 @@
  * same teammate there, on that item. Items with a live computer first,
  * done items folded away.
  *
+ * Nothing here reorders itself while you read it: the order comes from
+ * lib/sidebar, which ranks on start times, not on activity. Work in flight
+ * shows as a dot on the row it belongs to.
+ *
  * The row at the top of the tree adds a work item where you read them:
  * type a title, Enter, and it is there — the composer stays open for the
  * next one, and the page you are on does not move.
@@ -13,7 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useProject } from "../store";
 import { href, useRoute } from "../router";
-import { attachable, clampWidth, computerLabel, groupByItem, hueOf, loadSidebarWidth, relativeTime, saveSidebarWidth, type Computer, type ItemGroup } from "../lib/sidebar";
+import { attachable, clampWidth, coarseTime, computerLabel, groupByItem, hueOf, loadSidebarWidth, saveSidebarWidth, type Computer, type ItemGroup } from "../lib/sidebar";
 import type { WorkItem } from "../lib/workbench";
 import type { JoinTarget } from "../lib/start";
 import { StartDialog } from "./StartDialog";
@@ -287,7 +291,7 @@ function ConvLink({ c, current, onNavigate }: { c: Conversation; current: boolea
           ✕
         </span>
       ) : null}
-      <span className="conv-link-when">{relativeTime(c.last_active_at ?? c.updated_at ?? c.inserted_at)}</span>
+      <span className="conv-link-when">{coarseTime(c.last_active_at ?? c.updated_at ?? c.inserted_at)}</span>
     </a>
   );
 }

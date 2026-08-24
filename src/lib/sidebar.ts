@@ -9,6 +9,17 @@
  * A computer is live while a conversation still holds it (pending, running
  * or idle); the sandbox record, when we have it, has the last word. Fountain
  * attaches a second conversation only to a `ready` or `suspended` sandbox.
+ *
+ * **The tree does not reorder itself.** It once sorted every level by
+ * `last_active_at`, which Fountain moves on every line of runtime output —
+ * so two agents talking at once swapped rows under the pointer, several
+ * times a second, and the explorer was unreadable exactly when it had the
+ * most to say. Every rank here is a *start* time instead: `createdAt` for a
+ * work item, the first conversation for a computer, `inserted_at` for a
+ * conversation. Newest first, so a thing you just started is at the top of
+ * its list, and then it stays where you left it. A row moves only when you
+ * move it (start something, mark an item done) or when its computer dies —
+ * and a turn running is told by the dot beside it, not by its position.
  */
 import type { Conversation, SandboxRecord } from "../types";
 import { parseChannel } from "../../shared/channel";
@@ -22,28 +33,38 @@ export interface Computer {
   sandboxId: string | null;
   agentId: string | null;
   sandbox: SandboxRecord | null;
-  /** Most recent activity first. */
+  /** Newest first, and each one keeps its place. */
   conversations: Conversation[];
   live: boolean;
   /** A turn is in flight on it. */
   busy: boolean;
   unread: boolean;
-  /** ISO time of the latest activity on it. */
+  /** ISO time of the latest activity on it — shown, never sorted on. */
   latest: string;
+  /** ISO time its first conversation started: its fixed place in the item. */
+  startedAt: string;
 }
 
 function activityOf(c: Conversation): string {
   return c.last_active_at ?? c.updated_at ?? c.inserted_at ?? "";
 }
 
-/** Conversations sorted by activity, most recent first. */
-export function byActivity(convs: Conversation[]): Conversation[] {
-  return [...convs].sort((a, b) => activityOf(b).localeCompare(activityOf(a)));
+/**
+ * When a conversation began. Unlike `last_active_at` this is written once,
+ * so a row ranked by it holds still while the agent talks.
+ */
+function startOf(c: Conversation): string {
+  return c.inserted_at ?? "";
+}
+
+/** Conversations newest first, by when they started. Ties break on id, so the order is total. */
+export function byStart(convs: Conversation[]): Conversation[] {
+  return [...convs].sort((a, b) => startOf(b).localeCompare(startOf(a)) || a.id.localeCompare(b.id));
 }
 
 export function computersOf(convs: Conversation[], sandboxes: ReadonlyMap<string, SandboxRecord>): Computer[] {
   const byKey = new Map<string, Computer>();
-  for (const c of byActivity(convs)) {
+  for (const c of byStart(convs)) {
     const key = c.sandbox_id ?? `conv:${c.id}`;
     let comp = byKey.get(key);
     if (!comp) {
@@ -57,6 +78,7 @@ export function computersOf(convs: Conversation[], sandboxes: ReadonlyMap<string
         busy: false,
         unread: false,
         latest: "",
+        startedAt: "",
       };
       byKey.set(key, comp);
     }
@@ -66,16 +88,24 @@ export function computersOf(convs: Conversation[], sandboxes: ReadonlyMap<string
     if (c.unread) comp.unread = true;
     const at = activityOf(c);
     if (at > comp.latest) comp.latest = at;
+    // The conversations arrive newest first, so the last one seen is the
+    // oldest: when the computer came into being.
+    comp.startedAt = startOf(c);
   }
   for (const comp of byKey.values()) comp.live = isLive(comp);
   return [...byKey.values()].sort((a, b) => {
     if (a.live !== b.live) return a.live ? -1 : 1;
-    return b.latest.localeCompare(a.latest);
+    return b.startedAt.localeCompare(a.startedAt) || a.key.localeCompare(b.key);
   });
 }
 
 export function isLive(c: Pick<Computer, "sandboxId" | "sandbox" | "conversations">): boolean {
-  if (!c.sandboxId) return false;
+  // No sandbox id yet: a conversation being started is a computer coming up,
+  // not a dead one. Counting it live keeps it at the top of its item from the
+  // moment you start it, instead of sitting under the dead computers until
+  // Fountain hands back the id and then leaping. Anything else without an id
+  // is a computer we have no record of, and sinks.
+  if (!c.sandboxId) return c.conversations.some((x) => x.status === "pending" || x.status === "running");
   if (c.sandbox && (c.sandbox.status === "terminated" || c.sandbox.status === "failed")) return false;
   return c.conversations.some((x) => LIVE_STATUSES.has(x.status));
 }
@@ -88,6 +118,21 @@ export function attachable(c: Pick<Computer, "sandbox">): boolean {
 /** The work item a conversation belongs to, off its channel. */
 export function itemIdOf(c: Pick<Conversation, "channel_id">): string | null {
   return parseChannel(c.channel_id)?.itemId ?? null;
+}
+
+/**
+ * The explorer's clock. Like `relativeTime`, but it does not count seconds.
+ * The list re-renders on every burst of output — three times a second while
+ * an agent talks — so a seconds counter reflows the row it is in that often,
+ * for no news: the dot beside it already says the turn is running. Under a
+ * minute is just "now".
+ */
+export function coarseTime(iso: string | null | undefined, now = Date.now()): string {
+  if (!iso) return "—";
+  const secs = Math.floor((now - Date.parse(iso)) / 1000);
+  if (Number.isNaN(secs)) return "—";
+  if (secs < 60) return "now";
+  return relativeTime(iso, now);
 }
 
 /** Ns / Nm / Nh / Nd ago. */
@@ -118,8 +163,10 @@ export interface ItemGroup<I extends { id: string; title: string; status: string
 
 /**
  * Work items with their computers: items that have a live computer first,
- * then by latest activity; done items last. An item with no conversations
- * yet is kept, so it can be started from the sidebar.
+ * then newest item first; done items last. An item with no conversations
+ * yet is kept, so it can be started from the sidebar. Ranking on the item's
+ * own creation time rather than on its activity is what keeps the list
+ * still while its agents talk — see the module doc.
  */
 export function groupByItem<I extends { id: string; title: string; status: string; createdAt: string }>(
   items: I[],
@@ -150,7 +197,7 @@ export function groupByItem<I extends { id: string; title: string; status: strin
     const db = b.item.status === "done" ? 1 : 0;
     if (da !== db) return da - db;
     if (a.live !== b.live) return a.live ? -1 : 1;
-    return (b.latest || b.item.createdAt).localeCompare(a.latest || a.item.createdAt);
+    return b.item.createdAt.localeCompare(a.item.createdAt) || a.item.id.localeCompare(b.item.id);
   });
 }
 
