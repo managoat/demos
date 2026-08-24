@@ -5,8 +5,12 @@
  * was started for; "+" on a live one opens another conversation with the
  * same teammate there, on that item. Items with a live computer first,
  * done items folded away.
+ *
+ * The row at the top of the tree adds a work item where you read them:
+ * type a title, Enter, and it is there — the composer stays open for the
+ * next one, and the page you are on does not move.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useProject } from "../store";
 import { href, useRoute } from "../router";
 import { attachable, clampWidth, computerLabel, groupByItem, hueOf, loadSidebarWidth, relativeTime, saveSidebarWidth, type Computer, type ItemGroup } from "../lib/sidebar";
@@ -16,7 +20,7 @@ import { StartDialog } from "./StartDialog";
 import type { Conversation } from "../types";
 
 export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }) {
-  const { project, items, conversations, agents, sandboxes } = useProject();
+  const { project, items, conversations, agents, sandboxes, createItem } = useProject();
   const route = useRoute();
   const [dialog, setDialog] = useState<{ join: JoinTarget | null; agentId: string | null; itemId: string | null } | null>(null);
   const [showDone, setShowDone] = useState(false);
@@ -24,7 +28,11 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
   const [tick, setTick] = useState(0);
   const [width, setWidth] = useState(() => loadSidebarWidth());
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [creating, setCreating] = useState(false);
   const aside = useRef<HTMLElement>(null);
+  const newInput = useRef<HTMLInputElement>(null);
 
   // Drag the right edge: these titles are longer than any default width.
   const startResize = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
@@ -63,6 +71,27 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
   useEffect(() => {
     if (currentItem) setExpanded(currentItem);
   }, [currentItem]);
+
+  // A title is the whole of a new item here; notes and teammates come after,
+  // on the item itself. Failure keeps what was typed — the store has toasted.
+  const addItem = async (e: FormEvent) => {
+    e.preventDefault();
+    const title = newTitle.trim();
+    if (!title || creating) return;
+    setCreating(true);
+    const created = await createItem(title);
+    setCreating(false);
+    if (!created) return;
+    setNewTitle("");
+    setExpanded(created.id);
+    newInput.current?.focus();
+  };
+
+  const openComposer = () => {
+    setAdding(true);
+    // Already open: the click came from the empty state or a second press.
+    newInput.current?.focus();
+  };
 
   const toggle = (key: string, isOpen: boolean) =>
     setCollapsed((s) => {
@@ -182,9 +211,45 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
         </button>
       </div>
       <div className="sidebar-list">
+        {adding ? (
+          <form className="tree-row new-item" onSubmit={addItem}>
+            <span className="tree-twisty" aria-hidden="true">
+              ▸
+            </span>
+            <input
+              ref={newInput}
+              className="new-item-input"
+              value={newTitle}
+              autoFocus
+              disabled={creating}
+              placeholder="fix foo"
+              aria-label="New work item title"
+              onChange={(e) => setNewTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Escape") return;
+                setAdding(false);
+                setNewTitle("");
+              }}
+              onBlur={() => {
+                if (!newTitle.trim() && !creating) setAdding(false);
+              }}
+            />
+          </form>
+        ) : (
+          <button type="button" className="tree-row new-item-button" onClick={openComposer} title={`New work item in ${project.name}`}>
+            <span className="tree-twisty" aria-hidden="true">
+              +
+            </span>
+            <span className="ellipsis">new work item</span>
+          </button>
+        )}
         {items.length === 0 && (
           <div className="muted small sidebar-empty">
-            No work items in {project.name} yet. <a href={href.project(project.id)}>Add one</a>.
+            No work items in {project.name} yet.{" "}
+            <button type="button" className="linklike" onClick={openComposer}>
+              Add one
+            </button>
+            , or open <a href={href.project(project.id)}>the project</a>.
           </div>
         )}
         {openGroups.map(group)}

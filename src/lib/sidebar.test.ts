@@ -83,6 +83,15 @@ describe("groupByItem", () => {
     expect(g[2]!.computers).toEqual([]);
     expect(g[3]!.live).toBe(true); // done, but its computer is still up — shown last, not hidden
   });
+
+  // What the explorer's "new work item" row rests on: an item added there has
+  // no conversation yet, and still has to be where you can see it afterwards.
+  test("a just-created item sorts above the older quiet ones, under the live work", () => {
+    const fresh = { id: "fresh", title: "Fresh", status: "open", createdAt: "2026-08-24T06:00:00Z" };
+    const g = groupByItem([...items, fresh], convs, new Map());
+    expect(g.map((x) => x.item.id)).toEqual(["hot", "fresh", "cold", "quiet", "done"]);
+    expect(g[1]!.computers).toEqual([]);
+  });
 });
 
 test("hueOf is stable and in range", () => {

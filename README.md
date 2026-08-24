@@ -29,6 +29,9 @@ conversations.
 Each teammate's conversation gets its own computer, and a computer belongs
 to the work item it was started for — the checkout and the disk are that
 item's context, so the sidebar reads work item → computers → conversations.
+The row at the top of that tree starts a work item where you read them: type
+a title, press Enter, and it is in the list — the composer stays open for the
+next one, and the page you are on does not move.
 When a Fountain supports it (ADR 0023, *one sandbox, many conversations*),
 "**+**" on a computer that is already up opens a second conversation with
 the same teammate on the same machine, on the same item: shared checkout and
