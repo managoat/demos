@@ -235,7 +235,12 @@ const fountain = Bun.serve({
               acp: { command: "x", env: [{ name: "TOKEN", value: "ftn_supersecret" }] },
               odd: "not a map",
             },
-            skills: [{ name: "house-style", content: "# House style" }],
+            skills: [
+              { name: "house-style", content: "# House style" },
+              { name: "deploy", source: "acme/skills", ref: "v2" },
+            ],
+            system: "You are Coder. The staging password is hunter2.",
+            metadata: { team: "platform" },
           },
         ],
       });
@@ -672,8 +677,43 @@ describe("the project-scoped proxy", () => {
       expect(entry("gh").args).toEqual(["--repo", "acme/thing"]);
       expect(entry("workbench").url).toBe("https://workbench.inevitable.fyi/mcp");
       expect(mcp.odd).toBe("not a map");
-      expect(a!.skills).toEqual([{ name: "house-style", content: "# House style" }]);
     }
+  });
+
+  test("a skill's body is withheld from everyone, and its name and source are not", async () => {
+    // Nothing renders a SKILL.md body and this list is refetched on every
+    // project mount, so the kilobytes go — for the owner too, since the weight
+    // is the same in her browser. What the panel lists by survives.
+    for (const who of ["alice", "bob"]) {
+      const res = await call(who, "GET", `/f/${projectId}/api/agents`);
+      const text = await res.text();
+      expect(text).not.toContain("House style");
+      const [a] = (JSON.parse(text) as { data: { skills: Record<string, unknown>[] }[] }).data;
+      expect(a!.skills).toEqual([
+        { name: "house-style", content: "[withheld by the workbench]" },
+        { name: "deploy", source: "acme/skills", ref: "v2" },
+      ]);
+    }
+  });
+
+  test("a member does not get the owner's system prompts, and the owner does", async () => {
+    // `/api/agents` is the owner's whole account, not this project's team, so
+    // a member of one project would otherwise hold the standing instructions
+    // of every agent alice has — wider than what sharing a project means.
+    const member = await call("bob", "GET", `/f/${projectId}/api/agents`);
+    const bobText = await member.text();
+    expect(bobText).not.toContain("hunter2");
+    const [forBob] = (JSON.parse(bobText) as { data: Record<string, unknown>[] }).data;
+    expect(forBob!.system).toBe("[withheld by the workbench]");
+    expect(forBob!.metadata).toBe("[withheld by the workbench]");
+    // The teammate a picker has to show is all still there.
+    expect(forBob!.id).toBe("a1");
+    expect(forBob!.name).toBe("Coder");
+
+    const owner = await call("alice", "GET", `/f/${projectId}/api/agents`);
+    const [forAlice] = (JSON.parse(await owner.text()) as { data: Record<string, unknown>[] }).data;
+    expect(forAlice!.system).toBe("You are Coder. The staging password is hunter2.");
+    expect(forAlice!.metadata).toEqual({ team: "platform" });
   });
 
   test("the rest of the API is closed", async () => {

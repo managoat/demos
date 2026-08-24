@@ -169,6 +169,25 @@ visible. The proxy now replaces the values of every server's `env` and
 names. The names are the question — what is this teammate plugged into — and
 the values are the answer to nobody's.
 
+Two more fields go the same way, for two different reasons, and the reasons are
+worth keeping apart. An inline skill's `content` is the whole SKILL.md body:
+nothing renders it, the panel lists a skill by name, and this list is refetched
+on every project mount — so a few kilobytes per skill per agent were riding
+along on every page load for no reader. It is withheld for everyone, the owner
+included, because the weight is the same in her browser; if the panel ever
+wants to show a body it should ask for one on a route of its own, when a skill
+is expanded. Then `system` and `metadata`, which are withheld from a **member**
+and not from the owner. That route is the owner's whole *account* — the team
+picker needs agents that do not fit this project, so the list is forwarded
+unfiltered — and sharing one project should not hand over the standing
+instructions of every agent on the account, including ones no project of yours
+uses. A member gets the teammate: name, model, runtime, which skills, which
+servers. The owner gets their own account whole, exactly as they already do for
+environments and vaults. The role in that rule is not a softening of the MCP
+rule's refusal to have one: a credential is a secret from everybody and the
+owner reading it back changes nothing, while a system prompt is the owner's own
+writing and her key would fetch it from Fountain anyway.
+
 **What happened while you were away.** A work item opens on a digest of
 itself: turns finished, turns that failed, computers that went away, and —
 loudest — how many agents are blocked on a permission request, each one a
@@ -420,9 +439,12 @@ browser ──(session cookie)──▶ workbench server ──(owner's Fountain
   per-conversation call, forces the project's environment and vault on a new
   conversation, cuts full-text search down to hits in the project's
   conversations, lets a member see only the project's environment and
-  vault (the owner sees all), and withholds the values of every agent's MCP
-  `env` and `headers` — the two fields that exist to hold credentials — while
-  keeping their names. The owner's user-wide event stream
+  vault (the owner sees all), and shapes every agent on the way out: the values
+  of every MCP `env` and `headers` withheld from everyone — the two fields that
+  exist to hold credentials — while their names are kept, every inline skill's
+  body withheld from everyone because nothing reads it, and `system` and
+  `metadata` withheld from a member because that list is the owner's whole
+  account and not this project's team. The owner's user-wide event stream
   (`GET /api/events/stream`) is proxied the same way, filtered per project,
   with `event: workbench` records mixed in when another member changes an
   item or a setting — so every open screen follows along.

@@ -17,7 +17,9 @@
  *   GET  /api/sandboxes/:id                 one computer, if a conversation of the project is on it
  *   GET  /api/search                        full text, cut down to hits in this project's conversations
  *   GET  /api/agents, /api/agents/:id/avatar  the owner's agents (the team), with the values of
- *                                           every MCP server's `env` and `headers` withheld
+ *                                           every MCP server's `env` and `headers` withheld, every
+ *                                           inline skill's body withheld, and — for a member —
+ *                                           the owner's prose (`system`, `metadata`) withheld too
  *   GET  /api/environments, /api/vaults     the owner sees all; a member sees the project's
  *   GET  /api/events/stream                 the owner's stream, filtered to the project, plus
  *                                           `event: workbench` when items or settings change
@@ -110,7 +112,7 @@ export async function handleProxy(ctx: AppContext, req: Request, projectId: stri
     const res = await forward(client, req, path, url.search);
     if (!res.ok) return res;
     const body = (await res.json()) as { data?: unknown[] };
-    return json({ ...body, data: (body.data ?? []).map(withoutMcpSecrets) }, res.status);
+    return json({ ...body, data: (body.data ?? []).map((a) => visibleAgent(a, role)) }, res.status);
   }
 
   if (method === "GET" && /^\/api\/agents\/[^/]+\/avatar$/.test(path)) {
@@ -133,8 +135,63 @@ export async function handleProxy(ctx: AppContext, req: Request, projectId: stri
 
 // ── agents ───────────────────────────────────────────────────────────────
 
-/** What a value that carried a credential is replaced with, so the shape survives and the secret does not. */
+/** What a value the workbench will not pass on is replaced with, so the shape survives and the value does not. */
 const WITHHELD = "[withheld by the workbench]";
+
+/**
+ * An agent as this reader may see it. Two rules, and they are answers to two
+ * different questions, which is why one of them has a role in it and the other
+ * does not.
+ *
+ *   *Is this a secret?* — `mcp_servers[*].env` and `.headers`. Nobody sees the
+ *   values, owner included; see `withoutMcpSecrets`.
+ *
+ *   *Does this page need it?* — `skills[*].content`, the whole SKILL.md body of
+ *   every inline skill. Nothing renders it: the panel lists a skill by name
+ *   (`skillsOf` in `src/lib/details.ts` reads `name`, `source` and `ref`), and
+ *   this list is refetched on every project mount (`refreshResources`). A few
+ *   kilobytes per skill per agent per page load, for a field with no reader, is
+ *   not a payload the workbench should be moving. It goes for everyone. If the
+ *   panel later wants to show a body — it is a fair thing to want — it should
+ *   come back on a route of its own, asked for when a skill is expanded, and
+ *   that route gets to decide who may read it on its own terms.
+ *
+ *   *Is this the owner's to hand out?* — `system` and `metadata`. A member is
+ *   a member of one *project*, but this route is the owner's whole account:
+ *   the team picker needs agents that do not fit this project, so the list is
+ *   forwarded unfiltered. Sharing one project therefore hands over the standing
+ *   instructions of every agent on the account, including ones no project of
+ *   yours uses, which is wider than what a person thinks they are sharing when
+ *   they type an email into Settings & sharing. So a member gets the teammate —
+ *   name, model, runtime, which skills and which servers — and not the owner's
+ *   prose. The owner sees their own account whole, exactly as the environments
+ *   and vaults rule below already has it.
+ *
+ * The role in that last rule is deliberate and is not a softening of the MCP
+ * rule's refusal to have one. A credential in `headers` is a secret from
+ * everyone and the owner reading it back changes nothing; a system prompt is
+ * the owner's own writing, and withholding it from the person who wrote it
+ * would buy nothing they could not get from Fountain with their own key.
+ */
+function visibleAgent(agent: unknown, role: Role): unknown {
+  const out = withoutMcpSecrets(agent);
+  if (!isRecord(out)) return out;
+  const shaped: Record<string, unknown> = { ...out, ...withoutSkillBodies(out.skills) };
+  if (role === "owner") return shaped;
+  for (const field of ["system", "metadata"]) if (field in shaped) shaped[field] = WITHHELD;
+  return shaped;
+}
+
+/**
+ * The `skills` of an agent with every inline body replaced, or nothing to
+ * merge when there are none. The entry keeps its `name`, and keeps the absence
+ * of a `source` that is what marks it inline — so the panel still tells an
+ * inline skill from a github one, and still says which.
+ */
+function withoutSkillBodies(skills: unknown): { skills?: unknown } {
+  if (!Array.isArray(skills)) return {};
+  return { skills: skills.map((s) => (isRecord(s) && "content" in s ? { ...s, content: WITHHELD } : s)) };
+}
 
 /**
  * An agent, with the parts of its MCP configuration that are *designed* to
@@ -156,7 +213,9 @@ const WITHHELD = "[withheld by the workbench]";
  *
  * The owner is not exempt. Their own key would read these from Fountain
  * directly, so exempting them buys nothing and costs the one rule — and a
- * rule with a role in it is one an later route can forget to apply.
+ * rule with a role in it is one an later route can forget to apply. (One of
+ * the rules in `visibleAgent` does have a role in it, for a reason said
+ * there: it is answering a different question than this one.)
  *
  * What this does **not** claim: a credential written into an `args` entry or
  * a query string on a `url` still passes, because those fields are the
