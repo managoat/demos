@@ -532,3 +532,15 @@ body.resizing-col { cursor: col-resize; user-select: none; }
 .app.ide .conv-link.retired .conv-link-title { color: var(--muted); }
 .conv-link-when { flex-shrink: 0; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .conv-flag.failed { flex-shrink: 0; font-size: 10px; color: var(--danger); }
+
+/* one work item open at a time: the header is the row you click */
+.tree-twisty { width: 14px; height: 18px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 9px; line-height: 1; justify-content: center; flex-shrink: 0; }
+.tree-twisty:hover { background: transparent; color: var(--text); }
+.app.ide .sidebar-item { border-radius: 4px; }
+.app.ide .sidebar-item.open { background: color-mix(in srgb, var(--bg-2) 55%, transparent); padding-bottom: 4px; }
+.app.ide .sidebar-item + .sidebar-item { margin-top: 1px; }
+.app.ide .sidebar-item-head { padding: 2px 4px 2px 2px; gap: 3px; }
+.app.ide .sidebar-item.open > .sidebar-item-head { position: sticky; top: 0; z-index: 2; background: var(--bg-1); border-radius: 4px 4px 0 0; }
+.app.ide .sidebar-item-title { flex: 1; min-width: 0; }
+.tree-count { flex-shrink: 0; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; padding: 0 3px; }
+.tree-empty { font-size: 11px; padding: 2px 6px 4px 26px; }

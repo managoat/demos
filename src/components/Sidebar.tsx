@@ -23,6 +23,7 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [tick, setTick] = useState(0);
   const [width, setWidth] = useState(() => loadSidebarWidth());
+  const [expanded, setExpanded] = useState<string | null>(null);
   const aside = useRef<HTMLElement>(null);
 
   // Drag the right edge: these titles are longer than any default width.
@@ -57,6 +58,11 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
   const busyCount = groups.reduce((n, g) => n + g.computers.filter((c) => c.busy).length, 0);
   const currentId = route.page === "conversation" ? route.conversationId : null;
   const currentItem = route.page === "item" ? route.itemId : route.page === "conversation" ? (groups.find((g) => g.computers.some((c) => c.conversations.some((x) => x.id === currentId)))?.item.id ?? null) : null;
+
+  // One work item open at a time, and it is the one you are looking at.
+  useEffect(() => {
+    if (currentItem) setExpanded(currentItem);
+  }, [currentItem]);
 
   const toggle = (key: string, isOpen: boolean) =>
     setCollapsed((s) => {
@@ -119,28 +125,49 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
     );
   };
 
-  const group = (g: ItemGroup<WorkItem>) => (
-    <section key={g.item.id} className={`sidebar-item ${g.item.id === currentItem ? "current" : ""}`}>
-      <div className="sidebar-item-head tree-row">
-        <a href={href.item(project.id, g.item.id)} className="sidebar-item-title ellipsis" onClick={onNavigate} title={g.item.title}>
-          <span className="tree-icon">▤</span>
-          {g.item.title}
+  const group = (g: ItemGroup<WorkItem>) => {
+    const isOpen = expanded === g.item.id;
+    const up = g.computers.filter((c) => c.live).length;
+    const convs = g.computers.reduce((n, c) => n + c.conversations.length, 0);
+    return (
+      <section key={g.item.id} className={`sidebar-item ${g.item.id === currentItem ? "current" : ""} ${isOpen ? "open" : ""}`}>
+        <div className="sidebar-item-head tree-row">
+          <button
+            type="button"
+            className="tree-twisty"
+            aria-expanded={isOpen}
+            aria-label={isOpen ? `Collapse ${g.item.title}` : `Expand ${g.item.title}`}
+            onClick={() => setExpanded(isOpen ? null : g.item.id)}
+          >
+            {isOpen ? "▾" : "▸"}
+          </button>
+          <a href={href.item(project.id, g.item.id)} className="sidebar-item-title ellipsis" onClick={onNavigate} title={g.item.title}>
+            {g.item.title}
+          </a>
           {g.unread && <span className="unread-dot" />}
-        </a>
-        <span className="muted small">{g.computers.filter((c) => c.live).length > 0 ? `${g.computers.filter((c) => c.live).length} up` : ""}</span>
-        <button
-          type="button"
-          className="icon small-icon"
-          title={`New conversation on "${g.item.title}" — a new computer`}
-          disabled={agents.size === 0}
-          onClick={() => setDialog({ join: null, agentId: null, itemId: g.item.id })}
-        >
-          +
-        </button>
-      </div>
-      {g.computers.map((comp) => computer(g.item, comp))}
-    </section>
-  );
+          {g.busy && <span className="live-dot" title="a turn is running" />}
+          {!isOpen && convs > 0 && (
+            <span className="tree-count" title={`${convs} conversation${convs === 1 ? "" : "s"}${up ? `, ${up} computer${up === 1 ? "" : "s"} up` : ""}`}>
+              {up ? `${up}/${convs}` : convs}
+            </span>
+          )}
+          <button
+            type="button"
+            className="icon small-icon"
+            title={`New conversation on "${g.item.title}" — a new computer`}
+            disabled={agents.size === 0}
+            onClick={() => {
+              setExpanded(g.item.id);
+              setDialog({ join: null, agentId: null, itemId: g.item.id });
+            }}
+          >
+            +
+          </button>
+        </div>
+        {isOpen && (g.computers.length > 0 ? g.computers.map((comp) => computer(g.item, comp)) : <div className="tree-empty muted">no computer yet</div>)}
+      </section>
+    );
+  };
 
   return (
     <aside className={`sidebar ${open ? "open" : ""}`} ref={aside} style={{ width }}>
