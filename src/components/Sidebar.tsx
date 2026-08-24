@@ -11,7 +11,6 @@ import { useProject } from "../store";
 import { href, useRoute } from "../router";
 import { attachable, clampWidth, computerLabel, groupByItem, hueOf, loadSidebarWidth, relativeTime, saveSidebarWidth, type Computer, type ItemGroup } from "../lib/sidebar";
 import type { WorkItem } from "../lib/workbench";
-import { AgentAvatar, initials } from "./AgentAvatar";
 import { StartDialog, type JoinTarget } from "./StartDialog";
 import type { Conversation } from "../types";
 
@@ -90,13 +89,6 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
           className={`computer-head ${comp.live ? "live" : "gone"}`}
           title={`${agent?.name ?? newest?.runtime ?? "agent"} on ${computerLabel(comp)}${comp.sandbox ? ` (${comp.sandbox.status})` : ""} — ${comp.conversations.length} conversation${comp.conversations.length === 1 ? "" : "s"}`}
         >
-          {agent ? (
-            <AgentAvatar agent={agent} size={18} />
-          ) : (
-            <span className="avatar" style={{ width: 18, height: 18, fontSize: 8 }}>
-              {initials(newest?.runtime ?? "?") || "?"}
-            </span>
-          )}
           <span className="computer-name ellipsis">{agent?.name ?? newest?.runtime ?? "agent"}</span>
           <span className="computer-state">
             {comp.busy ? <span className="live-dot" /> : null}

@@ -544,3 +544,16 @@ body.resizing-col { cursor: col-resize; user-select: none; }
 .app.ide .sidebar-item-title { flex: 1; min-width: 0; }
 .tree-count { flex-shrink: 0; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; padding: 0 3px; }
 .tree-empty { font-size: 11px; padding: 2px 6px 4px 26px; }
+
+/* the colour bar carries the computer; the glyphs and the avatar were noise */
+.app.ide .sidebar summary.computer-head::before { content: none; }
+.app.ide .conv-link-title::before { content: none; }
+.app.ide .sidebar summary.computer-head { padding-left: 8px; }
+/* the disclosure and the + buttons appear when the pointer is in the explorer */
+.app.ide .sidebar .tree-twisty, .app.ide .sidebar-list .icon.small-icon { opacity: 0; transition: opacity .1s ease; }
+.app.ide .sidebar:hover .tree-twisty,
+.app.ide .sidebar:hover .sidebar-list .icon.small-icon,
+.app.ide .sidebar :focus-visible.tree-twisty,
+.app.ide .sidebar-list :focus-visible.icon.small-icon { opacity: 1; }
+/* except the one on the item you have open — that is where you start a conversation */
+.app.ide .sidebar-item.open > .sidebar-item-head .tree-twisty { opacity: 1; }
