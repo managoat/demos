@@ -63,8 +63,21 @@ function projectDto(ctx: AppContext, p: ProjectRow, role: Role, counts?: { open:
   };
 }
 
-function itemDto(w: ItemRow): ItemDto {
+export function itemDto(w: ItemRow): ItemDto {
   return { id: w.id, projectId: w.project_id, title: w.title, notes: w.notes, status: w.status === "done" ? "done" : "open", agentIds: parseAgentIds(w.agent_ids), createdAt: w.created_at };
+}
+
+/** A fresh work item, with the limits and defaults that apply wherever one is made — the API, or an agent over MCP. */
+export function newItemRow(projectId: string, title: unknown, notes: unknown): ItemRow {
+  return {
+    id: newId(),
+    project_id: projectId,
+    title: str(title, 300).trim() || "Untitled work item",
+    notes: str(notes, 20000),
+    status: "open",
+    agent_ids: "[]",
+    created_at: now(),
+  };
 }
 
 // ── projects ─────────────────────────────────────────────────────────────
@@ -188,15 +201,7 @@ export async function createItem(ctx: AppContext, req: Request, id: string): Pro
   const user = await authenticate(ctx, req);
   projectAccess(ctx, user, id);
   const body = await readJson(req);
-  const row: ItemRow = {
-    id: newId(),
-    project_id: id,
-    title: str(body.title, 300).trim() || "Untitled work item",
-    notes: str(body.notes, 20000),
-    status: "open",
-    agent_ids: "[]",
-    created_at: now(),
-  };
+  const row = newItemRow(id, body.title, body.notes);
   ctx.db.insertItem(row);
   ctx.events.emit(id, { kind: "items" });
   return json({ data: itemDto(row) }, 201);

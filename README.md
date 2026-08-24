@@ -54,6 +54,20 @@ bill for them do not outlive it. The button asks first when there is
 something to lose, and the app says what actually went. Reopening an item
 brings nothing back: it is new conversations from there.
 
+**A teammate can file the work itself.** `POST /mcp` is the work-item tree as
+MCP tools — `list_projects`, `list_work_items`, `create_work_item`,
+`update_work_item` — so "split this into three items" is something the agent
+you are talking to can just do, and the sidebar fills in while it answers.
+Authentication is a Fountain key in `Authorization: Bearer …`, which is what a
+sandbox already holds in `$FOUNTAIN_TOKEN`: the workbench asks Fountain whose
+key it is and gets that person's projects, exactly as sign-in does. A key
+whose email has never signed in here is refused. Send
+`X-Fountain-Conversation-Id` as well and the session is pinned to that
+conversation's project — read off its `channel_id` — so a sandbox reaches only
+the work it is on and no tool has to be told which project it means. Marking
+an item **done** is deliberately not a tool: that retires the item's
+conversations and takes its computers down, quite possibly the caller's own.
+
 **Themes.** The top bar's ☀/☾/◐ opens a colour-scheme menu the way an editor
 has one: follow the OS, or pick a palette — solarized, nord, dracula, gruvbox,
 tokyo night, one dark, catppuccin latte. Hovering a line previews it on the
@@ -90,6 +104,31 @@ browser ──(session cookie)──▶ workbench server ──(owner's Fountain
   (`GET /api/events/stream`) is proxied the same way, filtered per project,
   with `event: workbench` records mixed in when another member changes an
   item or a setting — so every open screen follows along.
+- **The MCP server** (`server/mcp.ts`) is `POST /mcp`: streamable HTTP, one
+  JSON-RPC message per POST, the shape Fountain's own MCP endpoints use. It
+  reaches Fountain only to ask who a key belongs to (`GET /api/auth/me`) and,
+  when the caller names a conversation, to read that one conversation on the
+  caller's own key; everything else it answers from the workbench's own
+  database. It is not a second way into Fountain — `server/proxy.ts` stays the
+  only boundary a member's conversations cross.
+
+  Point a teammate at it by putting it on the Fountain agent, which gives the
+  key-holder's whole tree (tools take a `project` argument):
+
+  ```json
+  { "mcp_servers": { "workbench": {
+      "type": "http",
+      "url": "https://workbench.inevitable.fyi/mcp",
+      "headers": { "Authorization": "Bearer ftn_…" }
+  } } }
+  ```
+
+  The pinned mode is the better one and needs Fountain to inject the server
+  per conversation, the way it already does for the team tools
+  (`Fountain.Team.conversation_mcp_servers/2`): only there do the sandbox's own
+  per-conversation token and `X-Fountain-Conversation-Id` reach the headers.
+  This side is ready for it.
+
 - **Recovery.** A conversation's membership is also recorded on Fountain, in
   its `channel_id`, as `workbench:<project>/<item>/<tag>` — one channel per
   conversation, because a Fountain channel binds a single conversation and a
@@ -153,6 +192,7 @@ server/
   auth.ts            sign-in: verify the key with Fountain, keep it, issue the session
   projects.ts        projects, members, items; recovery and import
   proxy.ts           Fountain as seen from inside one project, on the owner's key
+  mcp.ts             the work items as MCP tools, for an agent holding a Fountain key
   db.ts              SQLite: users, sessions, projects, members, items
   crypto.ts          keys at rest, session token hashing
 shared/

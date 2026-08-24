@@ -4,6 +4,7 @@ import type { Config } from "./config";
 import { ProjectEvents } from "./context";
 import { Cipher } from "./crypto";
 import { Db } from "./db";
+import { resetMcpCache } from "./mcp";
 import { resetProxyCache } from "./proxy";
 
 // ── a fake Fountain ──────────────────────────────────────────────────────
@@ -24,9 +25,11 @@ const KEYS: Record<string, { id: string; email: string }> = {
   "key-alice": { id: "u-alice", email: "Alice@Example.com" },
   "key-bob": { id: "u-bob", email: "bob@example.com" },
   "key-carol": { id: "u-carol", email: "carol@example.com" },
+  // A real Fountain account that has never signed in to the workbench.
+  "key-dave": { id: "u-dave", email: "dave@example.com" },
 };
 
-const convs: Record<string, FakeConv[]> = { "key-alice": [], "key-bob": [], "key-carol": [] };
+const convs: Record<string, FakeConv[]> = { "key-alice": [], "key-bob": [], "key-carol": [], "key-dave": [] };
 const posted: { key: string; body: Record<string, unknown> }[] = [];
 /** Conversations this fake was asked to terminate; one whose id starts with `stuck` refuses. */
 const terminated: string[] = [];
@@ -127,6 +130,7 @@ afterAll(() => {
 
 beforeEach(() => {
   resetProxyCache();
+  resetMcpCache();
 });
 
 const cookies: Record<string, string> = {};
@@ -491,5 +495,155 @@ describe("recovery", () => {
     expect(db.getProject(projectId)!.owner_email).toBe("alice@example.com");
     expect(db.getItem("olditem")!.status).toBe("done");
     expect(db.getItem("x")).toBeNull();
+  });
+});
+
+describe("the MCP server", () => {
+  /** One JSON-RPC message, as an agent's client would send it. */
+  async function rpc(key: string | null, method: string, params?: unknown, headers: Record<string, string> = {}): Promise<Response> {
+    const h: Record<string, string> = { "content-type": "application/json", ...headers };
+    if (key) h.authorization = `Bearer ${key}`;
+    const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, ...(params === undefined ? {} : { params }) });
+    return app(new Request("http://wb.test/mcp", { method: "POST", headers: h, body }));
+  }
+
+  /** A tool call, unwrapped: its text, and the JSON in it when it is not an error. */
+  async function tool(key: string, name: string, args: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
+    const res = await rpc(key, "tools/call", { name, arguments: args }, headers);
+    const { result } = (await res.json()) as { result: { content: { text: string }[]; isError: boolean } };
+    const text = result.content[0]!.text;
+    const value: unknown = result.isError ? null : JSON.parse(text);
+    return { failed: result.isError, text, value };
+  }
+
+  /** Alice's conversations: one on her project's first item, one that is not the workbench's at all. */
+  beforeAll(() => {
+    const conv = (id: string, channel: string | null): FakeConv => ({
+      id,
+      channel_id: channel,
+      title: null,
+      agent_id: "a1",
+      environment_id: "e1",
+      vault_id: "v1",
+      sandbox_id: "sbM",
+      status: "running",
+      inserted_at: "2026-08-23T00:00:00Z",
+    });
+    convs["key-alice"] = [conv("m1", `workbench:${projectId}/${itemId}/ffffffffffff`), conv("m2", "fountain:team")];
+  });
+
+  test("a Fountain key is the credential; nothing else gets in", async () => {
+    expect((await rpc(null, "initialize")).status).toBe(401);
+    expect((await rpc("nope", "initialize")).status).toBe(401);
+    // A real Fountain account is not yet a workbench one: the header does not create people.
+    const dave = await rpc("key-dave", "initialize");
+    expect(dave.status).toBe(401);
+    expect(((await dave.json()) as { error: string }).error).toBe("unknown_user");
+    expect((await app(new Request("http://wb.test/mcp", { headers: { authorization: "Bearer key-alice" } }))).status).toBe(405);
+  });
+
+  test("initialize and tools/list", async () => {
+    const init = (await (await rpc("key-alice", "initialize")).json()) as { result: { protocolVersion: string; serverInfo: { name: string } } };
+    expect(init.result.protocolVersion).toBe("2025-06-18");
+    expect(init.result.serverInfo.name).toBe("fountain-workbench");
+    const list = (await (await rpc("key-alice", "tools/list")).json()) as { result: { tools: { name: string }[] } };
+    expect(list.result.tools.map((t) => t.name)).toEqual(["list_projects", "list_work_items", "create_work_item", "update_work_item"]);
+    expect((await (await rpc("key-alice", "nonsense/method")).json()).error.code).toBe(-32601);
+  });
+
+  test("a notification is not answered", async () => {
+    const res = await app(
+      new Request("http://wb.test/mcp", {
+        method: "POST",
+        headers: { authorization: "Bearer key-alice", "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+      }),
+    );
+    expect(res.status).toBe(202);
+    expect(await res.text()).toBe("");
+  });
+
+  test("the projects are the ones that key's person can reach", async () => {
+    const alice = (await tool("key-alice", "list_projects")).value as { id: string; role: string }[];
+    expect(alice.map((p) => p.id)).toEqual([projectId]);
+    expect(alice[0]!.role).toBe("owner");
+    // Bob is a member of Alice's and owns the one recovery rebuilt for him.
+    const bob = (await tool("key-bob", "list_projects")).value as { id: string; role: string }[];
+    expect(bob.map((p) => p.id).sort()).toEqual(["bobproj", projectId].sort());
+    expect(bob.find((p) => p.id === projectId)!.role).toBe("member");
+  });
+
+  test("a member creates a work item by naming the project, and every open screen hears about it", async () => {
+    const got: unknown[] = [];
+    const off = events.subscribe(projectId, (d) => got.push(d));
+    const made = (await tool("key-bob", "create_work_item", { project: "Fountain!", title: "from an agent", notes: "it said so" })).value as {
+      created: boolean;
+      item: { id: string; title: string; status: string };
+    };
+    off();
+    expect(made.created).toBe(true);
+    expect(got).toEqual([{ kind: "items" }]);
+    const shown = (await (await call("alice", "GET", `/api/projects/${projectId}`)).json()).data;
+    const item = shown.items.find((w: { id: string }) => w.id === made.item.id);
+    expect(item.title).toBe("from an agent");
+    expect(item.notes).toBe("it said so");
+    expect(item.status).toBe("open");
+    expect(item.agentIds).toEqual([]);
+  });
+
+  test("with more than one project, one has to be named", async () => {
+    const vague = await tool("key-bob", "create_work_item", { title: "where?" });
+    expect(vague.failed).toBe(true);
+    expect(vague.text).toContain("name a project");
+    // Carol is in neither, so Alice's project is not a project as far as she is concerned.
+    const nope = await tool("key-carol", "create_work_item", { project: projectId, title: "sneak" });
+    expect(nope.failed).toBe(true);
+    expect(nope.text).toContain("no project called");
+  });
+
+  test("a title is required, and a work item nobody can reach is not there", async () => {
+    expect((await tool("key-bob", "create_work_item", { project: projectId, title: "  " })).text).toContain("needs a title");
+    expect((await tool("key-carol", "update_work_item", { item: itemId, title: "mine now" })).text).toContain(`no work item ${itemId}`);
+    expect(db.getItem(itemId)!.title).toBe("fix foo");
+  });
+
+  test("update rewrites the title and the notes; marking done is not on offer", async () => {
+    const res = (await tool("key-bob", "update_work_item", { item: itemId, title: "fix foo properly", notes: "found it" })).value as { updated: boolean };
+    expect(res.updated).toBe(true);
+    expect(db.getItem(itemId)!.title).toBe("fix foo properly");
+    expect(db.getItem(itemId)!.notes).toBe("found it");
+    // Done retires the item's computers, so it stays a person's call in the workbench.
+    const done = await tool("key-bob", "update_work_item", { item: itemId, status: "done" });
+    expect(done.failed).toBe(true);
+    expect(done.text).toContain("nothing to change");
+    expect(db.getItem(itemId)!.status).toBe("open");
+  });
+
+  test("the conversation a sandbox names pins it to that project", async () => {
+    const pin = { "x-fountain-conversation-id": "m1" };
+    const seen = (await tool("key-alice", "list_projects", {}, pin)).value as { id: string; current: boolean }[];
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ id: projectId, current: true });
+
+    const items = (await tool("key-alice", "list_work_items", {}, pin)).value as { items: { id: string; current?: boolean }[] };
+    expect(items.items.find((w) => w.id === itemId)!.current).toBe(true);
+    expect(items.items.filter((w) => w.current)).toHaveLength(1);
+
+    // No project has to be named, and no other project can be.
+    const made = (await tool("key-alice", "create_work_item", { title: "from inside the thread" }, pin)).value as { item: { id: string } };
+    expect(db.getItem(made.item.id)!.project_id).toBe(projectId);
+    const elsewhere = await tool("key-alice", "create_work_item", { project: "bobproj", title: "reach out" }, pin);
+    expect(elsewhere.failed).toBe(true);
+    expect(elsewhere.text).toContain("cannot reach another project");
+    expect(db.items("bobproj").map((w) => w.title)).toEqual(["Bob's thing"]);
+  });
+
+  test("a conversation that is not on a work item has no project, and one that is not the key's is not found", async () => {
+    const notOurs = await rpc("key-alice", "tools/list", undefined, { "x-fountain-conversation-id": "m2" });
+    expect(notOurs.status).toBe(404);
+    expect(((await notOurs.json()) as { error: string }).error).toBe("not_a_workbench_conversation");
+    const missing = await rpc("key-bob", "tools/list", undefined, { "x-fountain-conversation-id": "m1" });
+    expect(missing.status).toBe(404);
+    expect(((await missing.json()) as { error: string }).error).toBe("no_conversation");
   });
 });

@@ -21,6 +21,7 @@
  *   PATCH  /api/projects/:id/items/:item
  *   DELETE /api/projects/:id/items/:item
  *   *      /f/:id/api/...                   Fountain, scoped to the project (proxy.ts)
+ *   POST   /mcp                             the work items as MCP tools, on a Fountain key (mcp.ts)
  *   GET    /healthz
  */
 import { existsSync, statSync } from "node:fs";
@@ -28,6 +29,7 @@ import { join, normalize } from "node:path";
 import * as auth from "./auth";
 import type { AppContext } from "./context";
 import { errorResponse, HttpError, json } from "./http";
+import { handleMcp } from "./mcp";
 import * as projects from "./projects";
 import { handleProxy } from "./proxy";
 
@@ -85,6 +87,8 @@ export function buildApp(ctx: AppContext): (req: Request) => Promise<Response> {
   on("DELETE", "/api/projects/:id/items/:item", (req, p) => projects.removeItem(ctx, req, p.id!, p.item!));
 
   on("*", "/f/:id/*", (req, p) => handleProxy(ctx, req, p.id!, "/" + (p.rest ?? "")));
+  // Not under /api: an agent's client is told one URL, and this is it.
+  on("*", "/mcp", (req) => handleMcp(ctx, req));
 
   const staticDir = ctx.config.staticDir;
 
