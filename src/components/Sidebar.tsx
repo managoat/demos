@@ -4,7 +4,8 @@
  * state, the conversations on it inside. A computer belongs to the item it
  * was started for; "+" on a live one opens another conversation with the
  * same teammate there, on that item. Items with a live computer first,
- * done items folded away.
+ * closed items — done and won't do alike — folded away, each still saying
+ * which of the two it was.
  *
  * Nothing here reorders itself while you read it: the order comes from
  * lib/sidebar, which ranks on start times, not on activity. Work in flight
@@ -18,8 +19,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { useProject } from "../store";
 import { href, useRoute } from "../router";
 import { attachable, clampWidth, coarseTime, computerLabel, groupByItem, hueOf, loadSidebarWidth, saveSidebarWidth, type Computer, type ItemGroup } from "../lib/sidebar";
-import type { WorkItem } from "../lib/workbench";
+import { isClosed, type WorkItem } from "../lib/workbench";
 import type { JoinTarget } from "../lib/start";
+import { ItemStatusPill } from "./ItemStatus";
 import { StartDialog } from "./StartDialog";
 import type { Conversation } from "../types";
 
@@ -27,7 +29,7 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
   const { project, items, conversations, agents, sandboxes, createItem } = useProject();
   const route = useRoute();
   const [dialog, setDialog] = useState<{ join: JoinTarget | null; agentId: string | null; itemId: string | null } | null>(null);
-  const [showDone, setShowDone] = useState(false);
+  const [showClosed, setShowClosed] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [tick, setTick] = useState(0);
   const [width, setWidth] = useState(() => loadSidebarWidth());
@@ -64,8 +66,8 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
     void tick;
     return groupByItem(items, conversations, sandboxes);
   }, [items, conversations, sandboxes, tick]);
-  const openGroups = groups.filter((g) => g.item.status !== "done");
-  const doneGroups = groups.filter((g) => g.item.status === "done");
+  const openGroups = groups.filter((g) => !isClosed(g.item.status));
+  const closedGroups = groups.filter((g) => isClosed(g.item.status));
   const liveCount = groups.reduce((n, g) => n + g.computers.filter((c) => c.live).length, 0);
   const busyCount = groups.reduce((n, g) => n + g.computers.filter((c) => c.busy).length, 0);
   const currentId = route.page === "conversation" ? route.conversationId : null;
@@ -172,6 +174,7 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
           <a href={href.item(project.id, g.item.id)} className="sidebar-item-title ellipsis" onClick={onNavigate} title={g.item.title}>
             {g.item.title}
           </a>
+          {isClosed(g.item.status) && <ItemStatusPill status={g.item.status} tiny />}
           {g.unread && <span className="unread-dot" />}
           {g.busy && <span className="live-dot" title="a turn is running" />}
           {!isOpen && convs > 0 && (
@@ -257,13 +260,13 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
           </div>
         )}
         {openGroups.map(group)}
-        {doneGroups.length > 0 && (
+        {closedGroups.length > 0 && (
           <>
-            <button type="button" className="sidebar-group linklike-group" onClick={() => setShowDone((v) => !v)}>
-              <span>{showDone ? "▾" : "▸"} Done</span>
-              <span className="muted">{doneGroups.length}</span>
+            <button type="button" className="sidebar-group linklike-group" onClick={() => setShowClosed((v) => !v)}>
+              <span>{showClosed ? "▾" : "▸"} Closed</span>
+              <span className="muted">{closedGroups.length}</span>
             </button>
-            {showDone && doneGroups.map(group)}
+            {showClosed && closedGroups.map(group)}
           </>
         )}
       </div>

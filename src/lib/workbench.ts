@@ -17,19 +17,22 @@
  * channel binds only one), which is what makes the tree recoverable from
  * the conversation list alone.
  */
+import { markedAs, parseItemStatus, type ItemStatus } from "../../shared/status";
 import type { RetiredDto } from "./api";
 
 export { channelFor, channelIsItem, channelPrefix, conversationTitle, newId, parseChannel } from "../../shared/channel";
+export { isClosed, ITEM_STATUSES, statusLabel } from "../../shared/status";
+export type { ItemStatus } from "../../shared/status";
 export type { ItemDto as WorkItem, ProjectDto as Project } from "./api";
 
 /**
- * What to say after an item was marked done and the server retired its
- * computers. Nothing to report when there was nothing running on it.
+ * What to say after an item was closed — done or won't do — and the server
+ * retired its computers. Nothing to report when there was nothing running on it.
  */
-export function retiredMessage(r: RetiredDto): { text: string; kind: "info" | "error" } | null {
+export function retiredMessage(r: RetiredDto, status: ItemStatus = "done"): { text: string; kind: "info" | "error" } | null {
   if (r.failed > 0 || r.error) {
     const what = r.failed > 0 ? `${count(r.failed, "conversation")} would not retire` : "its computers could not be retired";
-    return { text: `Marked done, but ${what}${r.error ? `: ${r.error}` : "."}`, kind: "error" };
+    return { text: `${markedAs(status)}, but ${what}${r.error ? `: ${r.error}` : "."}`, kind: "error" };
   }
   if (r.conversations === 0) return null;
   const on = r.computers > 0 ? ` on ${count(r.computers, "computer")}` : "";
@@ -65,7 +68,7 @@ export function agentFits(
 /** What `fountain-workbench.state` held before the server existed. Imported once, then cleared. */
 export interface LegacyState {
   projects: { id: string; name: string; notes: string; environmentId: string | null; vaultId: string | null; createdAt: string }[];
-  items: { id: string; projectId: string; title: string; notes: string; status: "open" | "done"; agentIds: string[]; createdAt: string }[];
+  items: { id: string; projectId: string; title: string; notes: string; status: ItemStatus; agentIds: string[]; createdAt: string }[];
 }
 
 const LEGACY_KEY = "fountain-workbench.state";
@@ -106,7 +109,7 @@ export function normalizeLegacy(input: unknown): LegacyState {
       projectId: w.projectId,
       title: str(w.title) || "Untitled work item",
       notes: str(w.notes),
-      status: w.status === "done" ? "done" : "open",
+      status: parseItemStatus(w.status),
       agentIds: Array.isArray(w.agentIds) ? w.agentIds.filter((m): m is string => typeof m === "string") : [],
       createdAt: str(w.createdAt) || new Date(0).toISOString(),
     }));

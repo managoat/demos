@@ -10,6 +10,7 @@
  * `workbench:<project>/`, under the owner's key.
  */
 import { Database } from "bun:sqlite";
+import { emptyCounts, parseItemStatus, type ItemCounts, type ItemStatus } from "../shared/status";
 
 export interface UserRow {
   email: string;
@@ -41,7 +42,7 @@ export interface ItemRow {
   project_id: string;
   title: string;
   notes: string;
-  status: "open" | "done";
+  status: ItemStatus;
   agent_ids: string; // JSON array
   created_at: string;
 }
@@ -86,6 +87,8 @@ CREATE TABLE IF NOT EXISTS items (
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   notes TEXT NOT NULL DEFAULT '',
+  -- open | done | wont; free text, so a new state needs no migration and an
+  -- old row written by an older build still reads (shared/status.ts).
   status TEXT NOT NULL DEFAULT 'open',
   agent_ids TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL
@@ -255,16 +258,15 @@ export class Db {
   }
 
   /** Item counts per project for a user's list, in one query. */
-  itemCounts(projectIds: string[]): Map<string, { open: number; done: number }> {
-    const out = new Map<string, { open: number; done: number }>();
+  itemCounts(projectIds: string[]): Map<string, ItemCounts> {
+    const out = new Map<string, ItemCounts>();
     if (projectIds.length === 0) return out;
     const rows = this.sql
       .query(`SELECT project_id, status, COUNT(*) AS n FROM items WHERE project_id IN (${projectIds.map(() => "?").join(",")}) GROUP BY project_id, status`)
       .all(...projectIds) as { project_id: string; status: string; n: number }[];
     for (const r of rows) {
-      const c = out.get(r.project_id) ?? { open: 0, done: 0 };
-      if (r.status === "done") c.done += r.n;
-      else c.open += r.n;
+      const c = out.get(r.project_id) ?? emptyCounts();
+      c[parseItemStatus(r.status)] += r.n;
       out.set(r.project_id, c);
     }
     return out;

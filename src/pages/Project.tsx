@@ -1,14 +1,15 @@
 /**
- * The project's work: its items, open then done, and a form for the next one
+ * The project's work: its items, open then closed, and a form for the next one
  * — which can put a teammate on it and prompt them in the same submit, since
  * starting a conversation is what assigns one.
  */
 import { useMemo, useState, type FormEvent } from "react";
 import { useProject } from "../store";
-import { agentFits, channelIsItem } from "../lib/workbench";
+import { agentFits, channelIsItem, isClosed } from "../lib/workbench";
 import { describeError } from "../lib/errors";
 import { href, navigate } from "../router";
 import { TwoStep } from "../components/Thread";
+import { CloseControls, ItemStatusPill } from "../components/ItemStatus";
 import { AgentAvatar } from "../components/AgentAvatar";
 import { AttachmentStrip, useAttachments } from "../components/Attachments";
 import { formatTime } from "../lib/format";
@@ -19,7 +20,7 @@ export function Project() {
   const [notes, setNotes] = useState("");
   const [agentId, setAgentId] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [showDone, setShowDone] = useState(false);
+  const [showClosed, setShowClosed] = useState(false);
   const [busy, setBusy] = useState(false);
   const attachments = useAttachments((message) => toast(message, "error"));
 
@@ -61,8 +62,17 @@ export function Project() {
     }
   }
 
-  const open = items.filter((w) => w.status === "open");
-  const done = items.filter((w) => w.status === "done");
+  // Both ways of closing an item fold away together, but which way is still
+  // on the row: "we did this" and "we decided not to" are not the same answer.
+  const open = items.filter((w) => !isClosed(w.status));
+  const closed = items.filter((w) => isClosed(w.status));
+  const closedLabel = [
+    [closed.filter((w) => w.status === "done").length, "done"],
+    [closed.filter((w) => w.status === "wont").length, "won't do"],
+  ]
+    .filter(([n]) => (n as number) > 0)
+    .map(([n, what]) => `${n} ${what}`)
+    .join(" · ");
   const envName = project.environmentId ? environments.get(project.environmentId)?.name ?? "?" : "each agent's own";
   const vaultName = project.vaultId ? vaults.get(project.vaultId)?.name ?? "?" : "none";
 
@@ -81,6 +91,7 @@ export function Project() {
             <div className="conv-title">
               <span className="strong">{w.title}</span>
               {working > 0 && <span className="pill running">{working} working</span>}
+              {isClosed(w.status) && <ItemStatusPill status={w.status} />}
             </div>
             <div className="conv-sub muted">
               {convs.length} conversation{convs.length === 1 ? "" : "s"}
@@ -96,23 +107,7 @@ export function Project() {
             <span className="time muted">{formatTime(latest || w.createdAt)}</span>
           </div>
         </a>
-        {w.status === "done" ? (
-          <button className="secondary small self-center" onClick={() => void updateItem(w.id, { status: "open" })}>
-            Reopen
-          </button>
-        ) : live > 0 ? (
-          // Done retires what is still up on the item — the same loss as Retire, so the same ask.
-          <TwoStep
-            label="Done"
-            className="danger small self-center"
-            title={`Retires ${live} conversation${live === 1 ? "" : "s"} — the computers go with them`}
-            onConfirm={() => void updateItem(w.id, { status: "done" })}
-          />
-        ) : (
-          <button className="secondary small self-center" onClick={() => void updateItem(w.id, { status: "done" })}>
-            Done
-          </button>
-        )}
+        <CloseControls status={w.status} live={live} compact onSet={(status) => void updateItem(w.id, { status })} />
         <TwoStep label="Delete" onConfirm={() => void removeItem(w.id)} className="danger small self-center" />
       </li>
     );
@@ -188,14 +183,14 @@ export function Project() {
 
       <h2 className="h2 section">Open</h2>
       {open.length === 0 ? <p className="muted">Nothing open.</p> : <ul className="conv-list">{open.map(row)}</ul>}
-      {done.length > 0 && (
+      {closed.length > 0 && (
         <>
           <h2 className="h2 section">
-            <button className="linklike" onClick={() => setShowDone((v) => !v)}>
-              {showDone ? "Hide" : "Show"} {done.length} done
+            <button className="linklike" onClick={() => setShowClosed((v) => !v)}>
+              {showClosed ? "Hide" : "Show"} {closedLabel}
             </button>
           </h2>
-          {showDone && <ul className="conv-list">{done.map(row)}</ul>}
+          {showClosed && <ul className="conv-list">{closed.map(row)}</ul>}
         </>
       )}
     </div>

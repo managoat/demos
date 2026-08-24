@@ -116,6 +116,7 @@ describe("groupByItem", () => {
     { id: "hot", title: "Hot", status: "open", createdAt: "2026-08-23T00:00:00Z" },
     { id: "done", title: "Done", status: "done", createdAt: "2026-08-25T00:00:00Z" },
     { id: "cold", title: "Cold", status: "open", createdAt: "2026-08-22T00:00:00Z" },
+    { id: "wont", title: "Won't", status: "wont", createdAt: "2026-08-26T00:00:00Z" },
   ];
   const convs = [
     conv({ id: "h1", channel_id: "workbench:p/hot/t1", sandbox_id: "sb1", agent_id: "a1", status: "running", inserted_at: "2026-08-24T03:00:00Z", last_active_at: "2026-08-24T03:30:00Z" }),
@@ -124,17 +125,19 @@ describe("groupByItem", () => {
     conv({ id: "d1", channel_id: "workbench:p/done/t1", sandbox_id: "sb3", agent_id: "a1", status: "idle", inserted_at: "2026-08-24T05:00:00Z" }),
     conv({ id: "x", channel_id: "fountain:team", sandbox_id: "sb9", status: "idle" }),
   ];
-  test("items with a live computer first, then newest item first, done last; computers stay on their item", () => {
+  test("items with a live computer first, then newest item first, closed last; computers stay on their item", () => {
     const g = groupByItem(items, convs, new Map());
     // "hot" is live so it leads; "quiet" (created 08-24) then "cold" (08-22)
-    // by their own creation, not by which of them last saw output.
-    expect(g.map((x) => x.item.id)).toEqual(["hot", "quiet", "cold", "done"]);
+    // by their own creation, not by which of them last saw output. Both ways
+    // of being closed sink, however new the item is.
+    expect(g.map((x) => x.item.id)).toEqual(["hot", "quiet", "cold", "done", "wont"]);
     expect(g[0]!.computers).toHaveLength(1);
     expect(g[0]!.computers[0]!.conversations.map((c) => c.id)).toEqual(["h1", "h2"]);
     expect(g[0]!.busy).toBe(true);
     expect(g[1]!.computers).toEqual([]);
     expect(g[2]!.live).toBe(false);
-    expect(g[3]!.live).toBe(true); // done, but its computer is still up — shown last, not hidden
+    expect(g[3]!.live).toBe(true); // done, but its computer is still up — shown late, not hidden
+    expect(g[4]!.item.id).toBe("wont"); // the newest item of all, and still below every open one
   });
 
   test("the item list holds still while two agents talk at once", () => {
@@ -171,7 +174,7 @@ describe("groupByItem", () => {
     // "cold" used to sit above "quiet" here, on the strength of a burst of
     // output from a conversation that is now terminated. Creation order, so
     // the item you just typed lands where you can see it and stays there.
-    expect(g.map((x) => x.item.id)).toEqual(["hot", "fresh", "quiet", "cold", "done"]);
+    expect(g.map((x) => x.item.id)).toEqual(["hot", "fresh", "quiet", "cold", "done", "wont"]);
     expect(g[1]!.computers).toEqual([]);
   });
 });

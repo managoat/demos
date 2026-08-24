@@ -84,6 +84,7 @@ export function Projects() {
             </div>
             <div className="conv-sub muted">
               {p.counts.open} open · {p.counts.done} done
+              {p.counts.wont > 0 ? ` · ${p.counts.wont} won't do` : ""}
               {p.role === "member" ? ` · ${p.ownerEmail}'s` : ""}
               {p.notes ? ` · ${p.notes}` : ""}
             </div>

@@ -17,6 +17,8 @@ import { api, type Cost as CostDto, type CostBucket, type ItemCost, type Project
 import { describeError } from "../lib/errors";
 import { formatCompact, formatDay, formatHours, formatTime, formatUsd } from "../lib/format";
 import { href } from "../router";
+import { isClosed } from "../lib/workbench";
+import { ItemStatusPill } from "../components/ItemStatus";
 import { useWorkbench } from "../store";
 
 const tokens = (b: CostBucket) => b.input + b.output;
@@ -109,7 +111,7 @@ export function CostView({ cost, email }: { cost: CostDto; email: string }) {
       <a className="cost-item" href={w.status === null ? href.project(p.id) : href.item(p.id, w.id)}>
         <span className="cost-item-title ellipsis">
           {w.title ?? <span className="muted">Deleted item {w.id.slice(0, 6)}</span>}
-          {w.status === "done" && <span className="pill tiny">done</span>}
+          {w.status && isClosed(w.status) && <ItemStatusPill status={w.status} tiny />}
         </span>
         <span className="spacer" />
         <span className="muted small">

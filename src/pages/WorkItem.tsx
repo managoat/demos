@@ -11,6 +11,7 @@ import { agentFits, channelIsItem } from "../lib/workbench";
 import { computerLabel, computersOf, relativeTime } from "../lib/sidebar";
 import { href } from "../router";
 import { TwoStep } from "../components/Thread";
+import { CloseControls, ItemStatusPill } from "../components/ItemStatus";
 import { StartDialog } from "../components/StartDialog";
 import { StatusPill } from "../components/StatusPill";
 import { AgentAvatar } from "../components/AgentAvatar";
@@ -75,24 +76,8 @@ export function WorkItem({ itemId }: { itemId: string }) {
               {item.notes && <p className="muted small pre">{item.notes}</p>}
             </div>
             <div className="row">
-              <span className={`pill ${item.status === "done" ? "terminated" : "running"}`}>{item.status}</span>
-              {item.status === "done" ? (
-                <button className="secondary small" onClick={() => void updateItem(item.id, { status: "open" })}>
-                  Reopen
-                </button>
-              ) : live > 0 ? (
-                // Done retires what is still up on the item — the same loss as Retire, so the same ask.
-                <TwoStep
-                  label="Mark done"
-                  className="danger small"
-                  title={`Retires ${live} conversation${live === 1 ? "" : "s"} — the computers go with them`}
-                  onConfirm={() => void updateItem(item.id, { status: "done" })}
-                />
-              ) : (
-                <button className="secondary small" onClick={() => void updateItem(item.id, { status: "done" })}>
-                  Mark done
-                </button>
-              )}
+              <ItemStatusPill status={item.status} />
+              <CloseControls status={item.status} live={live} onSet={(status) => void updateItem(item.id, { status })} />
               <button className="secondary small" onClick={() => setEditing(true)}>
                 Edit
               </button>

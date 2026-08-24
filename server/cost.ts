@@ -35,6 +35,7 @@
  * which projects were live inside the period.
  */
 import { parseChannel } from "../shared/channel";
+import { parseItemStatus, type ItemStatus } from "../shared/status";
 import { authenticate, userClient, type AppContext } from "./context";
 import type { Billing, ConversationSummary } from "./fountain";
 import { HttpError, json } from "./http";
@@ -53,7 +54,7 @@ export interface ItemCostDto extends CostBucket {
   id: string;
   /** Null for an item that has been deleted here but whose conversations still name it. */
   title: string | null;
-  status: "open" | "done" | null;
+  status: ItemStatus | null;
 }
 
 export interface ProjectCostDto extends CostBucket {
@@ -110,7 +111,7 @@ export async function show(ctx: AppContext, req: Request): Promise<Response> {
   const projects = new Map<string, { dto: ProjectCostDto; items: Map<string, ItemCostDto> }>();
   for (const p of owned) {
     const items = new Map<string, ItemCostDto>();
-    for (const w of ctx.db.items(p.id)) items.set(w.id, { id: w.id, title: w.title, status: w.status === "done" ? "done" : "open", ...bucket() });
+    for (const w of ctx.db.items(p.id)) items.set(w.id, { id: w.id, title: w.title, status: parseItemStatus(w.status), ...bucket() });
     projects.set(p.id, { dto: { id: p.id, name: p.name, memberCount: ctx.db.members(p.id).length, items: [], ...bucket() }, items });
   }
 

@@ -78,6 +78,17 @@ bill for them do not outlive it. The button asks first when there is
 something to lose, and the app says what actually went. Reopening an item
 brings nothing back: it is new conversations from there.
 
+**Not everything gets done, and the list has to say so.** An item closes one
+of two ways: **done**, "we did this", or **won't do**, "we decided not to do
+this". A list that spells the second like the first cannot be read — "12
+done" means nothing if some of the twelve were abandoned — so the two are
+separate states (`shared/status.ts`), the project list counts them apart,
+and a closed item carries which one it was wherever it appears. Otherwise
+they are the same act: won't do ends the work, so it retires the item's
+conversations and takes its computers down exactly as done does, asks the
+same question first, and reopens the same way. Switching a closed item from
+one to the other costs nothing — the machines went when it was first closed.
+
 **A teammate can file the work itself.** `POST /mcp` is the work-item tree as
 MCP tools — `list_projects`, `list_work_items`, `create_work_item`,
 `update_work_item` — so "split this into three items" is something the agent
@@ -88,9 +99,11 @@ key it is and gets that person's projects, exactly as sign-in does. A key
 whose email has never signed in here is refused. Send
 `X-Fountain-Conversation-Id` as well and the session is pinned to that
 conversation's project — read off its `channel_id` — so a sandbox reaches only
-the work it is on and no tool has to be told which project it means. Marking
-an item **done** is deliberately not a tool: that retires the item's
-conversations and takes its computers down, quite possibly the caller's own.
+the work it is on and no tool has to be told which project it means. Closing
+an item — **done** or **won't do** — is deliberately not a tool: either
+retires the item's conversations and takes its computers down, quite possibly
+the caller's own. An agent that concludes an item should not be done says so
+in its notes; a person closes it.
 
 **⌘K finds anything said in the project.** A workbench whose shape is many
 conversations needs one box that reaches across them, and this is it:
@@ -244,6 +257,7 @@ server/
 shared/
   channel.ts         workbench:<project>/<item> — read and written by both sides
   images.ts          an image on a prompt: the four media types, the 10 MB ceiling
+  status.ts          a work item's state: open, done, won't do
 src/
   App.tsx            sign-in gate, OAuth callback, route switch
   store.tsx          WorkbenchProvider (me, projects) and ProjectProvider (one project's Fountain view + stream)
@@ -258,7 +272,7 @@ src/
   lib/markdown.tsx   allow-list markdown → React nodes, no innerHTML
   lib/theme.ts       the palette list; the blocks themselves are in styles.css
   pages/             Projects, Project (items, people), WorkItem, Team, Cost
-  components/        Thread, Palette (⌘K), StartDialog, Attachments, EnvVaultFields, Blocks, SignIn, Layout
+  components/        Thread, Palette (⌘K), StartDialog, Attachments, EnvVaultFields, Blocks, ItemStatus, SignIn, Layout
 ```
 
 ## Licence

@@ -1,3 +1,4 @@
+import type { ItemCounts, ItemStatus } from "../../shared/status";
 import type { Environment, Vault } from "../types";
 
 /**
@@ -15,7 +16,7 @@ export interface ProjectDto {
   ownerEmail: string;
   role: "owner" | "member";
   members: { email: string; addedAt: string }[];
-  counts: { open: number; done: number };
+  counts: ItemCounts;
 }
 
 export interface ItemDto {
@@ -23,12 +24,12 @@ export interface ItemDto {
   projectId: string;
   title: string;
   notes: string;
-  status: "open" | "done";
+  status: ItemStatus;
   agentIds: string[];
   createdAt: string;
 }
 
-/** What marking a work item done did to its computers (server/projects.ts). */
+/** What closing a work item did to its computers (server/projects.ts). */
 export interface RetiredDto {
   conversations: number;
   computers: number;
@@ -74,7 +75,7 @@ export interface ItemCost extends CostBucket {
   id: string;
   /** Null for an item deleted here whose conversations still name it. */
   title: string | null;
-  status: "open" | "done" | null;
+  status: ItemStatus | null;
 }
 
 export interface ProjectCost extends CostBucket {
@@ -145,7 +146,7 @@ export const api = {
   removeMember: (id: string, email: string) => data(call<{ data: ProjectDto }>("DELETE", `/api/projects/${id}/members/${encodeURIComponent(email)}`)),
 
   createItem: (projectId: string, input: { title: string; notes?: string }) => data(call<{ data: ItemDto }>("POST", `/api/projects/${projectId}/items`, input)),
-  // The envelope, not just the item: marking one done retires its computers, and says what went.
+  // The envelope, not just the item: closing one retires its computers, and says what went.
   patchItem: (projectId: string, itemId: string, patch: Partial<Pick<ItemDto, "title" | "notes" | "status" | "agentIds">>) =>
     call<{ data: ItemDto; retired?: RetiredDto }>("PATCH", `/api/projects/${projectId}/items/${itemId}`, patch),
   deleteItem: (projectId: string, itemId: string) => call<{ ok: true }>("DELETE", `/api/projects/${projectId}/items/${itemId}`),

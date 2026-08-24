@@ -407,12 +407,12 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
   const updateItem = useCallback<ProjectStore["updateItem"]>(
     async (id, patch) => {
       setItems((ws) => ws.map((w) => (w.id === id ? { ...w, ...patch } : w)));
-      // Done retires the item's computers (server/projects.ts): say what went, and
-      // show the conversations as retired without waiting for Fountain's notice.
+      // Closing an item — done or won't do — retires its computers (server/projects.ts):
+      // say what went, and show the conversations as retired without waiting for Fountain's notice.
       await run(async () => {
         const { retired } = await api.patchItem(projectId, id, patch);
         if (!retired) return;
-        const msg = retiredMessage(retired);
+        const msg = retiredMessage(retired, patch.status);
         if (msg) toast(msg.text, msg.kind);
         if (retired.conversations > 0) void refresh();
       });

@@ -275,7 +275,7 @@ describe("projects and sharing", () => {
     itemId = (await res.json()).data.id;
     const shown = (await (await call("alice", "GET", `/api/projects/${projectId}`)).json()).data;
     expect(shown.items.map((w: { id: string }) => w.id)).toEqual([itemId]);
-    expect(shown.project.counts).toEqual({ open: 1, done: 0 });
+    expect(shown.project.counts).toEqual({ open: 1, done: 0, wont: 0 });
   });
 
   test("changes are pushed to the project's streams", async () => {
@@ -640,14 +640,16 @@ describe("search across the project's conversations", () => {
   });
 });
 
-describe("done retires the item's computers", () => {
+describe("closing an item retires its computers", () => {
   let doneItem = "";
   let otherItem = "";
+  let wontItem = "";
 
   beforeAll(async () => {
     const make = async (title: string) => (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title })).json()).data.id as string;
     doneItem = await make("ship it");
     otherItem = await make("still going");
+    wontItem = await make("not worth it");
     const conv = (id: string, channel: string | null, sandbox: string | null, status: string): FakeConv => ({
       id,
       channel_id: channel,
@@ -666,6 +668,7 @@ describe("done retires the item's computers", () => {
       conv("o1", `workbench:${projectId}/${otherItem}/dddddddddddd`, "sbC", "running"), // another item
       conv("x1", "workbench:otherproj/item9", "sbD", "running"), // another project
       conv("p1", "fountain:team", "sbE", "running"), // not the workbench's at all
+      conv("w1", `workbench:${projectId}/${wontItem}/ffffffffffff`, "sbG", "running"), // the one we will decide against
     ];
     terminated.length = 0;
   });
@@ -691,6 +694,32 @@ describe("done retires the item's computers", () => {
     expect(convs["key-alice"]!.find((c) => c.id === "o1")!.status).toBe("running");
   });
 
+  test("won't do closes the same way done does: the work is over, so the computers go", async () => {
+    terminated.length = 0;
+    const res = await call("bob", "PATCH", `/api/projects/${projectId}/items/${wontItem}`, { status: "wont" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { status: string }; retired: unknown };
+    expect(body.data.status).toBe("wont");
+    expect(body.retired).toEqual({ conversations: 1, computers: 1, failed: 0 });
+    expect(terminated).toEqual(["w1"]);
+  });
+
+  test("swapping one closed state for the other retires nothing — the computers already went", async () => {
+    terminated.length = 0;
+    for (const status of ["done", "wont"]) {
+      const res = await call("bob", "PATCH", `/api/projects/${projectId}/items/${wontItem}`, { status });
+      const body = (await res.json()) as { data: { status: string }; retired?: unknown };
+      expect(body.data.status).toBe(status);
+      expect(body.retired).toBeUndefined();
+    }
+    expect(terminated).toEqual([]);
+  });
+
+  test("a status that is not one of ours changes nothing", async () => {
+    const res = await call("bob", "PATCH", `/api/projects/${projectId}/items/${wontItem}`, { status: "abandoned" });
+    expect((await res.json()).data.status).toBe("wont");
+  });
+
   test("what Fountain would not retire is reported; the item is done either way", async () => {
     convs["key-alice"]!.push({
       id: "stuck1",
@@ -713,6 +742,14 @@ describe("done retires the item's computers", () => {
     expect(body.retired.computers).toBe(1);
     expect(body.retired.failed).toBe(1);
     expect(body.retired.error).toContain("500");
+  });
+
+  test("the counts tell the two apart", async () => {
+    // By now: doneItem was reopened, otherItem is done, wontItem is won't do.
+    const { counts } = (await (await call("bob", "GET", `/api/projects/${projectId}`)).json()).data.project;
+    expect(counts.done).toBe(1);
+    expect(counts.wont).toBe(1);
+    expect(counts.open).toBeGreaterThan(0);
   });
 });
 
@@ -859,16 +896,32 @@ describe("the MCP server", () => {
     expect(db.getItem(itemId)!.title).toBe("fix foo");
   });
 
-  test("update rewrites the title and the notes; marking done is not on offer", async () => {
+  test("update rewrites the title and the notes; closing an item is not on offer, either way", async () => {
     const res = (await tool("key-bob", "update_work_item", { item: itemId, title: "fix foo properly", notes: "found it" })).value as { updated: boolean };
     expect(res.updated).toBe(true);
     expect(db.getItem(itemId)!.title).toBe("fix foo properly");
     expect(db.getItem(itemId)!.notes).toBe("found it");
-    // Done retires the item's computers, so it stays a person's call in the workbench.
-    const done = await tool("key-bob", "update_work_item", { item: itemId, status: "done" });
-    expect(done.failed).toBe(true);
-    expect(done.text).toContain("nothing to change");
+    // Closing retires the item's computers, so it stays a person's call in the
+    // workbench — an agent that concludes "we should not do this" writes it in
+    // the notes rather than closing the item under itself.
+    for (const status of ["done", "wont"]) {
+      const closed = await tool("key-bob", "update_work_item", { item: itemId, status });
+      expect(closed.failed).toBe(true);
+      expect(closed.text).toContain("nothing to change");
+    }
     expect(db.getItem(itemId)!.status).toBe("open");
+  });
+
+  test("work items can be listed by any of the three states", async () => {
+    const listed = async (status?: string) =>
+      ((await tool("key-bob", "list_work_items", { project: projectId, ...(status ? { status } : {}) })).value as { items: { id: string; status: string }[] }).items;
+    expect((await listed("wont")).map((w) => w.status)).toEqual(["wont"]);
+    expect((await listed("done")).map((w) => w.status)).toEqual(["done"]);
+    expect((await listed("open")).every((w) => w.status === "open")).toBe(true);
+    // Unfiltered is all of them, and a status nobody has is not a filter.
+    const all = await listed();
+    expect(all.length).toBe((await listed("open")).length + 2);
+    expect((await listed("abandoned")).length).toBe(all.length);
   });
 
   test("the conversation a sandbox names pins it to that project", async () => {

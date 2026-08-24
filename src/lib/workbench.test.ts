@@ -37,6 +37,13 @@ describe("retiredMessage", () => {
       kind: "error",
     });
   });
+  test("the notice says which way the item was closed", () => {
+    expect(retiredMessage({ conversations: 1, computers: 1, failed: 1, error: "Fountain answered 500." }, "wont")!.text).toBe(
+      "Marked won't do, but 1 conversation would not retire: Fountain answered 500.",
+    );
+    // What actually went is the same either way.
+    expect(retiredMessage({ conversations: 2, computers: 1, failed: 0 }, "wont")).toEqual({ text: "Retired 2 conversations on 1 computer.", kind: "info" });
+  });
 });
 
 describe("normalizeLegacy", () => {

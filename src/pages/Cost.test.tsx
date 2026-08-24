@@ -20,6 +20,8 @@ const full: Cost = {
       memberCount: 2,
       items: [
         { id: "w1", title: "fix foo", status: "open", ...bucket(2, 5, 1_200_000, 600_000, "2026-08-12T00:00:00Z") },
+        { id: "w2", title: "shipped it", status: "done", ...bucket(1, 2, 400, 200, "2026-08-10T00:00:00Z") },
+        { id: "w3", title: "dropped it", status: "wont", ...bucket(1, 2, 400, 200, "2026-08-09T00:00:00Z") },
         { id: "wgone", title: null, status: null, ...bucket(1, 1, 50, 25, "2026-08-11T00:00:00Z") },
       ],
       ...bucket(3, 6, 1_200_050, 600_025, "2026-08-12T00:00:00Z"),
@@ -58,6 +60,19 @@ describe("the cost view", () => {
     // An item deleted here still carries its spend, named for what it was.
     expect(html).toContain("Deleted item wgone");
     expect(html).toContain("75 tok");
+  });
+
+  test("a closed item says which way it closed — money was spent either way", () => {
+    const html = renderToStaticMarkup(<CostView cost={full} email="alice@example.com" />);
+    // "we did this" and "we decided not to" cost the same and must not read the same.
+    expect(html).toContain("shipped it");
+    expect(html).toContain("dropped it");
+    expect(html).toContain("won&#x27;t do");
+    // Not just different words: different marks, so they read apart at a glance.
+    expect(html).toContain('class="pill terminated tiny"');
+    expect(html).toContain('class="pill wont tiny"');
+    // An open item carries no pill at all, so those two are the only marks.
+    expect(html.match(/class="pill [a-z]+ tiny"/g) ?? []).toHaveLength(2);
   });
 
   test("what is not attributable is counted, not dropped", () => {

@@ -8,6 +8,7 @@
  * member's.
  */
 import { channelIsItem, channelPrefix, newId, parseChannel, recoveredTitle } from "../shared/channel";
+import { emptyCounts, isClosed, isItemStatus, parseItemStatus, type ItemCounts, type ItemStatus } from "../shared/status";
 import { authenticate, ownerClient, projectAccess, requireOwner, userClient, type AppContext } from "./context";
 import { now, parseAgentIds, type ItemRow, type ProjectRow, type Role } from "./db";
 import { FountainHttpError, type ConversationSummary, type FountainClient } from "./fountain";
@@ -23,7 +24,7 @@ export interface ProjectDto {
   ownerEmail: string;
   role: Role;
   members: { email: string; addedAt: string }[];
-  counts: { open: number; done: number };
+  counts: ItemCounts;
 }
 
 export interface ItemDto {
@@ -31,12 +32,12 @@ export interface ItemDto {
   projectId: string;
   title: string;
   notes: string;
-  status: "open" | "done";
+  status: ItemStatus;
   agentIds: string[];
   createdAt: string;
 }
 
-/** What marking a work item done did to its computers. */
+/** What closing a work item did to its computers. */
 export interface RetiredDto {
   /** Conversations retired. */
   conversations: number;
@@ -48,7 +49,7 @@ export interface RetiredDto {
   error?: string;
 }
 
-function projectDto(ctx: AppContext, p: ProjectRow, role: Role, counts?: { open: number; done: number }): ProjectDto {
+function projectDto(ctx: AppContext, p: ProjectRow, role: Role, counts?: ItemCounts): ProjectDto {
   return {
     id: p.id,
     name: p.name,
@@ -59,12 +60,12 @@ function projectDto(ctx: AppContext, p: ProjectRow, role: Role, counts?: { open:
     ownerEmail: p.owner_email,
     role,
     members: ctx.db.members(p.id).map((m) => ({ email: m.email, addedAt: m.added_at })),
-    counts: counts ?? ctx.db.itemCounts([p.id]).get(p.id) ?? { open: 0, done: 0 },
+    counts: counts ?? ctx.db.itemCounts([p.id]).get(p.id) ?? emptyCounts(),
   };
 }
 
 export function itemDto(w: ItemRow): ItemDto {
-  return { id: w.id, projectId: w.project_id, title: w.title, notes: w.notes, status: w.status === "done" ? "done" : "open", agentIds: parseAgentIds(w.agent_ids), createdAt: w.created_at };
+  return { id: w.id, projectId: w.project_id, title: w.title, notes: w.notes, status: parseItemStatus(w.status), agentIds: parseAgentIds(w.agent_ids), createdAt: w.created_at };
 }
 
 /** A fresh work item, with the limits and defaults that apply wherever one is made — the API, or an agent over MCP. */
@@ -216,13 +217,15 @@ export async function patchItem(ctx: AppContext, req: Request, id: string, itemI
   const p: Partial<Pick<ItemRow, "title" | "notes" | "status" | "agent_ids">> = {};
   if (typeof body.title === "string") p.title = str(body.title, 300).trim() || "Untitled work item";
   if (typeof body.notes === "string") p.notes = str(body.notes, 20000);
-  if (body.status === "open" || body.status === "done") p.status = body.status;
+  if (isItemStatus(body.status)) p.status = body.status;
   if (Array.isArray(body.agentIds)) p.agent_ids = JSON.stringify(body.agentIds.filter((x: unknown): x is string => typeof x === "string").slice(0, 100));
   ctx.db.updateItem(itemId, p);
   ctx.events.emit(id, { kind: "items" });
-  const done = p.status === "done" && cur.status !== "done";
+  // Both ways of closing an item end the work, so both take its computers
+  // down; going from one closed state to the other has nothing left to retire.
+  const closing = p.status !== undefined && isClosed(p.status) && !isClosed(cur.status);
   const item = itemDto(ctx.db.getItem(itemId)!);
-  return json(done ? { data: item, retired: await retire(ctx, project, itemId) } : { data: item });
+  return json(closing ? { data: item, retired: await retire(ctx, project, itemId) } : { data: item });
 }
 
 export async function removeItem(ctx: AppContext, req: Request, id: string, itemId: string): Promise<Response> {
@@ -236,7 +239,8 @@ export async function removeItem(ctx: AppContext, req: Request, id: string, item
 }
 
 /**
- * An item's computers, once it is done: the work is over, so the machines go.
+ * An item's computers, once it is closed — done or won't do alike: the work
+ * is over either way, so the machines go.
  *
  * Fountain has no "destroy this sandbox" — a sprite is torn down with the
  * last live conversation on it (ADR 0023), so retiring every conversation of
@@ -244,7 +248,7 @@ export async function removeItem(ctx: AppContext, req: Request, id: string, item
  * still holds rightly stays up. Terminating is idempotent, so an already-dead
  * conversation is simply skipped.
  *
- * Best effort: the item is done whatever Fountain says. What actually went is
+ * Best effort: the item is closed whatever Fountain says. What actually went is
  * reported back, so the browser can say so rather than imply a machine is
  * gone when it is still running.
  */
@@ -406,7 +410,7 @@ export async function importState(ctx: AppContext, req: Request): Promise<Respon
         project_id: p.id,
         title: str(w.title, 300).trim() || "Untitled work item",
         notes: str(w.notes, 20000),
-        status: w.status === "done" ? "done" : "open",
+        status: parseItemStatus(w.status),
         agent_ids: JSON.stringify(Array.isArray(w.agentIds) ? w.agentIds.filter((x: unknown): x is string => typeof x === "string") : []),
         created_at: str(w.createdAt, 40) || now(),
       })

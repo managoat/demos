@@ -33,6 +33,7 @@
  * same key to the sign-in form would, which is the deal already.
  */
 import { parseChannel } from "../shared/channel";
+import { emptyCounts, ITEM_STATUSES, isItemStatus } from "../shared/status";
 import { projectAccess, type AppContext } from "./context";
 import { sha256 } from "./crypto";
 import type { ItemRow, ProjectRow, Role, UserRow } from "./db";
@@ -75,7 +76,11 @@ const TOOLS = [
       type: "object",
       properties: {
         project: { type: "string", description: "Project id or name; omit inside a conversation, or when you are in only one" },
-        status: { type: "string", enum: ["open", "done"], description: "Only items in this state" },
+        status: {
+          type: "string",
+          enum: ITEM_STATUSES,
+          description: "Only items in this state: 'open' still to do, 'done' finished, 'wont' decided against",
+        },
       },
     },
   },
@@ -100,8 +105,9 @@ const TOOLS = [
     name: "update_work_item",
     description:
       "Rewrite a work item's title or notes — sharpen a title, or write up what you found. " +
-      "Marking one done is not here on purpose: that retires every conversation on the item and takes its " +
-      "computers down, quite possibly your own, so it stays a person's call in the workbench.",
+      "Closing one — done, or won't do — is not here on purpose: either retires every conversation on the " +
+      "item and takes its computers down, quite possibly your own, so it stays a person's call in the " +
+      "workbench. If you conclude an item should not be done, say why in its notes; a person closes it.",
     inputSchema: {
       type: "object",
       properties: {
@@ -238,14 +244,14 @@ function listProjects(ctx: AppContext, caller: Caller): unknown {
     notes: p.notes,
     role: p.owner_email === caller.user.email ? "owner" : "member",
     ownerEmail: p.owner_email,
-    items: counts.get(p.id) ?? { open: 0, done: 0 },
+    items: counts.get(p.id) ?? emptyCounts(),
     ...(caller.pinned ? { current: true } : {}),
   }));
 }
 
 function listWorkItems(ctx: AppContext, caller: Caller, args: Record<string, unknown>): unknown {
   const project = resolveProject(ctx, caller, args.project);
-  const status = args.status === "open" || args.status === "done" ? args.status : null;
+  const status = isItemStatus(args.status) ? args.status : null;
   const items = ctx.db
     .items(project.id)
     .map(itemDto)

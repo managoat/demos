@@ -18,11 +18,12 @@
  * work item, the first conversation for a computer, `inserted_at` for a
  * conversation. Newest first, so a thing you just started is at the top of
  * its list, and then it stays where you left it. A row moves only when you
- * move it (start something, mark an item done) or when its computer dies —
+ * move it (start something, close an item) or when its computer dies —
  * and a turn running is told by the dot beside it, not by its position.
  */
 import type { Conversation, SandboxRecord } from "../types";
 import { parseChannel } from "../../shared/channel";
+import { isClosed } from "../../shared/status";
 
 export const LIVE_STATUSES = new Set<Conversation["status"]>(["pending", "running", "idle"]);
 export const ATTACHABLE = new Set<string>(["ready", "suspended"]);
@@ -163,7 +164,7 @@ export interface ItemGroup<I extends { id: string; title: string; status: string
 
 /**
  * Work items with their computers: items that have a live computer first,
- * then newest item first; done items last. An item with no conversations
+ * then newest item first; closed items last. An item with no conversations
  * yet is kept, so it can be started from the sidebar. Ranking on the item's
  * own creation time rather than on its activity is what keeps the list
  * still while its agents talk — see the module doc.
@@ -193,8 +194,8 @@ export function groupByItem<I extends { id: string; title: string; status: strin
     };
   });
   return groups.sort((a, b) => {
-    const da = a.item.status === "done" ? 1 : 0;
-    const db = b.item.status === "done" ? 1 : 0;
+    const da = isClosed(a.item.status) ? 1 : 0;
+    const db = isClosed(b.item.status) ? 1 : 0;
     if (da !== db) return da - db;
     if (a.live !== b.live) return a.live ? -1 : 1;
     return b.item.createdAt.localeCompare(a.item.createdAt) || a.item.id.localeCompare(b.item.id);
