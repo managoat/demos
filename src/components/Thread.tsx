@@ -1,0 +1,255 @@
+/**
+ * One conversation: its transcript so far (SDK history), live events from the
+ * store's stream, and a composer. Chat layout: your prompts on the right, the
+ * agent's blocks on the left.
+ */
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useStore } from "../store";
+import type { Stream } from "@agentshit/fountain-sdk";
+import type { Conversation, LogEvent, Turn, UserEvent } from "../types";
+import { arrange } from "../lib/blocks";
+import { fold, stageLine } from "../lib/turns";
+import { formatTime } from "../lib/format";
+import { describeError } from "../lib/errors";
+import { BlockView } from "./Blocks";
+import { StatusPill } from "./StatusPill";
+import { AgentAvatar } from "./AgentAvatar";
+import { memberFor } from "../lib/workbench";
+
+const HISTORY_STREAMS: Stream[] = ["acp", "stdout", "stage"];
+
+export function Thread({ conversationId, onClose }: { conversationId: string; onClose?: () => void }) {
+  const { fountain, conversations, agents, subscribe, toast, refresh, state } = useStore();
+  const listed = conversations.find((c) => c.id === conversationId) ?? null;
+  const [fetched, setFetched] = useState<Conversation | null>(null);
+  const conversation = listed ?? fetched;
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [events, setEvents] = useState<LogEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showStdout, setShowStdout] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const scroller = useRef<HTMLDivElement>(null);
+  const stickToBottom = useRef(true);
+
+  const agent = conversation?.agent_id ? agents.get(conversation.agent_id) ?? null : null;
+  const member = conversation ? memberFor(state.members, conversation, agent?.environment_id) : null;
+  const who = member?.name ?? agent?.name ?? conversation?.runtime ?? "agent";
+
+  // Load: the record if the list has not got it, the turns, and the history.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setTurns([]);
+    setEvents([]);
+    const handle = fountain.resume(conversationId);
+    void (async () => {
+      try {
+        const [record, ts, history] = await Promise.all([
+          listed ? Promise.resolve(null) : handle.get(),
+          handle.turns(),
+          handle.history({ streams: HISTORY_STREAMS }),
+        ]);
+        if (cancelled) return;
+        if (record) setFetched(record);
+        setTurns(ts);
+        setEvents(history);
+        void handle.markRead().then(() => refresh());
+      } catch (err) {
+        if (!cancelled) toast(describeError(err), "error");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // `listed` is deliberately not a dependency: it changes on every stream tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId, fountain, toast, refresh]);
+
+  // Live: append what the user-wide stream delivers for this conversation.
+  useEffect(() => {
+    const seen = new Set<number>();
+    return subscribe(conversationId, (ev: UserEvent) => {
+      if (seen.has(ev.id)) return;
+      seen.add(ev.id);
+      setEvents((prev) => (prev.some((e) => e.id === ev.id) ? prev : [...prev, ev]));
+      if (ev.kind === "stage" && ev.stage === "turn") {
+        // A turn began or ended: re-read the turn list so the prompt and status show.
+        void fountain.resume(conversationId).turns().then(setTurns).catch(() => undefined);
+      }
+    });
+  }, [conversationId, subscribe, fountain]);
+
+  // A turn we did not see start (sent from elsewhere) still needs its row.
+  useEffect(() => {
+    if (!conversation) return;
+    if ((conversation.turn_count ?? 0) > turns.length) {
+      void fountain.resume(conversationId).turns().then(setTurns).catch(() => undefined);
+    }
+  }, [conversation?.turn_count, conversation?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const folded = useMemo(() => fold(events, turns), [events, turns]);
+  const visible = useMemo(() => new Set(showStdout ? ["acp", "stdout"] : ["acp"]), [showStdout]);
+
+  // Follow the bottom unless the reader scrolled up.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || !stickToBottom.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [events, turns, loading]);
+
+  const onScroll = useCallback(() => {
+    const el = scroller.current;
+    if (!el) return;
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  }, []);
+
+  async function send(e?: FormEvent) {
+    e?.preventDefault();
+    const prompt = draft.trim();
+    if (!prompt || sending) return;
+    setSending(true);
+    try {
+      await fountain.request("POST", `/api/conversations/${conversationId}/prompts`, { body: { prompt } });
+      setDraft("");
+      stickToBottom.current = true;
+      void refresh();
+    } catch (err) {
+      toast(describeError(err), "error");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void send();
+    }
+  }
+
+  const running = conversation?.status === "running" || conversation?.status === "pending";
+  const lastTurn = folded.turns[folded.turns.length - 1];
+  const waiting = running && (!lastTurn || lastTurn.turn.status === "running" || lastTurn.turn.status === "pending");
+
+  return (
+    <section className="thread">
+      <header className="thread-head">
+        {onClose && (
+          <button className="icon" onClick={onClose} title="Close">
+            ×
+          </button>
+        )}
+        {agent && <AgentAvatar agent={agent} size={28} />}
+        <div className="thread-title">
+          <div className="name">{conversation?.title ?? who}</div>
+          <div className="sub muted small">
+            {who}
+            {conversation?.sandbox ? ` · ${conversation.sandbox.sprite_name} (${conversation.sandbox.status})` : ""}
+          </div>
+        </div>
+        {conversation && <StatusPill status={conversation.status} sandbox={conversation.sandbox?.status} />}
+        <label className="check small">
+          <input type="checkbox" checked={showStdout} onChange={(e) => setShowStdout(e.target.checked)} /> stdout
+        </label>
+        {running && (
+          <button
+            className="secondary small"
+            onClick={() => fountain.resume(conversationId).interrupt().then(() => toast("Interrupted")).catch((err) => toast(describeError(err), "error"))}
+          >
+            Interrupt
+          </button>
+        )}
+        {conversation && conversation.status !== "terminated" && (
+          <TwoStep label="Retire" onConfirm={() => fountain.resume(conversationId).terminate().then(() => refresh()).catch((err) => toast(describeError(err), "error"))} />
+        )}
+      </header>
+
+      <div className="transcript chat" ref={scroller} onScroll={onScroll}>
+        {loading && <div className="muted small">Loading…</div>}
+        {folded.setup.length > 0 && <SetupLine events={folded.setup} done={folded.turns.length > 0} />}
+        {folded.turns.map(({ turn, events: evs }) => (
+          <div className="turn" key={turn.id}>
+            <div className="bubble you">
+              <div className="body">{turn.prompt}</div>
+              <div className="meta">
+                #{turn.turn_number} · {formatTime(turn.started_at ?? turn.inserted_at)}
+                {turn.status === "failed" ? " · failed" : turn.status === "interrupted" ? " · interrupted" : ""}
+              </div>
+            </div>
+            {arrange(evs, visible).map((b, i) => (
+              <BlockView key={`${turn.id}-${i}`} block={b} bubble />
+            ))}
+          </div>
+        ))}
+        {folded.loose.length > 0 && <div className="muted small">{stageLine(folded.loose)}</div>}
+        {waiting && (
+          <div className="bubble them typing" aria-label="working">
+            <span />
+            <span />
+            <span />
+          </div>
+        )}
+      </div>
+
+      <form className="composer" onSubmit={send}>
+        <div className="composer-main">
+          <textarea
+            rows={2}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={onKey}
+            placeholder={conversation?.status === "terminated" ? "This conversation is retired." : `Message ${who}… (Enter to send, Shift+Enter for a newline)`}
+            disabled={conversation?.status === "terminated"}
+          />
+        </div>
+        <button className="send" type="submit" disabled={sending || !draft.trim() || conversation?.status === "terminated"} title="Send">
+          ↑
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function SetupLine({ events, done }: { events: LogEvent[]; done: boolean }) {
+  const line = stageLine(events);
+  const failed = events.some((e) => e.kind === "stage" && e.state === "failed");
+  return (
+    <details className={`block init ${failed ? "error" : ""}`}>
+      <summary>{failed ? "✕ setup failed" : done ? "✓ sandbox ready" : `⏳ ${line ?? "setting up"}`}</summary>
+      <pre>
+        {events
+          .filter((e) => e.kind === "stage")
+          .map((e) => `${formatTime(e.ts)}  ${e.stage ?? ""} ${e.state ?? ""}${e.duration_ms != null ? ` (${e.duration_ms} ms)` : ""}`)
+          .join("\n")}
+      </pre>
+    </details>
+  );
+}
+
+/** A destructive button that asks once, inline — never a browser dialog. */
+export function TwoStep({ label, onConfirm, className = "danger small" }: { label: string; onConfirm: () => void; className?: string }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  return armed ? (
+    <button
+      className={className}
+      onClick={() => {
+        setArmed(false);
+        onConfirm();
+      }}
+    >
+      Sure? {label}
+    </button>
+  ) : (
+    <button className={className.replace("danger", "secondary")} onClick={() => setArmed(true)}>
+      {label}
+    </button>
+  );
+}
