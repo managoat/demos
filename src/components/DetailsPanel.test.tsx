@@ -60,7 +60,16 @@ function store(over: { conversations?: Conversation[]; sandboxes?: [string, Sand
 }
 
 let current = store();
-mock.module("../store", () => ({ useProject: () => current }));
+// Only `useProject` is stubbed, and the rest of the module is kept as it is.
+// `mock.module` replaces the module for the whole test *process*, not for this
+// file — so a factory returning `{ useProject }` alone unexports everything
+// else, and any test file loaded after this one that reaches `useWorkbench`
+// (Cost, ItemStatus, Board, Feed — all of them through a component) dies at
+// link time with "Export named 'useWorkbench' not found". Which of those
+// files break depends on the order bun happens to walk them in, so adding a
+// test file anywhere in the repo can turn this red. Spread the real module.
+const realStore = await import("../store");
+mock.module("../store", () => ({ ...realStore, useProject: () => current }));
 const { DetailsPanel } = await import("./DetailsPanel");
 
 const render = () => renderToStaticMarkup(<DetailsPanel conversationId={conversation.id} onClose={() => {}} />);

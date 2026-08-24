@@ -28,6 +28,8 @@ interface FakeConv {
   turn_count?: number;
   usage_total?: { input: number; output: number };
   last_active_at?: string | null;
+  /** Fountain's own: `last_active_at` is later than `last_read_at`. What the feed is built on. */
+  unread?: boolean;
 }
 
 /** What `GET /api/conversations/:id/turns` answers, per conversation id. */
@@ -956,6 +958,143 @@ describe("recovery", () => {
     expect(db.getProject(projectId)!.owner_email).toBe("alice@example.com");
     expect(db.getItem("olditem")!.status).toBe("done");
     expect(db.getItem("x")).toBeNull();
+  });
+});
+
+describe("the survey: what is live per project, and what stopped unread across all of them", () => {
+  // The complaint this answers: a conversation finishing in another project
+  // is invisible, because the event stream is one project's and the browser
+  // holds only the one it is looking at. So the server sweeps every project
+  // the caller is in, on each owner's key, and both facts fall out of the one
+  // listing. Bob is a member of alice's project and the owner of his own,
+  // which is the case that needs two keys.
+  const before = { alice: convs["key-alice"]!, bob: convs["key-bob"]! };
+  let goneItem = "";
+
+  const conv = (id: string, channel: string | null, status: string, unread: boolean, at: string): FakeConv => ({
+    id,
+    channel_id: channel,
+    title: `Coder: ${id}`,
+    agent_id: "a1",
+    environment_id: "e1",
+    vault_id: "v1",
+    sandbox_id: "sbS",
+    status,
+    inserted_at: "2026-08-20T00:00:00Z",
+    last_active_at: at,
+    unread,
+  });
+
+  beforeAll(async () => {
+    const on = (item: string) => `workbench:${projectId}/${item}/${item.slice(0, 8)}`;
+    goneItem = (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title: "will be deleted" })).json()).data.id;
+    await call("bob", "DELETE", `/api/projects/${projectId}/items/${goneItem}`);
+    convs["key-alice"] = [
+      conv("s-idle", on(itemId), "idle", true, "2026-08-24T10:00:00Z"),
+      conv("s-failed", on(itemId), "failed", true, "2026-08-24T11:00:00Z"),
+      // Read: somebody has been and looked, so it is not news.
+      conv("s-read", on(itemId), "idle", false, "2026-08-24T12:00:00Z"),
+      // Still working. It is live, and a turn in flight is not a finished one.
+      conv("s-running", on(itemId), "running", true, "2026-08-24T12:30:00Z"),
+      conv("s-pending", on(itemId), "pending", true, "2026-08-24T12:31:00Z"),
+      // Retired. Closing a work item retires every conversation on it, so
+      // counting these would turn "done" into a screenful of notifications.
+      conv("s-terminated", on(itemId), "terminated", true, "2026-08-24T09:00:00Z"),
+      // The item is gone from here; its conversation still names it.
+      conv("s-orphan", on(goneItem), "idle", true, "2026-08-24T08:00:00Z"),
+      // Not the workbench's, and a workbench project nobody here is in.
+      conv("s-team", "fountain:team", "idle", true, "2026-08-24T13:00:00Z"),
+      conv("s-elsewhere", "workbench:otherproj/item9/aaaaaaaa", "idle", true, "2026-08-24T13:00:00Z"),
+    ];
+    convs["key-bob"] = [conv("s-bob", "workbench:bobproj/bobitem/bbbbbbbb", "idle", true, "2026-08-24T07:00:00Z")];
+  });
+
+  afterAll(() => {
+    convs["key-alice"] = before.alice;
+    convs["key-bob"] = before.bob;
+  });
+
+  const surveyOf = async (who: string) => (await (await call(who, "GET", "/api/projects/activity")).json()).data as import("./projects").ActivityDto;
+
+  test("no session, no survey", async () => {
+    expect((await call(null, "GET", "/api/projects/activity")).status).toBe(401);
+  });
+
+  test("only a conversation that has stopped with something unread is in the feed", async () => {
+    const s = await surveyOf("alice");
+    // Newest first. Everything else is excluded for its own reason, above.
+    expect(s.feed.map((e) => e.conversationId)).toEqual(["s-failed", "s-idle", "s-orphan"]);
+    expect(s.feed[0]!.status).toBe("failed");
+    expect(s.feed[1]!.status).toBe("idle");
+    expect(s.dropped).toBe(0);
+  });
+
+  test("an entry says where it is, because whoever reads it is somewhere else", async () => {
+    const s = await surveyOf("alice");
+    const e = s.feed.find((x) => x.conversationId === "s-idle")!;
+    expect(e.projectId).toBe(projectId);
+    expect(e.projectName).toBe(db.getProject(projectId)!.name);
+    expect(e.itemId).toBe(itemId);
+    expect(e.itemTitle).toBe(db.getItem(itemId)!.title);
+    expect(e.title).toBe("Coder: s-idle");
+    expect(e.agentId).toBe("a1");
+    // An item deleted here still places its conversation; there is just no
+    // title to give it, and the panel says so rather than showing a raw id.
+    expect(s.feed.find((x) => x.conversationId === "s-orphan")!.itemTitle).toBeNull();
+  });
+
+  test("a member sees the owner's project and their own — two owners, both keys", async () => {
+    const s = await surveyOf("bob");
+    expect(s.feed.map((e) => e.conversationId)).toEqual(["s-failed", "s-idle", "s-orphan", "s-bob"]);
+    expect(s.feed.find((e) => e.conversationId === "s-bob")!.projectId).toBe("bobproj");
+    // And the owner of one of them is not in the other.
+    const alice = await surveyOf("alice");
+    expect(alice.feed.map((e) => e.projectId)).not.toContain("bobproj");
+  });
+
+  test("the live counts come out of the same pass, and count only what is working", async () => {
+    const s = await surveyOf("alice");
+    // `s-running` and `s-pending`; and the latest is theirs (12:31), not the
+    // 13:00 of the team conversation and the one in a project she is not in —
+    // neither of those is this project's to report, in either figure.
+    expect(s.projects[projectId]).toEqual({ live: 2, latest: "2026-08-24T12:31:00Z" });
+    expect(s.projects.otherproj).toBeUndefined();
+  });
+
+  test("the feed is a list, not an archive: it caps, and says how much it is not showing", async () => {
+    const on = `workbench:${projectId}/${itemId}/${itemId.slice(0, 8)}`;
+    const many = Array.from({ length: 55 }, (_, i) =>
+      // Ascending time, so the newest are the highest-numbered.
+      conv(`bulk-${String(i).padStart(2, "0")}`, on, "idle", true, `2026-08-25T${String(i % 24).padStart(2, "0")}:${String(i).padStart(2, "0")}:00Z`),
+    );
+    const kept = convs["key-alice"]!;
+    convs["key-alice"] = [...kept, ...many];
+    try {
+      const s = await surveyOf("alice");
+      expect(s.feed).toHaveLength(50);
+      expect(s.dropped).toBe(58 - 50);
+      // Newest first, and what fell off the end is the oldest — not an
+      // arbitrary 50 with the number quietly swallowed.
+      const times = s.feed.map((e) => e.at);
+      expect([...times].sort().reverse()).toEqual(times);
+    } finally {
+      convs["key-alice"] = kept;
+    }
+  });
+
+  test("an owner whose key Fountain refuses reports nothing, rather than failing the survey", async () => {
+    const kept = KEYS["key-bob"]!;
+    delete KEYS["key-bob"];
+    try {
+      const s = await surveyOf("bob");
+      // Alice's key still answered, so her project's half of his survey is
+      // there. His own project is simply quiet — one dead key is a hole in
+      // the sweep, not a screen that fails to load.
+      expect(s.feed.map((e) => e.conversationId)).toEqual(["s-failed", "s-idle", "s-orphan"]);
+      expect(s.projects.bobproj).toEqual({ live: 0, latest: null });
+    } finally {
+      KEYS["key-bob"] = kept;
+    }
   });
 });
 

@@ -116,36 +116,117 @@ export async function list(ctx: AppContext, req: Request): Promise<Response> {
   return json({ data: rows.map((p) => projectDto(ctx, p, p.owner_email === user.email ? "owner" : "member", counts.get(p.id))) });
 }
 
+/** What is happening in one project: how many conversations are working, and when anything last happened. */
+export interface Activity {
+  live: number;
+  latest: string | null;
+}
+
 /**
- * What is happening in each of the caller's projects: how many conversations
- * are working, and when anything last happened. One Fountain call per
- * distinct owner, all in parallel; an owner whose key fails just reports nothing.
+ * One conversation that has stopped with something nobody has read.
+ *
+ * It carries where it is as well as what it is, because the whole point of
+ * the feed is that you are somewhere else: a browser reading this is not in
+ * the project the entry names and has no store for it, so the project and
+ * item are spelled out here rather than looked up there.
+ */
+export interface FeedEntry {
+  conversationId: string;
+  projectId: string;
+  projectName: string;
+  itemId: string;
+  /** Null for an item deleted here whose conversation still names it. */
+  itemTitle: string | null;
+  /** Fountain generates one from the first turn; null until there is one. */
+  title: string | null;
+  agentId: string | null;
+  /** `idle` — the turn ended and it is waiting on you. `failed` — it fell over. */
+  status: "idle" | "failed";
+  /** When it last said anything. */
+  at: string;
+}
+
+export interface ActivityDto {
+  projects: Record<string, Activity>;
+  /** Newest first, capped. */
+  feed: FeedEntry[];
+  /** Entries past the cap, so the panel says what it is not showing rather than implying there is no more. */
+  dropped: number;
+}
+
+/**
+ * A conversation is in the feed when it has stopped and nobody has read what
+ * it last said. `running` and `pending` are still working — the projects list
+ * counts those as live and they are not news; `terminated` is a conversation
+ * whose work is over, and closing a work item retires every conversation on
+ * it, so counting those would turn "done" into a screenful of notifications.
+ */
+const FEED_STATUSES = new Set(["idle", "failed"]);
+
+/**
+ * The feed is a list, not an archive: an account that has ignored its
+ * conversations for a month should not push a thousand rows down the wire.
+ */
+const FEED_MAX = 50;
+
+/**
+ * What is happening across every project the caller is in, in the two shapes
+ * the app reads it in: per project, how much is working and when anything last
+ * happened (the projects list); and a flat feed of conversations that have
+ * stopped with something unread (the notification panel in the top bar).
+ *
+ * Both come out of one pass over the same listing, because they are the same
+ * question asked twice — one Fountain call per distinct owner, all in
+ * parallel; an owner whose key fails just reports nothing.
+ *
+ * `unread` is Fountain's own (`last_active_at` later than `last_read_at`), and
+ * it is the owner's: every conversation in a project runs on the owner's key,
+ * so opening a thread marks it read for everyone in the project, exactly as
+ * the sidebar's unread dot already works. A shared project shares its inbox.
  */
 export async function activity(ctx: AppContext, req: Request): Promise<Response> {
   const user = await authenticate(ctx, req);
   const rows = ctx.db.projectsFor(user.email);
-  const mine = new Set(rows.map((p) => p.id));
+  const mine = new Map(rows.map((p) => [p.id, p]));
   const byOwner = new Map<string, ProjectRow>();
   for (const p of rows) if (!byOwner.has(p.owner_email)) byOwner.set(p.owner_email, p);
-  const out: Record<string, { live: number; latest: string | null }> = {};
+  const out: Record<string, Activity> = {};
   for (const p of rows) out[p.id] = { live: 0, latest: null };
+  const feed: FeedEntry[] = [];
   await Promise.allSettled(
     [...byOwner.values()].map(async (p) => {
       const client = await ownerClient(ctx, p);
       const convs = await client.conversations({ roots_only: "true" });
       for (const c of convs) {
         const ref = parseChannel(c.channel_id);
-        if (!ref || !mine.has(ref.projectId)) continue;
+        if (!ref) continue;
+        const project = mine.get(ref.projectId);
         // Only this owner's projects: the same id under another owner is not this conversation's.
-        if (ctx.db.getProject(ref.projectId)?.owner_email !== p.owner_email) continue;
-        const a = out[ref.projectId]!;
+        if (!project || project.owner_email !== p.owner_email) continue;
+        const a = out[project.id]!;
         if (c.status === "running" || c.status === "pending") a.live += 1;
         const at = c.last_active_at ?? c.updated_at ?? c.inserted_at ?? null;
         if (at && (!a.latest || at > a.latest)) a.latest = at;
+        if (!at || c.unread !== true || !FEED_STATUSES.has(c.status ?? "")) continue;
+        feed.push({
+          conversationId: c.id,
+          projectId: project.id,
+          projectName: project.name,
+          itemId: ref.itemId,
+          itemTitle: ctx.db.getItem(ref.itemId)?.title ?? null,
+          title: typeof c.title === "string" && c.title ? c.title : null,
+          agentId: typeof c.agent_id === "string" && c.agent_id ? c.agent_id : null,
+          status: c.status === "failed" ? "failed" : "idle",
+          at,
+        });
       }
     }),
   );
-  return json({ data: out });
+  // Ties break on id so the order is total, and the panel does not shuffle
+  // two conversations that stopped in the same millisecond under the pointer.
+  feed.sort((a, b) => b.at.localeCompare(a.at) || a.conversationId.localeCompare(b.conversationId));
+  const dto: ActivityDto = { projects: out, feed: feed.slice(0, FEED_MAX), dropped: Math.max(0, feed.length - FEED_MAX) };
+  return json({ data: dto });
 }
 
 export async function create(ctx: AppContext, req: Request): Promise<Response> {

@@ -53,6 +53,32 @@ export interface Activity {
   latest: string | null;
 }
 
+/**
+ * One conversation that stopped with something nobody has read — a row of the
+ * feed in the top bar. It names its project and item as well as itself,
+ * because a browser reading it is by definition somewhere else and has no
+ * store for the project the entry points into (server/projects.ts).
+ */
+export interface FeedEntry {
+  conversationId: string;
+  projectId: string;
+  projectName: string;
+  itemId: string;
+  itemTitle: string | null;
+  title: string | null;
+  agentId: string | null;
+  status: "idle" | "failed";
+  at: string;
+}
+
+/** What one survey of every project you are in came back with. */
+export interface ActivityDto {
+  projects: Record<string, Activity>;
+  feed: FeedEntry[];
+  /** Entries past the server's cap; shown, never silently dropped. */
+  dropped: number;
+}
+
 export interface Me {
   email: string;
   fountainUrl: string;
@@ -196,7 +222,7 @@ export const api = {
   costPeriod: () => data(call<{ data: PeriodCost }>("GET", "/api/me/cost/period")),
 
   projects: () => data(call<{ data: ProjectDto[] }>("GET", "/api/projects")),
-  activity: () => data(call<{ data: Record<string, Activity> }>("GET", "/api/projects/activity")),
+  activity: () => data(call<{ data: ActivityDto }>("GET", "/api/projects/activity")),
   createProject: (input: { name: string; notes?: string; environmentId?: string | null; vaultId?: string | null }) => data(call<{ data: ProjectDto }>("POST", "/api/projects", input)),
   project: (id: string) => data(call<{ data: { project: ProjectDto; items: ItemDto[] } }>("GET", `/api/projects/${id}`)),
   patchProject: (id: string, patch: Partial<Pick<ProjectDto, "name" | "notes" | "environmentId" | "vaultId" | "defaultAgentId">>) => data(call<{ data: ProjectDto }>("PATCH", `/api/projects/${id}`, patch)),

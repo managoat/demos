@@ -17,16 +17,31 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { Fountain } from "@agentshit/fountain-sdk";
 import type { Agent, Conversation, Environment, SandboxRecord, UserEvent, Vault } from "./types";
 import { computersOf } from "./lib/sidebar";
-import { api, ApiError, projectFountainBase, type Activity, type ItemDto, type ItemPatch, type Me, type ProjectDto } from "./lib/api";
+import { api, ApiError, projectFountainBase, type ActivityDto, type ItemDto, type ItemPatch, type Me, type ProjectDto } from "./lib/api";
 import { startBody, type StartInput } from "./lib/start";
 import { readSse } from "./lib/sse";
 import { describeError } from "./lib/errors";
+import { feedRead, NO_ACTIVITY } from "./lib/feed";
 import { retiredMessage } from "./lib/workbench";
 
 export type EventHandler = (ev: UserEvent) => void;
 
 const THREAD_STREAMS = ["acp", "stdout", "stage"];
 const LAST_PROJECT = "fountain-workbench.lastProject";
+
+/**
+ * How often the survey is re-read, and why it is a poll at all.
+ *
+ * The event stream this app runs on is a *project's* — `/f/<project>/…`,
+ * filtered per project by server/proxy.ts — and a browser holds exactly the
+ * one it is looking at. So there is no wire down which "the agent in your
+ * other project just finished" could arrive, and one request a minute is what
+ * tells this tab instead. It costs one Fountain conversation-list call per
+ * distinct project owner, which is what the projects list already spends on
+ * every visit, and it stops while the tab is in the background — a survey
+ * nobody can see is a request nobody asked for.
+ */
+const SURVEY_MS = 60_000;
 
 /** The project this browser was in last, to land there again. */
 export function loadLastProject(): string | null {
@@ -43,9 +58,12 @@ export interface Workbench {
   me: Me;
   projects: ProjectDto[];
   projectsLoaded: boolean;
-  activity: Record<string, Activity>;
+  /** Every project you are in, surveyed: what is live in each, and what stopped unread across all of them. */
+  activity: ActivityDto;
   refreshProjects: () => Promise<ProjectDto[] | null>;
   refreshActivity: () => Promise<void>;
+  /** This browser has just read a conversation, so take it out of the feed now rather than at the next survey. */
+  markRead: (conversationId: string) => void;
   toast: (text: string, kind?: "info" | "error") => void;
   signOut: () => void;
 }
@@ -67,7 +85,7 @@ interface Toast {
 export function WorkbenchProvider({ me, onSignOut, children }: { me: Me; onSignOut: () => void; children: ReactNode }) {
   const [projects, setProjects] = useState<ProjectDto[]>([]);
   const [projectsLoaded, setProjectsLoaded] = useState(false);
-  const [activity, setActivity] = useState<Record<string, Activity>>({});
+  const [activity, setActivity] = useState<ActivityDto>(NO_ACTIVITY);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const toast = useCallback((text: string, kind: Toast["kind"] = "info") => {
@@ -93,8 +111,14 @@ export function WorkbenchProvider({ me, onSignOut, children }: { me: Me; onSignO
     try {
       setActivity(await api.activity());
     } catch {
-      // decoration only
+      // A survey that did not come back leaves the last one standing: a feed
+      // that emptied itself on one failed request would say "nothing waiting",
+      // which is the one thing it must never say wrongly.
     }
+  }, []);
+
+  const markRead = useCallback((conversationId: string) => {
+    setActivity((a) => feedRead(a, conversationId));
   }, []);
 
   useEffect(() => {
@@ -102,14 +126,29 @@ export function WorkbenchProvider({ me, onSignOut, children }: { me: Me; onSignO
     void refreshActivity();
   }, [refreshProjects, refreshActivity]);
 
+  // See SURVEY_MS: nothing streams across projects, so this is what notices.
+  // Coming back to the tab surveys straight away — that is the moment the
+  // question "what happened while I was away" is actually being asked.
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState === "visible") void refreshActivity();
+    };
+    const timer = window.setInterval(tick, SURVEY_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [refreshActivity]);
+
   const signOut = useCallback(() => {
     void api.signOut().catch(() => undefined);
     onSignOut();
   }, [onSignOut]);
 
   const value = useMemo<Workbench>(
-    () => ({ me, projects, projectsLoaded, activity, refreshProjects, refreshActivity, toast, signOut }),
-    [me, projects, projectsLoaded, activity, refreshProjects, refreshActivity, toast, signOut],
+    () => ({ me, projects, projectsLoaded, activity, refreshProjects, refreshActivity, markRead, toast, signOut }),
+    [me, projects, projectsLoaded, activity, refreshProjects, refreshActivity, markRead, toast, signOut],
   );
 
   return (

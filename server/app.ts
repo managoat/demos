@@ -11,7 +11,8 @@
  *   GET    /api/me/cost/period              the same projects in turn hours over the bill's own window (cost.ts)
  *   GET    /api/projects                    mine: owned and shared with me
  *   POST   /api/projects
- *   GET    /api/projects/activity           live counts and last activity, per project
+ *   GET    /api/projects/activity           per project: live counts and last activity; and across
+ *                                           all of them, the conversations that stopped unread
  *   POST   /api/projects/recover            rebuild my projects from my Fountain conversations
  *   POST   /api/import                      the tree an old browser kept in localStorage
  *   GET    /api/projects/:id                project + items

@@ -21,6 +21,8 @@ export interface ConversationSummary {
   inserted_at?: string;
   last_active_at?: string | null;
   updated_at?: string | null;
+  /** `last_active_at` is later than `last_read_at` — nobody on the owner's key has read what it last said. */
+  unread?: boolean;
   turn_count?: number;
   /** Running sums over the turns that reported one — lifetime, not per billing period. */
   usage_total?: { input?: number; output?: number };

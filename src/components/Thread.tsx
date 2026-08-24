@@ -9,7 +9,7 @@
  * at the same place — the turn scrolled to and marked in the margin.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import { useProject } from "../store";
+import { useProject, useWorkbench } from "../store";
 import type { Stream } from "@agentshit/fountain-sdk";
 import type { Conversation, LogEvent, Turn, UserEvent } from "../types";
 import { arrange } from "../lib/blocks";
@@ -27,6 +27,8 @@ const HISTORY_STREAMS: Stream[] = ["acp", "stdout", "stage"];
 
 export function Thread({ conversationId, onClose, context, focusTurnId }: { conversationId: string; onClose?: () => void; context?: ReactNode; focusTurnId?: string | null }) {
   const { project, fountain, conversations, agents, sandboxes, subscribe, toast, refresh } = useProject();
+  // Reading a conversation is what takes it out of the feed in the top bar.
+  const { markRead } = useWorkbench();
   const listed = conversations.find((c) => c.id === conversationId) ?? null;
   const [fetched, setFetched] = useState<Conversation | null>(null);
   // The list has the live status; the show has the sandbox (the list never embeds it).
@@ -70,7 +72,13 @@ export function Thread({ conversationId, onClose, context, focusTurnId }: { conv
         setTurns(ts);
         // Live events may have landed while the history was in flight; keep them.
         setEvents((prev) => mergeById(history, prev));
-        void handle.markRead().then(() => refresh());
+        // Fountain's read mark is what the feed is surveyed against, so move
+        // the local one with it rather than leaving the row up until the next
+        // survey — a minute of watching something you have just opened.
+        void handle.markRead().then(() => {
+          markRead(conversationId);
+          refresh();
+        });
       } catch (err) {
         if (!cancelled) toast(describeError(err), "error");
       } finally {
@@ -80,7 +88,7 @@ export function Thread({ conversationId, onClose, context, focusTurnId }: { conv
     return () => {
       cancelled = true;
     };
-  }, [conversationId, fountain, toast, refresh]);
+  }, [conversationId, fountain, toast, refresh, markRead]);
 
   // Live: append what the user-wide stream delivers for this conversation.
   useEffect(() => {

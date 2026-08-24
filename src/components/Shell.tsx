@@ -10,6 +10,10 @@
  * what there is, the panel says what the thread you are reading is running
  * with (`DetailsPanel`). It describes a conversation, so its toggle is in
  * the top bar only while you are on one.
+ *
+ * The 🔔 is the one thing in the frame that is not about the project you are
+ * in — it is what finished in the others (`Feed`), which no page here can
+ * tell you — so it is on every screen, in a project or not.
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { useProjectMaybe, useWorkbench } from "../store";
@@ -21,6 +25,7 @@ import { ThemePicker } from "./ThemePicker";
 import { Palette } from "./Palette";
 import { DetailsPanel } from "./DetailsPanel";
 import { loadPanelOpen, savePanelOpen } from "../lib/details";
+import { Feed } from "./Feed";
 
 export function Shell({ children }: { children: ReactNode }) {
   const { me, projects, signOut } = useWorkbench();
@@ -123,6 +128,9 @@ export function Shell({ children }: { children: ReactNode }) {
             {me.email}
           </span>
         )}
+        {/* On every page, in a project or not: what finished elsewhere is
+            exactly what the page you are on cannot tell you. */}
+        <Feed />
         <ThemePicker />
         <button className="secondary small" onClick={signOut}>
           sign out

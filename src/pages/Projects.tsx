@@ -72,7 +72,7 @@ export function Projects() {
   const shared = projects.filter((p) => p.role !== "owner");
 
   const row = (p: (typeof projects)[number]) => {
-    const a = activity[p.id];
+    const a = activity.projects[p.id];
     return (
       <li key={p.id}>
         <a className="conv-row" href={href.project(p.id)}>

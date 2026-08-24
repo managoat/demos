@@ -179,6 +179,41 @@ from when this browser last opened the item (kept per item, so a reload does
 not lose your place); a held request is not, because a glance at the page
 must not be what makes "3 agents are blocked waiting on you" disappear.
 
+**And what happened while you were in another project.** The digest above is
+a work item's, folded out of the stream the page already holds — and that
+stream is one *project's* (`/f/<project>/api/events/stream`, filtered per
+project by the proxy), of which a browser holds exactly the one it is looking
+at. So a teammate finishing in your other project had no wire into this tab
+at all: you found out by going there. The **🔔** in the top bar is the wire.
+It is on every page, in a project or not, and it carries a count.
+
+What lands in it is one rule: **a conversation that has stopped, with something
+nobody has read.** Stopped is `idle` or `failed` — `running` and `pending` are
+still working, which the projects list already counts as live and which is not
+news; `terminated` is a conversation whose work is over, and since closing a
+work item retires every conversation on it, counting those would turn "done"
+into a screenful of notifications. Unread is Fountain's own — `last_active_at`
+later than `last_read_at` — so opening the thread is what clears the row, and
+nothing in the panel dismisses without reading. That is deliberate: a "clear
+all" would let the one screen that says an agent is waiting be silenced by
+somebody who never looked, which is where this started. It also means the mark
+is not this browser's, unlike the digest's: read state lives on the
+conversation, shared by everyone in the project the way everything else in a
+project is, so answering a teammate on your laptop does not leave the same row
+waiting on your desk.
+
+It is a **poll**, once a minute, and only while the tab is on screen — because
+there is no cross-project stream to read, and one request a minute is cheaper
+than inventing one. It costs a conversation-list call per distinct project
+owner, which is what the projects list already spends on every visit, and both
+facts come out of that one listing: `GET /api/projects/activity` answers what
+is live per project *and* the feed across all of them. Rows are grouped by
+project, because "which project is this in" is the fact the reader is missing;
+the project you are standing in sinks to the bottom, labelled, since what is in
+front of you is the one thing you did not need telling about. The list is
+capped at 50 and the panel says how many it is not showing, rather than
+implying there is no more.
+
 **And you can unblock it where it asked.** An agent under an `ask` permission
 stops before the tool runs, and Fountain puts the ask on the conversation as a
 `permission_request` block. The transcript renders it as a card with buttons —
@@ -471,6 +506,7 @@ src/
   lib/search.ts      what ⌘K and ⌘F search: names locally, messages through the proxy
   lib/turns.ts       fold a log feed into turns for the chat view
   lib/digest.ts      a work item's stage stream → what happened since you last looked
+  lib/feed.ts        the same question across every project: what stopped unread, and where
   lib/details.ts     what a conversation runs with: its computer, its skills and MCP servers, the policy in force
   lib/board.ts       the items as columns, and which drags between them are real writes
   lib/blocks.ts      arrange server-parsed blocks (from fountain-conversations)
@@ -478,7 +514,7 @@ src/
   lib/draft.ts       a field's draft and the debounced save behind it
   lib/theme.ts       the palette list; the blocks themselves are in styles.css
   pages/             Projects, Project (items as a list or a board, people), WorkItem, Team, Cost
-  components/        Thread, ThreadFind (⌘F), DetailsPanel, Board, ItemDigest, Palette (⌘K), StartDialog, Attachments, EnvVaultFields, Blocks, ItemStatus, SignIn, Layout
+  components/        Thread, ThreadFind (⌘F), DetailsPanel, Board, ItemDigest, Feed (🔔), Palette (⌘K), StartDialog, Attachments, EnvVaultFields, Blocks, ItemStatus, SignIn, Layout
 ```
 
 ## Licence
