@@ -29,7 +29,21 @@ const KEYS: Record<string, { id: string; email: string }> = {
   "key-dave": { id: "u-dave", email: "dave@example.com" },
 };
 
+interface FakeHit {
+  kind: "title" | "prompt" | "reply";
+  conversation_id: string;
+  agent_id: string | null;
+  turn_id: string | null;
+  turn_number: number | null;
+  snippet: string;
+  ts: string;
+}
+
 const convs: Record<string, FakeConv[]> = { "key-alice": [], "key-bob": [], "key-carol": [], "key-dave": [] };
+/** What `GET /api/search` has to offer, per key, before `q` and paging are applied. */
+const hits: Record<string, FakeHit[]> = { "key-alice": [], "key-bob": [], "key-carol": [], "key-dave": [] };
+/** Every search the fake was asked for, to see what the proxy actually sent. */
+const searched: { key: string; q: string; limit: string | null; offset: string | null; conversation_id: string[] }[] = [];
 const posted: { key: string; body: Record<string, unknown> }[] = [];
 /** Prompt bodies this fake was sent, in order. */
 const prompted: { prompt?: string; images?: unknown[] }[] = [];
@@ -94,6 +108,21 @@ const fountain = Bun.serve({
       const on = convs[key]!.filter((c) => c.sandbox_id === sb[1]);
       if (on.length === 0) return Response.json({ error: "not_found" }, { status: 404 });
       return Response.json({ data: { id: sb[1], sprite_name: `sprite-${sb[1]}`, status: "ready", conversations: on.map((c) => ({ id: c.id, status: c.status, mid_turn: false })) } });
+    }
+    if (path === "/api/search") {
+      const q = url.searchParams.get("q") ?? "";
+      // Fountain refuses a blank query, and the whole account is the scope
+      // unless `conversation_id` narrows it — the thing the proxy has to fix.
+      if (!q.trim()) return Response.json({ error: "bad_query" }, { status: 400 });
+      const only = url.searchParams.getAll("conversation_id");
+      searched.push({ key, q, limit: url.searchParams.get("limit"), offset: url.searchParams.get("offset"), conversation_id: only });
+      const limit = Number(url.searchParams.get("limit") ?? 20);
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      // Repeated params: Phoenix reads the last, which is what makes forwarding the raw query wrong.
+      // `q=leaky` is a Fountain that ignores the scoping it was asked for.
+      const narrow = q === "leaky" || !only.length ? null : only[only.length - 1];
+      const all = (hits[key] ?? []).filter((h) => h.snippet.includes(q) && (!narrow || h.conversation_id === narrow));
+      return Response.json({ data: all.slice(offset, offset + limit), meta: { limit, offset, has_more: offset + limit < all.length } });
     }
     if (path === "/api/agents") return Response.json({ data: [{ id: "a1", name: "Coder" }] });
     if (path === "/api/environments") return Response.json({ data: [{ id: "e1", name: "one" }, { id: "e2", name: "two" }] });
@@ -449,6 +478,150 @@ describe("the project-scoped proxy", () => {
     expect(text).not.toContain('"conversation_id":"c2"');
     expect(text).not.toContain('"conversation_id":"c3"');
     expect(text).toContain("event: conversations");
+  });
+});
+
+describe("search across the project's conversations", () => {
+  /** Alice's account: one conversation in the project, one personal, one in another project of hers. */
+  beforeAll(() => {
+    const conv = (id: string, channel: string | null): FakeConv => ({
+      id,
+      channel_id: channel,
+      title: null,
+      agent_id: "a1",
+      environment_id: "e1",
+      vault_id: "v1",
+      sandbox_id: "sbS",
+      status: "idle",
+      inserted_at: "2026-08-23T00:00:00Z",
+    });
+    convs["key-alice"] = [conv("s1", `workbench:${projectId}/${itemId}/aaaaaaaaaaaa`), conv("s2", "fountain:team"), conv("s3", "workbench:otherproj/item9")];
+    const hit = (conversation_id: string, kind: FakeHit["kind"], snippet: string, turn: number | null = null): FakeHit => ({
+      kind,
+      conversation_id,
+      agent_id: "a1",
+      turn_id: turn === null ? null : `t-${conversation_id}-${turn}`,
+      turn_number: turn,
+      snippet,
+      ts: "2026-08-23T01:00:00Z",
+    });
+    hits["key-alice"] = [
+      hit("s2", "reply", "needle — the salary review thread"),
+      hit("s3", "title", "needle — another project of Alice's"),
+      hit("s1", "reply", "needle — in this project", 3),
+      hit("s2", "prompt", "needle — Alice's own notes", 1),
+      hit("s1", "title", "needle — this project's conversation", null),
+    ];
+  });
+
+  test("a member sees this project's hits and nothing else of the owner's", async () => {
+    const res = await call("bob", "GET", `/f/${projectId}/api/search?q=needle`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: FakeHit[]; meta: { limit: number; offset: number; has_more: boolean } };
+    expect(body.data.map((h) => h.conversation_id)).toEqual(["s1", "s1"]);
+    // Not one word of the owner's other conversations came back with it.
+    expect(JSON.stringify(body)).not.toContain("salary");
+    expect(JSON.stringify(body)).not.toContain("another project");
+    expect(body.meta.has_more).toBe(false);
+    // The hit carries where to jump: the conversation, and the turn when there is one.
+    expect(body.data[0]).toMatchObject({ kind: "reply", turn_id: "t-s1-3", turn_number: 3 });
+  });
+
+  test("the owner gets the same narrowing — a project is a project, whoever is asking", async () => {
+    const body = (await (await call("alice", "GET", `/f/${projectId}/api/search?q=needle`)).json()) as { data: FakeHit[] };
+    expect(body.data.map((h) => h.conversation_id)).toEqual(["s1", "s1"]);
+  });
+
+  test("limit and offset window this project's hits, not the owner's", async () => {
+    const first = (await (await call("bob", "GET", `/f/${projectId}/api/search?q=needle&limit=1`)).json()) as { data: FakeHit[]; meta: { has_more: boolean } };
+    expect(first.data).toHaveLength(1);
+    expect(first.data[0]!.kind).toBe("reply");
+    expect(first.meta.has_more).toBe(true);
+    const second = (await (await call("bob", "GET", `/f/${projectId}/api/search?q=needle&limit=1&offset=1`)).json()) as { data: FakeHit[]; meta: { has_more: boolean } };
+    expect(second.data[0]!.kind).toBe("title");
+    expect(second.meta.has_more).toBe(false);
+  });
+
+  test("naming a conversation scopes the query at Fountain, and only for one of this project's", async () => {
+    searched.length = 0;
+    const ok = await call("bob", "GET", `/f/${projectId}/api/search?q=needle&conversation_id=s1`);
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as { data: FakeHit[] }).data.map((h) => h.conversation_id)).toEqual(["s1", "s1"]);
+    expect(searched).toHaveLength(1);
+    expect(searched[0]!.conversation_id).toEqual(["s1"]);
+    // The owner's own, and another project's: not this project's to search.
+    expect((await call("bob", "GET", `/f/${projectId}/api/search?q=needle&conversation_id=s2`)).status).toBe(404);
+    expect((await call("bob", "GET", `/f/${projectId}/api/search?q=needle&conversation_id=s3`)).status).toBe(404);
+    expect((await call("bob", "GET", `/f/${projectId}/api/search?q=needle&conversation_id=nope`)).status).toBe(404);
+  });
+
+  test("a repeated conversation_id cannot smuggle one past the check", async () => {
+    // We read the first and Fountain would read the last, so the query is rebuilt, never forwarded.
+    searched.length = 0;
+    const res = await call("bob", "GET", `/f/${projectId}/api/search?q=needle&conversation_id=s1&conversation_id=s2`);
+    expect(res.status).toBe(200);
+    expect(searched[0]!.conversation_id).toEqual(["s1"]);
+    expect(((await res.json()) as { data: FakeHit[] }).data.every((h) => h.conversation_id === "s1")).toBe(true);
+    // The other way round is refused outright.
+    expect((await call("bob", "GET", `/f/${projectId}/api/search?q=needle&conversation_id=s2&conversation_id=s1`)).status).toBe(404);
+  });
+
+  test("a blank query is refused here, without asking Fountain", async () => {
+    searched.length = 0;
+    const res = await call("bob", "GET", `/f/${projectId}/api/search?q=%20%20`);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("bad_query");
+    expect(searched).toEqual([]);
+  });
+
+  test("a non-member cannot search the project at all", async () => {
+    expect((await call("carol", "GET", `/f/${projectId}/api/search?q=needle`)).status).toBe(404);
+    expect((await call(null, "GET", `/f/${projectId}/api/search?q=needle`)).status).toBe(401);
+  });
+
+  test("this project's hits are dug out from behind pages of the owner's, on the owner's key", async () => {
+    // Fountain's limit and offset count the owner's hits, so a member's first
+    // hit can sit on the owner's third page. Forwarding them would answer
+    // "nothing"; the proxy pages upstream itself.
+    const junk = (i: number): FakeHit => ({ kind: "reply", conversation_id: "s2", agent_id: "a1", turn_id: `t-junk-${i}`, turn_number: i, snippet: `haystack ${i} — the owner's own`, ts: "2026-08-23T01:00:00Z" });
+    hits["key-alice"] = [...Array.from({ length: 250 }, (_, i) => junk(i)), { kind: "reply", conversation_id: "s1", agent_id: "a1", turn_id: "t-deep", turn_number: 9, snippet: "haystack — in this project", ts: "2026-08-23T01:00:00Z" }];
+    searched.length = 0;
+    const body = (await (await call("bob", "GET", `/f/${projectId}/api/search?q=haystack`)).json()) as { data: FakeHit[]; meta: { has_more: boolean } };
+    expect(body.data.map((h) => h.turn_id)).toEqual(["t-deep"]);
+    expect(body.meta.has_more).toBe(false);
+    expect(searched.every((s) => s.key === "key-alice")).toBe(true);
+    expect(searched.map((s) => s.offset)).toEqual(["0", "100", "200"]);
+  });
+
+  test("digging stops somewhere, and says so rather than claiming the end", async () => {
+    // Deeper than the proxy will read: the answer is empty but honest, so the
+    // palette can offer "narrow it" instead of "no results".
+    hits["key-alice"] = Array.from({ length: 600 }, (_, i) => ({ kind: "reply" as const, conversation_id: "s2", agent_id: "a1", turn_id: `t-far-${i}`, turn_number: i, snippet: `farfetched ${i}`, ts: "2026-08-23T01:00:00Z" }));
+    searched.length = 0;
+    const body = (await (await call("bob", "GET", `/f/${projectId}/api/search?q=farfetched`)).json()) as { data: FakeHit[]; meta: { has_more: boolean } };
+    expect(body.data).toEqual([]);
+    expect(body.meta.has_more).toBe(true);
+    expect(searched).toHaveLength(5);
+  });
+
+  test("a scoped query is checked on the way back too, so no route trusts the scoping alone", async () => {
+    hits["key-alice"] = [
+      { kind: "reply", conversation_id: "s2", agent_id: "a1", turn_id: "t-own", turn_number: 1, snippet: "leaky", ts: "2026-08-23T01:00:00Z" },
+      { kind: "reply", conversation_id: "s1", agent_id: "a1", turn_id: "t-ours", turn_number: 1, snippet: "leaky", ts: "2026-08-23T01:00:00Z" },
+    ];
+    const body = (await (await call("bob", "GET", `/f/${projectId}/api/search?q=leaky&conversation_id=s1`)).json()) as { data: FakeHit[] };
+    expect(body.data.map((h) => h.turn_id)).toEqual(["t-ours"]);
+  });
+
+  test("a hit is placed by its channel, not by anything the hit itself claims", async () => {
+    // A conversation the list does not carry is fetched and read; one that is
+    // not there at all is dropped, not passed through on the benefit of doubt.
+    hits["key-alice"] = [
+      { kind: "reply", conversation_id: "ghost", agent_id: "a1", turn_id: "t-ghost", turn_number: 1, snippet: "spectral", ts: "2026-08-23T01:00:00Z" },
+      { kind: "reply", conversation_id: "s1", agent_id: "a1", turn_id: "t-real", turn_number: 1, snippet: "spectral", ts: "2026-08-23T01:00:00Z" },
+    ];
+    const body = (await (await call("bob", "GET", `/f/${projectId}/api/search?q=spectral`)).json()) as { data: FakeHit[] };
+    expect(body.data.map((h) => h.turn_id)).toEqual(["t-real"]);
   });
 });
 

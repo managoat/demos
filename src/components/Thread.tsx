@@ -19,7 +19,7 @@ import { turnImageUrl } from "../lib/api";
 
 const HISTORY_STREAMS: Stream[] = ["acp", "stdout", "stage"];
 
-export function Thread({ conversationId, onClose, context }: { conversationId: string; onClose?: () => void; context?: ReactNode }) {
+export function Thread({ conversationId, onClose, context, focusTurnId }: { conversationId: string; onClose?: () => void; context?: ReactNode; focusTurnId?: string | null }) {
   const { project, fountain, conversations, agents, sandboxes, subscribe, toast, refresh } = useProject();
   const listed = conversations.find((c) => c.id === conversationId) ?? null;
   const [fetched, setFetched] = useState<Conversation | null>(null);
@@ -34,7 +34,9 @@ export function Thread({ conversationId, onClose, context }: { conversationId: s
   const [sending, setSending] = useState(false);
   const attachments = useAttachments(useCallback((message: string) => toast(message, "error"), [toast]));
   const scroller = useRef<HTMLDivElement>(null);
-  const stickToBottom = useRef(true);
+  // Arriving on a turn (a search hit) means reading there, not at the bottom.
+  const stickToBottom = useRef(!focusTurnId);
+  const landed = useRef<string | null>(null);
 
   const agent = conversation?.agent_id ? agents.get(conversation.agent_id) ?? null : null;
   const who = agent?.name ?? conversation?.runtime ?? "agent";
@@ -113,6 +115,16 @@ export function Thread({ conversationId, onClose, context }: { conversationId: s
     el.scrollTop = el.scrollHeight;
   }, [events, turns, loading]);
 
+  // A search hit names a turn: scroll to it once it is on screen — once, so
+  // that output arriving afterwards does not keep yanking the view back.
+  useEffect(() => {
+    if (!focusTurnId || landed.current === focusTurnId) return;
+    const el = scroller.current?.querySelector<HTMLElement>(`[data-turn="${CSS.escape(focusTurnId)}"]`);
+    if (!el) return;
+    landed.current = focusTurnId;
+    el.scrollIntoView({ block: "center" });
+  }, [focusTurnId, turns, events]);
+
   const onScroll = useCallback(() => {
     const el = scroller.current;
     if (!el) return;
@@ -190,7 +202,7 @@ export function Thread({ conversationId, onClose, context }: { conversationId: s
         {loading && <div className="term-line muted"># loading…</div>}
         {folded.setup.length > 0 && <SetupLine events={folded.setup} done={folded.turns.length > 0} />}
         {folded.turns.map(({ turn, events: evs }) => (
-          <div className={`turn ${turn.status}`} key={turn.id}>
+          <div className={`turn ${turn.status} ${turn.id === focusTurnId ? "found" : ""}`} key={turn.id} data-turn={turn.id}>
             <div className="term-prompt">
               <span className="ps1" aria-hidden="true">
                 ❯

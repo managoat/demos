@@ -13,3 +13,11 @@ test("routes", () => {
   // The older item-scoped form still opens the conversation.
   expect(parseRoute("#/p/abc/w/def/c/c1")).toEqual({ page: "conversation", projectId: "abc", conversationId: "c1" });
 });
+
+test("a search hit lands on the turn it matched", () => {
+  expect(parseRoute(href.conversation("abc", "c1", "t9"))).toEqual({ page: "conversation", projectId: "abc", conversationId: "c1", turnId: "t9" });
+  expect(parseRoute("#/p/abc/w/def/c/c1/t/t9")).toEqual({ page: "conversation", projectId: "abc", conversationId: "c1", turnId: "t9" });
+  // A title hit names no turn, and the anchor is simply absent.
+  expect(href.conversation("abc", "c1", null)).toBe("#/p/abc/c/c1");
+  expect(parseRoute("#/p/abc/c/c1/t")).toEqual({ page: "conversation", projectId: "abc", conversationId: "c1" });
+});

@@ -15,6 +15,7 @@
  *                                           tree, stream, a turn's image bytes — after checking :id
  *                                           is in the project
  *   GET  /api/sandboxes/:id                 one computer, if a conversation of the project is on it
+ *   GET  /api/search                        full text, cut down to hits in this project's conversations
  *   GET  /api/agents, /api/agents/:id/avatar  the owner's agents (the team)
  *   GET  /api/environments, /api/vaults     the owner sees all; a member sees the project's
  *   GET  /api/events/stream                 the owner's stream, filtered to the project, plus
@@ -27,7 +28,7 @@ import { channelPrefix, newConversationChannel, parseChannel } from "../shared/c
 import { imagesProblem } from "../shared/images";
 import { authenticate, ownerClient, projectAccess, type AppContext } from "./context";
 import type { ProjectRow, Role } from "./db";
-import type { ConversationSummary, FountainClient } from "./fountain";
+import type { ConversationSummary, FountainClient, SearchHit } from "./fountain";
 import { HttpError, json, readJson } from "./http";
 import { addTeammate, reconcileItems } from "./projects";
 
@@ -43,6 +44,12 @@ function remember(c: ConversationSummary): void {
 /** For tests: forget every cached conversation. */
 export function resetProxyCache(): void {
   convProject.clear();
+}
+
+/** Whether we still trust what we know about this conversation. */
+function known(conversationId: string): boolean {
+  const hit = convProject.get(conversationId);
+  return !!hit && Date.now() - hit.at < CACHE_TTL_MS;
 }
 
 async function belongs(client: FountainClient, projectId: string, conversationId: string): Promise<boolean> {
@@ -95,6 +102,8 @@ export async function handleProxy(ctx: AppContext, req: Request, projectId: stri
 
   const sandbox = /^\/api\/sandboxes\/([^/]+)$/.exec(path);
   if (sandbox && method === "GET") return showSandbox(scope, decodeURIComponent(sandbox[1]!));
+
+  if (method === "GET" && path === "/api/search") return search(scope, url);
 
   if (method === "GET" && (path === "/api/agents" || /^\/api\/agents\/[^/]+\/avatar$/.test(path))) {
     return forward(client, req, path, url.search);
@@ -216,6 +225,132 @@ async function showSandbox({ project, client }: Scope, id: string): Promise<Resp
   for (const c of convs) if (await belongs(client, project.id, c.id)) mine.push(c);
   if (mine.length === 0) throw new HttpError(404, "not_found", "No such computer in this project.");
   return json({ ...body, data: { ...body.data, conversations: mine } });
+}
+
+// ── search ───────────────────────────────────────────────────────────────
+
+/** Fountain's largest page, and how many of them we will read looking for this project's hits. */
+const SEARCH_PAGE = 100;
+const SEARCH_PAGES = 5;
+/** What a caller may narrow by; `limit` and `offset` are ours, not theirs (see below). */
+const SEARCH_FILTERS = ["agent_id", "since", "kinds"];
+
+/**
+ * Full-text search over this project's conversations.
+ *
+ * The decision this route turns on: search runs on the **owner's** key, so
+ * Fountain answers for the owner's whole account — their other projects, and
+ * personal conversations that have nothing to do with this one. A member must
+ * see this project's hits and no others. Two ways to get there, and only one
+ * of them scales:
+ *
+ *   *Scope on the way out.* `conversation_id` takes exactly one id, so "every
+ *   conversation in this project" is one request per conversation — a fan-out
+ *   per keystroke against the same rate limit, growing with the project. Right
+ *   for one named conversation, which is why that case below does take this
+ *   path and lets Fountain do the narrowing; no good for the palette.
+ *
+ *   *Filter on the way back.* One request, and the answer is cut down to the
+ *   hits whose conversation is provably this project's. It is the rule `keep()`
+ *   already applies to the owner's user-wide event stream, which crosses this
+ *   proxy for the same reason and is filtered per record on the same authority
+ *   — `belongs()`, which reads the conversation's own `channel_id`. Default
+ *   deny: a hit whose conversation we cannot place is dropped, not passed.
+ *
+ * So: filter on the way back, and keep the one rule rather than a second one.
+ * The owner's snippets reach this process, which already holds the owner's key
+ * and can read anything with it; what matters is that they do not reach a
+ * member, and only an id we have placed in this project gets past `keepHits`.
+ *
+ * What it costs is paging. Fountain's `limit` and `offset` count the owner's
+ * hits, not this project's, so forwarding them would answer "nothing" to a
+ * member whose first hit sits on the owner's fourth page. The proxy pages
+ * upstream itself and serves its own window over what survives — and says
+ * `has_more` when it stopped digging rather than pretending it reached the end.
+ */
+async function search({ project, client }: Scope, url: URL): Promise<Response> {
+  const q = url.searchParams.get("q") ?? "";
+  if (!q.trim()) throw new HttpError(400, "bad_query", "Search for something.");
+  const limit = Math.min(Math.max(int(url.searchParams.get("limit"), 20), 1), SEARCH_PAGE);
+  const offset = Math.max(int(url.searchParams.get("offset"), 0), 0);
+
+  // Rebuilt, never forwarded as it came: a repeated `conversation_id` would
+  // leave us checking the first and Fountain reading the last.
+  const base = new URLSearchParams({ q });
+  for (const k of SEARCH_FILTERS) {
+    const v = url.searchParams.get(k);
+    if (v) base.set(k, v);
+  }
+
+  // One conversation, named: check it is this project's and let Fountain scope
+  // the query. Nothing outside the conversation is fetched at all.
+  const only = url.searchParams.get("conversation_id");
+  if (only) {
+    if (!(await belongs(client, project.id, only))) throw new HttpError(404, "not_found", "No such conversation in this project.");
+    base.set("conversation_id", only);
+    base.set("limit", String(limit));
+    base.set("offset", String(offset));
+    const res = await client.fetch(`/api/search?${base}`);
+    const text = await res.text();
+    if (!res.ok) return passthrough(res, text);
+    // Scoped by Fountain and checked again here, so that one rule governs
+    // every hit that leaves this route and no path is exempt from it.
+    const body = JSON.parse(text) as { data?: SearchHit[] };
+    return json({ ...body, data: await keepHits(client, project.id, body.data ?? []) });
+  }
+
+  const wanted = offset + limit;
+  const kept: SearchHit[] = [];
+  let read = 0;
+  let ended = false;
+  for (let page = 0; page < SEARCH_PAGES && kept.length <= wanted; page++) {
+    const qs = new URLSearchParams(base);
+    qs.set("limit", String(SEARCH_PAGE));
+    qs.set("offset", String(read));
+    const res = await client.fetch(`/api/search?${qs}`);
+    const text = await res.text();
+    if (!res.ok) return passthrough(res, text);
+    const body = JSON.parse(text) as { data?: SearchHit[]; meta?: { has_more?: boolean } };
+    const hits = body.data ?? [];
+    kept.push(...(await keepHits(client, project.id, hits)));
+    read += hits.length;
+    if (hits.length === 0 || body.meta?.has_more !== true) {
+      ended = true;
+      break;
+    }
+  }
+
+  return json({ data: kept.slice(offset, wanted), meta: { limit, offset, has_more: kept.length > wanted || !ended } });
+}
+
+/**
+ * The hits this project may see. A hit carries a `conversation_id` and nothing
+ * else we can trust, so each one is placed by `belongs()` — the same authority
+ * the conversation routes and the stream use — and dropped unless it lands in
+ * this project.
+ *
+ * Placing them one at a time would be a request per hit against the owner's
+ * whole account, so the first id we do not already know warms every id at once
+ * off the conversation list; after that the checks are cache hits.
+ */
+async function keepHits(client: FountainClient, projectId: string, hits: SearchHit[]): Promise<SearchHit[]> {
+  let primed = false;
+  const out: SearchHit[] = [];
+  for (const hit of hits) {
+    const id = hit?.conversation_id;
+    if (typeof id !== "string" || !id) continue;
+    if (!primed && !known(id)) {
+      for (const c of await client.conversations({ roots_only: "false" })) remember(c);
+      primed = true;
+    }
+    if (await belongs(client, projectId, id)) out.push(hit);
+  }
+  return out;
+}
+
+function int(v: string | null, fallback: number): number {
+  const n = Number(v);
+  return v !== null && Number.isFinite(n) ? Math.trunc(n) : fallback;
 }
 
 // ── forwarding ───────────────────────────────────────────────────────────

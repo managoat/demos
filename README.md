@@ -77,6 +77,26 @@ the work it is on and no tool has to be told which project it means. Marking
 an item **done** is deliberately not a tool: that retires the item's
 conversations and takes its computers down, quite possibly the caller's own.
 
+**⌘K finds anything said in the project.** A workbench whose shape is many
+conversations needs one box that reaches across them, and this is it:
+conversation names match locally as you type, off the list the app already
+holds, and Fountain's full text over titles, prompts and replies arrives a
+beat behind. Enter opens the hit — a reply or a prompt lands on the turn it
+matched, marked in the margin, not at the bottom of the thread.
+
+Search is the sharpest edge of running on the owner's key: `GET /api/search`
+answers for the owner's *whole account* — their other projects, and personal
+conversations that are nobody else's business. So the proxy narrows it, and
+the decision it turns on is recorded in `server/proxy.ts`. In short: a hit is
+kept only when its conversation's `channel_id` places it in this project,
+which is the rule the event stream already crosses this proxy under. Fountain
+can scope a query to one conversation but not to a set, so scoping on the way
+out would be a request per conversation per keystroke; it *is* used for the
+one case it fits, a search inside a named conversation. Because Fountain's
+`limit`/`offset` count the owner's hits rather than the project's, the proxy
+pages upstream itself and serves its own window — and says so rather than
+saying "no results" when it stops digging.
+
 **Themes.** The top bar's ☀/☾/◐ opens a colour-scheme menu the way an editor
 has one: follow the OS, or pick a palette — solarized, nord, dracula, gruvbox,
 tokyo night, one dark, catppuccin latte. Hovering a line previews it on the
@@ -108,7 +128,8 @@ browser ──(session cookie)──▶ workbench server ──(owner's Fountain
   on the owner's key and admits only conversations whose `channel_id` starts
   with `workbench:<project>/`: it filters the list, checks every
   per-conversation call, forces the project's environment and vault on a new
-  conversation, and lets a member see only the project's environment and
+  conversation, cuts full-text search down to hits in the project's
+  conversations, and lets a member see only the project's environment and
   vault (the owner sees all). The owner's user-wide event stream
   (`GET /api/events/stream`) is proxied the same way, filtered per project,
   with `event: workbench` records mixed in when another member changes an
@@ -215,12 +236,13 @@ src/
   lib/workbench.ts   the model; the legacy-state import
   lib/start.ts       starting a conversation on an item — the request that also assigns the teammate
   lib/images.ts      a pasted or dropped file, read into the payload a prompt takes
+  lib/search.ts      what ⌘K searches: names locally, messages through the proxy
   lib/turns.ts       fold a log feed into turns for the chat view
   lib/blocks.ts      arrange server-parsed blocks (from fountain-conversations)
   lib/markdown.tsx   allow-list markdown → React nodes, no innerHTML
   lib/theme.ts       the palette list; the blocks themselves are in styles.css
   pages/             Projects, Project (items, people), WorkItem, Team
-  components/        Thread, StartDialog, Attachments, EnvVaultFields, Blocks, SignIn, Layout
+  components/        Thread, Palette (⌘K), StartDialog, Attachments, EnvVaultFields, Blocks, SignIn, Layout
 ```
 
 ## Licence

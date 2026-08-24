@@ -10,6 +10,7 @@ export type {
   Environment,
   LogEvent,
   SandboxRecord,
+  SearchHit,
   Turn,
   Vault,
 } from "@agentshit/fountain-sdk";

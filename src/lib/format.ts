@@ -20,7 +20,7 @@ export function shortId(id: string): string {
 }
 
 /** A conversation's display line: its title, else a trimmed first prompt, else the id. */
-export function conversationLabel(c: { title: string | null; id: string }, firstPrompt?: string | null): string {
+export function conversationLabel(c: { title?: string | null; id: string }, firstPrompt?: string | null): string {
   if (c.title) return c.title;
   if (firstPrompt) {
     const t = firstPrompt.replace(/\s+/g, " ").trim();

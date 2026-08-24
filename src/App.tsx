@@ -157,7 +157,7 @@ function Router() {
         ) : route.page === "item" ? (
           <WorkItem itemId={route.itemId} />
         ) : route.page === "conversation" ? (
-          <Conversation conversationId={route.conversationId} />
+          <Conversation conversationId={route.conversationId} turnId={route.turnId} />
         ) : (
           <Project />
         )}

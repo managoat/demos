@@ -24,6 +24,18 @@ export interface ConversationSummary {
   [k: string]: unknown;
 }
 
+/** One hit from `GET /api/search`: what matched, and where to jump. */
+export interface SearchHit {
+  kind: "title" | "prompt" | "reply";
+  conversation_id: string;
+  agent_id?: string | null;
+  turn_id?: string | null;
+  turn_number?: number | null;
+  snippet: string;
+  ts: string;
+  [k: string]: unknown;
+}
+
 export class FountainHttpError extends Error {
   constructor(
     readonly status: number,
