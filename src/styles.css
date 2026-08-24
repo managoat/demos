@@ -523,6 +523,18 @@ details.init summary { color: var(--text-2); }
 .member-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .member-row { display: flex; align-items: center; gap: 8px; }
 
+/* what happened on the item while you were away; blocked agents are the loud part */
+.digest { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; margin-bottom: 12px; }
+.digest.blocked { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
+.digest p { margin: 0; }
+.digest-counts { font-size: 13px; color: var(--text-2); }
+.digest-blocked { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.digest-asks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.digest-ask { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 8px; text-decoration: none; color: inherit; }
+.digest-ask:hover { background: var(--bg-2); }
+.digest-ask .min0 { display: flex; align-items: baseline; gap: 4px; overflow: hidden; }
+.digest-gone { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+
 /* the rest of the team: the chip prompts them onto the item, "+" only earmarks them */
 .agent-chip { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-0); overflow: hidden; max-width: 22ch; }
 .agent-chip button { border: 0; border-radius: 0; background: transparent; color: var(--text); }

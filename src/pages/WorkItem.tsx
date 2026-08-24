@@ -1,8 +1,9 @@
 /**
- * One work item: its notes and status, the teammates on it and the rest of
- * the team a click away, and the conversations it has — each on its computer
- * — linking into the thread. Prompting an agent from here is what puts them
- * on the item; "+" on one only earmarks them.
+ * One work item: what happened on it since you last looked, its notes and
+ * status, the teammates on it and the rest of the team a click away, and the
+ * conversations it has — each on its computer — linking into the thread.
+ * Prompting an agent from here is what puts them on the item; "+" on one only
+ * earmarks them.
  *
  * The notes are the briefing whoever picks the item up reads — a teammate
  * over MCP (`list_work_items`) as much as a person here — so they are
@@ -22,6 +23,7 @@ import { CloseControls, ItemStatusPill } from "../components/ItemStatus";
 import { StartDialog } from "../components/StartDialog";
 import { StatusPill } from "../components/StatusPill";
 import { AgentAvatar } from "../components/AgentAvatar";
+import { ItemDigest } from "../components/ItemDigest";
 import { shortId } from "../lib/format";
 
 export function WorkItem({ itemId }: { itemId: string }) {
@@ -106,6 +108,9 @@ export function WorkItem({ itemId }: { itemId: string }) {
           </>
         )}
       </div>
+
+      {/* Keyed on the item: the mark it reads is captured once, per item. */}
+      <ItemDigest key={item.id} itemId={item.id} conversations={convs} />
 
       <section className="card stack tight">
         <h2 className="h2">Teammates</h2>

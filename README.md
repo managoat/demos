@@ -79,6 +79,16 @@ the app says so. The sandbox identity `(owner, agent, environment, vault)`
 falls out of the tree — same project, same agent — which is what makes sharing
 a computer legal, whichever member opens the second conversation.
 
+**What happened while you were away.** A work item opens on a digest of
+itself: turns finished, turns that failed, computers that went away, and —
+loudest — how many agents are blocked on a permission request, each one a
+click from the tool it is asking about and how long before Fountain refuses
+it for you. Everything is folded out of the `stage` stream the project
+already carries, so this is a client reading what it had. Counts are measured
+from when this browser last opened the item (kept per item, so a reload does
+not lose your place); a held request is not, because a glance at the page
+must not be what makes "3 agents are blocked waiting on you" disappear.
+
 **Done means done.** Marking a work item done retires every conversation
 still live on it, which is what takes its computers down — Fountain destroys
 a sprite with the last live conversation on it, so a machine something
@@ -277,12 +287,13 @@ src/
   lib/images.ts      a pasted or dropped file, read into the payload a prompt takes
   lib/search.ts      what ⌘K searches: names locally, messages through the proxy
   lib/turns.ts       fold a log feed into turns for the chat view
+  lib/digest.ts      a work item's stage stream → what happened since you last looked
   lib/blocks.ts      arrange server-parsed blocks (from fountain-conversations)
   lib/markdown.tsx   allow-list markdown → React nodes, no innerHTML
   lib/draft.ts       a field's draft and the debounced save behind it
   lib/theme.ts       the palette list; the blocks themselves are in styles.css
   pages/             Projects, Project (items, people), WorkItem, Team, Cost
-  components/        Thread, Palette (⌘K), StartDialog, Attachments, EnvVaultFields, Blocks, ItemStatus, SignIn, Layout
+  components/        Thread, ItemDigest, Palette (⌘K), StartDialog, Attachments, EnvVaultFields, Blocks, ItemStatus, SignIn, Layout
 ```
 
 ## Licence
