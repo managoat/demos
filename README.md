@@ -116,6 +116,26 @@ conversations and takes its computers down exactly as done does, asks the
 same question first, and reopens the same way. Switching a closed item from
 one to the other costs nothing — the machines went when it was first closed.
 
+**The one who finds out is not the one who can close it.** An agent is usually
+what discovers an item should not be done: it reads the code, the premise is
+wrong, and the verdict is real work already done. It is also the one thing it
+cannot record — closing an item retires every conversation on it, its own
+included — so it used to end up as "we should not do this, because…" in the
+notes, sitting there until a person read it: prose nothing counts and nothing
+sorts, which is the problem `won't do` exists to fix, one level up. So a
+verdict is a state the item carries before anyone acts on it.
+`update_work_item` takes `propose: "done" | "wont"` (and `"none"` to withdraw
+one), the row reads **"Coder says: won't do"**, and a person answers it —
+**Confirm**, which is the ordinary close and asks first when something is
+running, or **Dismiss**, which clears it and leaves the item open. Deciding
+the status either way settles the proposal, because the question has been
+answered. A proposal retires nothing and takes no computer down; that is why
+it is a field of its own and not the status, and why the list still counts the
+item as open work until a person agrees. The cheaper-looking alternative —
+letting an item close while its computers stay up — is exactly what "Done
+means done" is there to prevent, so it is not a shortcut, it is a different
+promise.
+
 **A teammate can file the work itself.** `POST /mcp` is the work-item tree as
 MCP tools — `list_projects`, `list_work_items`, `create_work_item`,
 `update_work_item` — so "split this into three items" is something the agent
@@ -129,8 +149,8 @@ conversation's project — read off its `channel_id` — so a sandbox reaches on
 the work it is on and no tool has to be told which project it means. Closing
 an item — **done** or **won't do** — is deliberately not a tool: either
 retires the item's conversations and takes its computers down, quite possibly
-the caller's own. An agent that concludes an item should not be done says so
-in its notes; a person closes it.
+the caller's own. An agent that concludes an item should not be done proposes
+that (`propose`, above) and says why in the notes; a person confirms it.
 
 **⌘K finds anything said in the project.** A workbench whose shape is many
 conversations needs one box that reaches across them, and this is it:
@@ -284,7 +304,7 @@ server/
 shared/
   channel.ts         workbench:<project>/<item> — read and written by both sides
   images.ts          an image on a prompt: the four media types, the 10 MB ceiling
-  status.ts          a work item's state: open, done, won't do
+  status.ts          a work item's state: open, done, won't do — and the verdict a teammate proposes
 src/
   App.tsx            sign-in gate, OAuth callback, route switch
   store.tsx          WorkbenchProvider (me, projects) and ProjectProvider (one project's Fountain view + stream)

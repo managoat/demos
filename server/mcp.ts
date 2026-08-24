@@ -33,13 +33,13 @@
  * same key to the sign-in form would, which is the deal already.
  */
 import { parseChannel } from "../shared/channel";
-import { emptyCounts, ITEM_STATUSES, isItemStatus } from "../shared/status";
+import { emptyCounts, isClosed, isItemStatus, isProposedStatus, ITEM_STATUSES, PROPOSABLE_STATUSES, statusLabel } from "../shared/status";
 import { projectAccess, type AppContext } from "./context";
 import { sha256 } from "./crypto";
-import type { ItemRow, ProjectRow, Role, UserRow } from "./db";
+import { NO_PROPOSAL, type ItemPatch, type ItemRow, type ProjectRow, type Role, type UserRow } from "./db";
 import { FountainClient, FountainHttpError } from "./fountain";
 import { HttpError, json, readJson, str } from "./http";
-import { itemDto, newItemRow } from "./projects";
+import { itemDto, newItemRow, proposalFields } from "./projects";
 
 const PROTOCOL_VERSION = "2025-06-18";
 const SERVER_INFO = { name: "fountain-workbench", version: "1" };
@@ -69,9 +69,9 @@ const TOOLS = [
   {
     name: "list_work_items",
     description:
-      "A project's work items — id, title, notes, status, and which teammates have worked on each. " +
-      "The item this conversation is on is marked `current`. Read this before creating an item, so you " +
-      "add to the list rather than duplicate it.",
+      "A project's work items — id, title, notes, status, any verdict a teammate has proposed on one, and " +
+      "which teammates have worked on each. The item this conversation is on is marked `current`. Read this " +
+      "before creating an item, so you add to the list rather than duplicate it.",
     inputSchema: {
       type: "object",
       properties: {
@@ -104,16 +104,25 @@ const TOOLS = [
   {
     name: "update_work_item",
     description:
-      "Rewrite a work item's title or notes — sharpen a title, or write up what you found. " +
-      "Closing one — done, or won't do — is not here on purpose: either retires every conversation on the " +
-      "item and takes its computers down, quite possibly your own, so it stays a person's call in the " +
-      "workbench. If you conclude an item should not be done, say why in its notes; a person closes it.",
+      "Rewrite a work item's title or notes — sharpen a title, or write up what you found — and say what " +
+      "you think should happen to it with `propose`. Closing one outright is not here on purpose: done or " +
+      "won't do retires every conversation on the item and takes its computers down, quite possibly your " +
+      "own, so the last click stays a person's. A proposal is the verdict without the demolition: it shows " +
+      "on the item as yours until a person confirms or dismisses it, and retires nothing.",
     inputSchema: {
       type: "object",
       properties: {
         item: { type: "string", description: "The work item id, from list_work_items" },
         title: { type: "string", description: "The new title" },
         notes: { type: "string", description: "The new notes; replaces what is there" },
+        propose: {
+          type: "string",
+          enum: [...PROPOSABLE_STATUSES, "none"],
+          description:
+            "What you say should happen to this item: 'done' it is finished, 'wont' it should not be done — " +
+            "put why in the notes — or 'none' to withdraw a proposal you no longer stand behind. Nothing closes " +
+            "and no computer goes down; a person decides.",
+        },
       },
       required: ["item"],
     },
@@ -180,8 +189,8 @@ function callTool(ctx: AppContext, caller: Caller, params: Record<string, unknow
 
 interface Caller {
   user: UserRow;
-  /** The project (and item) of the conversation the caller named, when it named one. */
-  pinned: { project: ProjectRow; role: Role; itemId: string } | null;
+  /** The project, item and agent of the conversation the caller named, when it named one. */
+  pinned: { project: ProjectRow; role: Role; itemId: string; agentId: string | null } | null;
 }
 
 async function authenticate(ctx: AppContext, req: Request): Promise<Caller> {
@@ -230,7 +239,7 @@ async function pin(ctx: AppContext, user: UserRow, key: string, req: Request): P
     throw new HttpError(404, "not_a_workbench_conversation", "That conversation is not on a workbench work item, so there is no project to be in. Drop the header to reach your projects by name.");
   }
   const { project, role } = projectAccess(ctx, user, ref.projectId);
-  return { project, role, itemId: ref.itemId };
+  return { project, role, itemId: ref.itemId, agentId: conv.agent_id ?? null };
 }
 
 // ── what the tools do ────────────────────────────────────────────────────
@@ -280,19 +289,57 @@ function updateWorkItem(ctx: AppContext, caller: Caller, args: Record<string, un
   const item = ctx.db.getItem(id);
   if (!item) throw new ToolError(`no work item ${id}`);
   const project = projectOf(ctx, caller, item);
+  if (args.status !== undefined) {
+    throw new ToolError(
+      "setting `status` is not a tool: closing an item retires every conversation on it and takes its computers down, quite possibly this one. " +
+        'Pass `propose: "done"` or `propose: "wont"` to put your verdict on the item, and say why in the notes; a person confirms it.',
+    );
+  }
 
-  const patch: Partial<Pick<ItemRow, "title" | "notes">> = {};
+  const patch: ItemPatch = {};
   if (typeof args.title === "string") {
     const title = str(args.title, 300).trim();
     if (!title) throw new ToolError("a work item needs a title");
     patch.title = title;
   }
   if (typeof args.notes === "string") patch.notes = str(args.notes, 20000);
-  if (Object.keys(patch).length === 0) throw new ToolError("nothing to change — pass title, notes, or both");
+  if (args.propose !== undefined) Object.assign(patch, proposal(caller, item, args.propose));
+  if (Object.keys(patch).length === 0) throw new ToolError("nothing to change — pass title, notes, propose, or any of them together");
 
   ctx.db.updateItem(item.id, patch);
   ctx.events.emit(project.id, { kind: "items" });
-  return { updated: true, project: { id: project.id, name: project.name }, item: itemDto(ctx.db.getItem(item.id)!) };
+  const updated = itemDto(ctx.db.getItem(item.id)!);
+  return {
+    updated: true,
+    project: { id: project.id, name: project.name },
+    item: updated,
+    ...(args.propose === undefined
+      ? {}
+      : {
+          hint: updated.proposal
+            ? `Recorded on the item as your recommendation: it still reads ${updated.status}, nothing was retired, and no computer went down. A person confirms or dismisses it in the workbench.`
+            : "Withdrawn. The item carries no proposal now.",
+        }),
+  };
+}
+
+/**
+ * The columns a `propose` argument sets. Nothing here closes the item — that
+ * is the point of the field — so this only ever writes what the caller says
+ * it thinks, or clears it.
+ */
+function proposal(caller: Caller, item: ItemRow, arg: unknown): ItemPatch {
+  const want = str(arg, 20).trim();
+  if (want === "none") return { ...NO_PROPOSAL };
+  if (!isProposedStatus(want)) {
+    throw new ToolError(`propose takes ${PROPOSABLE_STATUSES.map((s) => JSON.stringify(s)).join(" or ")}, or "none" to withdraw — not ${JSON.stringify(want)}`);
+  }
+  if (isClosed(item.status)) {
+    throw new ToolError(`work item ${item.id} is already closed (${statusLabel(item.status)}), so there is nothing to propose; a person reopens it if that was wrong`);
+  }
+  // Inside a conversation the proposal is the agent's and says so on the row;
+  // a bare key names only the account it belongs to.
+  return proposalFields(want, caller.pinned?.agentId ?? null, caller.user.email);
 }
 
 // ── naming a project ─────────────────────────────────────────────────────

@@ -5,7 +5,7 @@
  */
 import { useMemo, useState, type FormEvent } from "react";
 import { useProject } from "../store";
-import { agentFits, channelIsItem, isClosed } from "../lib/workbench";
+import { agentFits, channelIsItem, isClosed, proposerName } from "../lib/workbench";
 import { describeError } from "../lib/errors";
 import { href, navigate } from "../router";
 import { TwoStep } from "../components/Thread";
@@ -107,7 +107,15 @@ export function Project() {
             <span className="time muted">{formatTime(latest || w.createdAt)}</span>
           </div>
         </a>
-        <CloseControls status={w.status} live={live} compact onSet={(status) => void updateItem(w.id, { status })} />
+        <CloseControls
+          status={w.status}
+          live={live}
+          proposal={w.proposal}
+          proposedBy={w.proposal ? proposerName(w.proposal, agents) : ""}
+          compact
+          onSet={(status) => void updateItem(w.id, { status })}
+          onDismiss={() => void updateItem(w.id, { proposal: null })}
+        />
         <TwoStep label="Delete" onConfirm={() => void removeItem(w.id)} className="danger small self-center" />
       </li>
     );

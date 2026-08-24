@@ -17,7 +17,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { Fountain } from "@agentshit/fountain-sdk";
 import type { Agent, Conversation, Environment, SandboxRecord, UserEvent, Vault } from "./types";
 import { computersOf } from "./lib/sidebar";
-import { api, ApiError, projectFountainBase, type Activity, type ItemDto, type Me, type ProjectDto } from "./lib/api";
+import { api, ApiError, projectFountainBase, type Activity, type ItemDto, type ItemPatch, type Me, type ProjectDto } from "./lib/api";
 import { startBody, type StartInput } from "./lib/start";
 import { readSse } from "./lib/sse";
 import { describeError } from "./lib/errors";
@@ -154,7 +154,8 @@ export interface ProjectStore {
   addMember: (email: string) => Promise<void>;
   removeMember: (email: string) => Promise<void>;
   createItem: (title: string, notes?: string) => Promise<ItemDto | null>;
-  updateItem: (id: string, patch: Partial<Pick<ItemDto, "title" | "notes" | "status" | "agentIds">>) => Promise<void>;
+  /** Change one. `proposal: null` dismisses a teammate's proposal without closing anything. */
+  updateItem: (id: string, patch: ItemPatch) => Promise<void>;
   removeItem: (id: string) => Promise<void>;
   addTeammate: (itemId: string, agentId: string) => Promise<void>;
   removeTeammate: (itemId: string, agentId: string) => Promise<void>;
@@ -408,7 +409,9 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
   );
   const updateItem = useCallback<ProjectStore["updateItem"]>(
     async (id, patch) => {
-      setItems((ws) => ws.map((w) => (w.id === id ? { ...w, ...patch } : w)));
+      // Deciding the status settles any proposal standing on the item, here as
+      // on the server — the question has been answered, so it stops being asked.
+      setItems((ws) => ws.map((w) => (w.id === id ? { ...w, ...patch, ...(patch.status === undefined ? {} : { proposal: null }) } : w)));
       // Closing an item — done or won't do — retires its computers (server/projects.ts):
       // say what went, and show the conversations as retired without waiting for Fountain's notice.
       await run(async () => {

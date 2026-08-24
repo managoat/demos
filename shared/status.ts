@@ -52,3 +52,39 @@ export function statusLabel(status: string): string {
 export function markedAs(status: string): string {
   return `Marked ${statusLabel(status)}`;
 }
+
+// ── a verdict nobody has acted on yet ────────────────────────────────────
+
+/**
+ * The states an agent can *propose* an item is in, without putting it there.
+ *
+ * Closing an item retires every conversation on it and takes its computers
+ * down — quite possibly the caller's own — so closing stays a person's call
+ * and no MCP tool does it (server/mcp.ts). But the agent is usually the one
+ * that finds out an item should not be done: it reads the code, the premise
+ * is wrong, and the verdict is real work already done. Left in prose in the
+ * notes, nothing counts it and nothing sorts it — which is the problem the
+ * `wont` status exists to fix, one level up.
+ *
+ * So a proposal is a state the item carries: "Coder says: won't do", on the
+ * row, until a person confirms it or dismisses it. Recording one retires
+ * nothing and takes nothing down; that is the whole point of it being a
+ * separate field rather than the status.
+ */
+export const PROPOSABLE_STATUSES = ["done", "wont"] as const;
+
+export type ProposedStatus = (typeof PROPOSABLE_STATUSES)[number];
+
+export function isProposedStatus(v: unknown): v is ProposedStatus {
+  return typeof v === "string" && (PROPOSABLE_STATUSES as readonly string[]).includes(v);
+}
+
+/** What an agent recommends be done with an item, and who said so. */
+export interface Proposal {
+  status: ProposedStatus;
+  /** The agent that said it, when the proposal came from inside a conversation; a key alone names nobody. */
+  agentId: string | null;
+  /** The account whose Fountain key proposed it. */
+  email: string;
+  at: string;
+}

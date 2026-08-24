@@ -337,6 +337,8 @@ code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background:
 .pill.terminated { opacity: 0.7; }
 /* Closed, but not finished: hollow where "done" is filled, so the two ways an item ends read apart at a glance. */
 .pill.wont { opacity: 0.7; background: transparent; box-shadow: inset 0 0 0 1px var(--border); }
+/* A teammate's verdict, waiting on a person: nothing has happened to the item yet, so it reads as a question. */
+.pill.proposed { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
 .pill.tiny { font-size: 10px; padding: 0 5px; }
 
 /* show */

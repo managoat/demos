@@ -10,9 +10,16 @@
  *
  * Changing one closed state to the other costs nothing — the machines went
  * when it was first closed — so that one is a plain button.
+ *
+ * A teammate cannot close an item — it would retire its own conversation —
+ * so it proposes instead (server/mcp.ts), and the proposal is a question
+ * standing on the row: "Coder says: won't do", confirm or dismiss. While one
+ * stands it replaces the plain pair, because it *is* the pair, with an answer
+ * already suggested; dismissing brings them back. Confirming closes the item
+ * exactly as the plain button would, and asks first the same way.
  */
 import { TwoStep } from "./Thread";
-import { isClosed, statusLabel, type ItemStatus } from "../lib/workbench";
+import { isClosed, statusLabel, type ItemStatus, type Proposal } from "../lib/workbench";
 
 export function ItemStatusPill({ status, tiny = false }: { status: ItemStatus; tiny?: boolean }) {
   const tone = status === "open" ? "running" : status === "wont" ? "wont" : "terminated";
@@ -22,22 +29,31 @@ export function ItemStatusPill({ status, tiny = false }: { status: ItemStatus; t
 export function CloseControls({
   status,
   live,
+  proposal = null,
+  proposedBy = "",
   compact = false,
   onSet,
+  onDismiss,
 }: {
   status: ItemStatus;
   /** Conversations still live on the item; they go with it when it closes. */
   live: number;
+  /** What a teammate says should happen to it, if one has said. */
+  proposal?: Proposal | null;
+  /** Who said it, as a person reads it — the teammate's name (src/lib/workbench.ts). */
+  proposedBy?: string;
   /** Tighter labels and list-row alignment. */
   compact?: boolean;
   onSet: (status: ItemStatus) => void;
+  /** Clear a proposal without closing anything. Leaves the item open. */
+  onDismiss?: () => void;
 }) {
   const cls = compact ? "small self-center" : "small";
-  const close = (next: ItemStatus, label: string) =>
+  const close = (next: ItemStatus, label: string, className = "secondary") =>
     live > 0 ? (
       <TwoStep label={label} className={`danger ${cls}`} title={`Retires ${live} conversation${live === 1 ? "" : "s"} — the computers go with them`} onConfirm={() => onSet(next)} />
     ) : (
-      <button className={`secondary ${cls}`} onClick={() => onSet(next)}>
+      <button className={[className, cls].filter(Boolean).join(" ")} onClick={() => onSet(next)}>
         {label}
       </button>
     );
@@ -55,6 +71,24 @@ export function CloseControls({
       </>
     );
   }
+
+  if (proposal) {
+    const said = statusLabel(proposal.status);
+    return (
+      <>
+        <span className="pill proposed self-center" title={`${proposedBy} proposed this${proposal.at ? ` on ${new Date(proposal.at).toLocaleString()}` : ""}. Nothing has been retired — the item is still open.`}>
+          {proposedBy} says: {said}
+        </span>
+        {close(proposal.status, compact ? "Confirm" : `Confirm ${said}`, "")}
+        {onDismiss && (
+          <button className={`secondary ${cls}`} title="Clear the proposal and leave the item open" onClick={onDismiss}>
+            Dismiss
+          </button>
+        )}
+      </>
+    );
+  }
+
   return (
     <>
       {close("done", compact ? "Done" : "Mark done")}

@@ -1,10 +1,15 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { buildApp } from "./app";
 import type { Config } from "./config";
 import { ProjectEvents } from "./context";
 import { Cipher } from "./crypto";
 import { Db } from "./db";
 import { resetMcpCache } from "./mcp";
+import { itemDto, proposalFields } from "./projects";
 import { resetProxyCache } from "./proxy";
 
 // ── a fake Fountain ──────────────────────────────────────────────────────
@@ -787,6 +792,39 @@ describe("recovery", () => {
   });
 });
 
+describe("a database written before proposals existed", () => {
+  // The deployed workbench is one SQLite file on a volume, and `CREATE TABLE
+  // IF NOT EXISTS` leaves a table that is already there alone — so the columns
+  // have to be added to it, and its rows have to keep reading.
+  test("gains the columns, and its items read as nobody having proposed anything", () => {
+    const dir = mkdtempSync(join(tmpdir(), "workbench-migrate-"));
+    const path = join(dir, "old.sqlite");
+    try {
+      const old = new Database(path, { create: true, strict: true });
+      old.exec(`CREATE TABLE items (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'open', agent_ids TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL)`);
+      old.query("INSERT INTO items (id, project_id, title, created_at) VALUES ('w-old', 'p-old', 'from before', '2026-01-01T00:00:00Z')").run();
+      old.close();
+
+      const migrated = new Db(path);
+      try {
+        const row = migrated.getItem("w-old")!;
+        expect(row.title).toBe("from before");
+        expect(itemDto(row).proposal).toBeNull();
+        // And it takes one now, without losing what it already held.
+        migrated.updateItem("w-old", proposalFields("wont", "a1", "alice@example.com"));
+        expect(itemDto(migrated.getItem("w-old")!).proposal).toMatchObject({ status: "wont", agentId: "a1" });
+        expect(migrated.getItem("w-old")!.title).toBe("from before");
+      } finally {
+        migrated.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("the MCP server", () => {
   /** One JSON-RPC message, as an agent's client would send it. */
   async function rpc(key: string | null, method: string, params?: unknown, headers: Record<string, string> = {}): Promise<Response> {
@@ -902,14 +940,14 @@ describe("the MCP server", () => {
     expect(db.getItem(itemId)!.title).toBe("fix foo properly");
     expect(db.getItem(itemId)!.notes).toBe("found it");
     // Closing retires the item's computers, so it stays a person's call in the
-    // workbench — an agent that concludes "we should not do this" writes it in
-    // the notes rather than closing the item under itself.
+    // workbench — an agent that concludes "we should not do this" proposes it.
     for (const status of ["done", "wont"]) {
       const closed = await tool("key-bob", "update_work_item", { item: itemId, status });
       expect(closed.failed).toBe(true);
-      expect(closed.text).toContain("nothing to change");
+      expect(closed.text).toContain("`propose:");
     }
     expect(db.getItem(itemId)!.status).toBe("open");
+    expect(db.getItem(itemId)!.proposed_status).toBe("");
   });
 
   test("work items can be listed by any of the three states", async () => {
@@ -941,6 +979,98 @@ describe("the MCP server", () => {
     expect(elsewhere.failed).toBe(true);
     expect(elsewhere.text).toContain("cannot reach another project");
     expect(db.items("bobproj").map((w) => w.title)).toEqual(["Bob's thing"]);
+  });
+
+  // The agent is usually the one that finds out an item should not be done —
+  // it read the code and the premise was wrong. It cannot close the item: that
+  // would retire every conversation on it, this one included. So it proposes,
+  // and the proposal is a state the list can count, not prose in the notes.
+  describe("proposing a verdict without closing the item under yourself", () => {
+    const pin = { "x-fountain-conversation-id": "m1" };
+
+    test("a proposal is recorded, and retires nothing — the agent's own conversation included", async () => {
+      terminated.length = 0;
+      const got: unknown[] = [];
+      const off = events.subscribe(projectId, (d) => got.push(d));
+      const res = (await tool("key-alice", "update_work_item", { item: itemId, notes: "foo is never called; the premise is wrong", propose: "wont" }, pin)).value as {
+        item: { status: string; proposal: { status: string; agentId: string | null; email: string; at: string } | null };
+        hint: string;
+      };
+      off();
+      expect(got).toEqual([{ kind: "items" }]);
+      // The verdict is on the item; the item itself has not moved.
+      expect(res.item.proposal).toMatchObject({ status: "wont", agentId: "a1", email: "alice@example.com" });
+      expect(res.item.proposal!.at).not.toBe("");
+      expect(res.item.status).toBe("open");
+      expect(res.hint).toContain("nothing was retired");
+      expect(db.getItem(itemId)!.status).toBe("open");
+      // Nothing was retired: not the item's conversations, not the proposer's own.
+      expect(terminated).toEqual([]);
+      expect(convs["key-alice"]!.find((c) => c.id === "m1")!.status).toBe("running");
+    });
+
+    test("it shows wherever the item shows — the project a person opens, and the list an agent reads", async () => {
+      const shown = (await (await call("alice", "GET", `/api/projects/${projectId}`)).json()).data;
+      const item = shown.items.find((w: { id: string }) => w.id === itemId);
+      expect(item.proposal).toMatchObject({ status: "wont", agentId: "a1" });
+      // Still open, so it is still counted as work to do.
+      expect(item.status).toBe("open");
+      const listed = ((await tool("key-bob", "list_work_items", { project: projectId })).value as { items: { id: string; proposal: { status: string } | null }[] }).items;
+      expect(listed.find((w) => w.id === itemId)!.proposal!.status).toBe("wont");
+    });
+
+    test("propose takes the two ways an item closes and nothing else", async () => {
+      const bad = await tool("key-alice", "update_work_item", { item: itemId, propose: "maybe" }, pin);
+      expect(bad.failed).toBe(true);
+      expect(bad.text).toContain("propose takes");
+      // Refused whole: the standing proposal is not clobbered by a bad argument.
+      expect(db.getItem(itemId)!.proposed_status).toBe("wont");
+    });
+
+    test("without a conversation the proposal names the account; a closed item has nothing left to propose", async () => {
+      const fresh = (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title: "check whether bar is still used" })).json()).data.id as string;
+      const made = (await tool("key-bob", "update_work_item", { item: fresh, propose: "done" })).value as { item: { proposal: { status: string; agentId: string | null; email: string } } };
+      // A bare key is not an agent, so nobody's name goes on it — the account's does.
+      expect(made.item.proposal).toMatchObject({ status: "done", agentId: null, email: "bob@example.com" });
+
+      // A person agrees, which is what actually closes it; the question is then answered.
+      const closed = (await (await call("bob", "PATCH", `/api/projects/${projectId}/items/${fresh}`, { status: "done" })).json()) as { data: { status: string; proposal: unknown } };
+      expect(closed.data.status).toBe("done");
+      expect(closed.data.proposal).toBeNull();
+
+      const again = await tool("key-bob", "update_work_item", { item: fresh, propose: "wont" });
+      expect(again.failed).toBe(true);
+      expect(again.text).toContain("already closed");
+    });
+
+    test("either side can take it back: the agent withdraws, or a person dismisses it", async () => {
+      terminated.length = 0;
+      const withdrawn = (await tool("key-alice", "update_work_item", { item: itemId, propose: "none" }, pin)).value as { item: { proposal: unknown }; hint: string };
+      expect(withdrawn.item.proposal).toBeNull();
+      expect(withdrawn.hint).toContain("Withdrawn");
+
+      await tool("key-alice", "update_work_item", { item: itemId, propose: "wont" }, pin);
+      const dismissed = (await (await call("bob", "PATCH", `/api/projects/${projectId}/items/${itemId}`, { proposal: null })).json()) as { data: { status: string; proposal: unknown }; retired?: unknown };
+      expect(dismissed.data.proposal).toBeNull();
+      expect(dismissed.data.status).toBe("open");
+      // Dismissing decides nothing, so nothing goes down.
+      expect(dismissed.retired).toBeUndefined();
+      expect(terminated).toEqual([]);
+      expect(convs["key-alice"]!.find((c) => c.id === "m1")!.status).toBe("running");
+    });
+
+    test("confirming one is the ordinary close: the item shuts and its computers go", async () => {
+      terminated.length = 0;
+      await tool("key-alice", "update_work_item", { item: itemId, propose: "wont" }, pin);
+      const res = (await (await call("bob", "PATCH", `/api/projects/${projectId}/items/${itemId}`, { status: "wont" })).json()) as {
+        data: { status: string; proposal: unknown };
+        retired: unknown;
+      };
+      expect(res.data.status).toBe("wont");
+      expect(res.data.proposal).toBeNull();
+      expect(res.retired).toEqual({ conversations: 1, computers: 1, failed: 0 });
+      expect(terminated).toEqual(["m1"]);
+    });
   });
 
   test("a conversation that is not on a work item has no project, and one that is not the key's is not found", async () => {

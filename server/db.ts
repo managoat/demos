@@ -45,9 +45,26 @@ export interface ItemRow {
   status: ItemStatus;
   agent_ids: string; // JSON array
   created_at: string;
+  /** A verdict an agent proposed but nobody has acted on: '' | 'done' | 'wont' (shared/status.ts). */
+  proposed_status: string;
+  /** Who proposed it: the agent, when it came from inside a conversation, and the account whose key it was. */
+  proposed_agent_id: string;
+  proposed_email: string;
+  proposed_at: string;
 }
 
+/** The proposal fields of an item nobody has proposed anything on — a new item, or one just decided. */
+export const NO_PROPOSAL: Pick<ItemRow, "proposed_status" | "proposed_agent_id" | "proposed_email" | "proposed_at"> = {
+  proposed_status: "",
+  proposed_agent_id: "",
+  proposed_email: "",
+  proposed_at: "",
+};
+
 export type Role = "owner" | "member";
+
+/** What an update to a work item may set. Its id, project and creation stand. */
+export type ItemPatch = Partial<Omit<ItemRow, "id" | "project_id" | "created_at">>;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -91,10 +108,29 @@ CREATE TABLE IF NOT EXISTS items (
   -- old row written by an older build still reads (shared/status.ts).
   status TEXT NOT NULL DEFAULT 'open',
   agent_ids TEXT NOT NULL DEFAULT '[]',
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  -- '' | done | wont: what an agent says should happen to this item, which is
+  -- not the same as it happening. Nothing is retired for a proposal.
+  proposed_status TEXT NOT NULL DEFAULT '',
+  proposed_agent_id TEXT NOT NULL DEFAULT '',
+  proposed_email TEXT NOT NULL DEFAULT '',
+  proposed_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS items_project ON items(project_id);
 `;
+
+/**
+ * Columns added to `items` after the table existed. `CREATE TABLE IF NOT
+ * EXISTS` leaves a table that is already there alone, so a database written
+ * by an older build needs them added; the defaults make an old row a row
+ * nobody has proposed anything on.
+ */
+const ADDED_ITEM_COLUMNS: [string, string][] = [
+  ["proposed_status", "TEXT NOT NULL DEFAULT ''"],
+  ["proposed_agent_id", "TEXT NOT NULL DEFAULT ''"],
+  ["proposed_email", "TEXT NOT NULL DEFAULT ''"],
+  ["proposed_at", "TEXT NOT NULL DEFAULT ''"],
+];
 
 export function now(): string {
   return new Date().toISOString();
@@ -108,6 +144,15 @@ export class Db {
     this.sql.exec("PRAGMA journal_mode = WAL");
     this.sql.exec("PRAGMA foreign_keys = ON");
     this.sql.exec(SCHEMA);
+    this.migrate();
+  }
+
+  /** Bring a database written by an older build up to the schema above. */
+  private migrate(): void {
+    const have = new Set((this.sql.query("PRAGMA table_info(items)").all() as { name: string }[]).map((c) => c.name));
+    for (const [name, decl] of ADDED_ITEM_COLUMNS) {
+      if (!have.has(name)) this.sql.exec(`ALTER TABLE items ADD COLUMN ${name} ${decl}`);
+    }
   }
 
   close(): void {
@@ -237,20 +282,34 @@ export class Db {
   insertItem(w: ItemRow): boolean {
     const r = this.sql
       .query(
-        `INSERT OR IGNORE INTO items (id, project_id, title, notes, status, agent_ids, created_at)
-         VALUES ($id, $project_id, $title, $notes, $status, $agent_ids, $created_at)`,
+        `INSERT OR IGNORE INTO items (id, project_id, title, notes, status, agent_ids, created_at, proposed_status, proposed_agent_id, proposed_email, proposed_at)
+         VALUES ($id, $project_id, $title, $notes, $status, $agent_ids, $created_at, $proposed_status, $proposed_agent_id, $proposed_email, $proposed_at)`,
       )
       .run(w as unknown as Record<string, string>);
     return r.changes > 0;
   }
 
-  updateItem(id: string, patch: Partial<Pick<ItemRow, "title" | "notes" | "status" | "agent_ids">>): void {
+  updateItem(id: string, patch: ItemPatch): void {
     const cur = this.getItem(id);
     if (!cur) return;
     const next = { ...cur, ...patch };
     this.sql
-      .query("UPDATE items SET title = $title, notes = $notes, status = $status, agent_ids = $agent_ids WHERE id = $id")
-      .run({ id, title: next.title, notes: next.notes, status: next.status, agent_ids: next.agent_ids });
+      .query(
+        `UPDATE items SET title = $title, notes = $notes, status = $status, agent_ids = $agent_ids,
+           proposed_status = $proposed_status, proposed_agent_id = $proposed_agent_id, proposed_email = $proposed_email, proposed_at = $proposed_at
+         WHERE id = $id`,
+      )
+      .run({
+        id,
+        title: next.title,
+        notes: next.notes,
+        status: next.status,
+        agent_ids: next.agent_ids,
+        proposed_status: next.proposed_status,
+        proposed_agent_id: next.proposed_agent_id,
+        proposed_email: next.proposed_email,
+        proposed_at: next.proposed_at,
+      });
   }
 
   deleteItem(id: string): void {

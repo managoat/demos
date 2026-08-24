@@ -10,6 +10,7 @@ const item: ItemDto = {
   status: "open",
   agentIds: [],
   createdAt: "2026-08-24T00:00:00Z",
+  proposal: null,
 };
 
 const agent = { id: "a1", name: "Coder" };

@@ -1,4 +1,4 @@
-import type { ItemCounts, ItemStatus } from "../../shared/status";
+import type { ItemCounts, ItemStatus, Proposal } from "../../shared/status";
 import type { Environment, Vault } from "../types";
 
 /**
@@ -27,7 +27,16 @@ export interface ItemDto {
   status: ItemStatus;
   agentIds: string[];
   createdAt: string;
+  /** What a teammate says should happen to this item, waiting on a person (server/mcp.ts). */
+  proposal: Proposal | null;
 }
+
+/**
+ * What a person may change about a work item. `proposal` only ever goes null:
+ * a proposal is a teammate's recommendation, made over MCP; from here a person
+ * confirms it by setting the status, or dismisses it and leaves the item open.
+ */
+export type ItemPatch = Partial<Pick<ItemDto, "title" | "notes" | "status" | "agentIds">> & { proposal?: null };
 
 /** What closing a work item did to its computers (server/projects.ts). */
 export interface RetiredDto {
@@ -147,7 +156,7 @@ export const api = {
 
   createItem: (projectId: string, input: { title: string; notes?: string }) => data(call<{ data: ItemDto }>("POST", `/api/projects/${projectId}/items`, input)),
   // The envelope, not just the item: closing one retires its computers, and says what went.
-  patchItem: (projectId: string, itemId: string, patch: Partial<Pick<ItemDto, "title" | "notes" | "status" | "agentIds">>) =>
+  patchItem: (projectId: string, itemId: string, patch: ItemPatch) =>
     call<{ data: ItemDto; retired?: RetiredDto }>("PATCH", `/api/projects/${projectId}/items/${itemId}`, patch),
   deleteItem: (projectId: string, itemId: string) => call<{ ok: true }>("DELETE", `/api/projects/${projectId}/items/${itemId}`),
 

@@ -17,13 +17,23 @@
  * channel binds only one), which is what makes the tree recoverable from
  * the conversation list alone.
  */
-import { markedAs, parseItemStatus, type ItemStatus } from "../../shared/status";
+import { markedAs, parseItemStatus, type ItemStatus, type Proposal } from "../../shared/status";
 import type { RetiredDto } from "./api";
 
 export { channelFor, channelIsItem, channelPrefix, conversationTitle, newId, parseChannel } from "../../shared/channel";
 export { isClosed, ITEM_STATUSES, statusLabel } from "../../shared/status";
-export type { ItemStatus } from "../../shared/status";
+export type { ItemStatus, Proposal } from "../../shared/status";
 export type { ItemDto as WorkItem, ProjectDto as Project } from "./api";
+
+/**
+ * Who a proposal is from, as a row says it: the teammate that made it, since
+ * "Coder says: won't do" is what a person needs to read. An agent that has
+ * since gone from the team — or a proposal made on a bare key, from outside
+ * any conversation — falls back to the account it was made on.
+ */
+export function proposerName(proposal: Proposal, agents: Map<string, { name: string }>): string {
+  return (proposal.agentId ? agents.get(proposal.agentId)?.name : null) ?? proposal.email;
+}
 
 /**
  * What to say after an item was closed — done or won't do — and the server

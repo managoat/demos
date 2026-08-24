@@ -13,7 +13,7 @@
 import { useMemo, useState } from "react";
 import { useProject } from "../store";
 import type { Agent } from "../types";
-import { agentFits, channelIsItem } from "../lib/workbench";
+import { agentFits, channelIsItem, proposerName } from "../lib/workbench";
 import { computerLabel, computersOf, relativeTime } from "../lib/sidebar";
 import { useDraft } from "../lib/draft";
 import { renderMarkdown } from "../lib/markdown";
@@ -100,7 +100,14 @@ export function WorkItem({ itemId }: { itemId: string }) {
             </div>
             <div className="row">
               <ItemStatusPill status={item.status} />
-              <CloseControls status={item.status} live={live} onSet={(status) => void updateItem(item.id, { status })} />
+              <CloseControls
+                status={item.status}
+                live={live}
+                proposal={item.proposal}
+                proposedBy={item.proposal ? proposerName(item.proposal, agents) : ""}
+                onSet={(status) => void updateItem(item.id, { status })}
+                onDismiss={() => void updateItem(item.id, { proposal: null })}
+              />
               <button className="secondary small" onClick={() => setEditing(true)}>
                 Edit
               </button>

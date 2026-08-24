@@ -8,9 +8,9 @@
  * member's.
  */
 import { channelIsItem, channelPrefix, newId, parseChannel, recoveredTitle } from "../shared/channel";
-import { emptyCounts, isClosed, isItemStatus, parseItemStatus, type ItemCounts, type ItemStatus } from "../shared/status";
+import { emptyCounts, isClosed, isItemStatus, isProposedStatus, parseItemStatus, type ItemCounts, type ItemStatus, type Proposal, type ProposedStatus } from "../shared/status";
 import { authenticate, ownerClient, projectAccess, requireOwner, userClient, type AppContext } from "./context";
-import { now, parseAgentIds, type ItemRow, type ProjectRow, type Role } from "./db";
+import { NO_PROPOSAL, now, parseAgentIds, type ItemPatch, type ItemRow, type ProjectRow, type Role } from "./db";
 import { FountainHttpError, type ConversationSummary, type FountainClient } from "./fountain";
 import { HttpError, isEmail, json, normalizeEmail, optId, readJson, str } from "./http";
 
@@ -35,6 +35,8 @@ export interface ItemDto {
   status: ItemStatus;
   agentIds: string[];
   createdAt: string;
+  /** What a teammate says should happen to this item, waiting on a person. Null when nobody has said. */
+  proposal: Proposal | null;
 }
 
 /** What closing a work item did to its computers. */
@@ -65,7 +67,27 @@ function projectDto(ctx: AppContext, p: ProjectRow, role: Role, counts?: ItemCou
 }
 
 export function itemDto(w: ItemRow): ItemDto {
-  return { id: w.id, projectId: w.project_id, title: w.title, notes: w.notes, status: parseItemStatus(w.status), agentIds: parseAgentIds(w.agent_ids), createdAt: w.created_at };
+  return {
+    id: w.id,
+    projectId: w.project_id,
+    title: w.title,
+    notes: w.notes,
+    status: parseItemStatus(w.status),
+    agentIds: parseAgentIds(w.agent_ids),
+    createdAt: w.created_at,
+    proposal: proposalOf(w),
+  };
+}
+
+/** The proposal standing on an item, if one does. Anything we do not recognise is nobody proposing anything. */
+function proposalOf(w: ItemRow): Proposal | null {
+  if (!isProposedStatus(w.proposed_status)) return null;
+  return { status: w.proposed_status, agentId: w.proposed_agent_id || null, email: w.proposed_email, at: w.proposed_at };
+}
+
+/** The columns that record one: what is proposed, and who by. */
+export function proposalFields(status: ProposedStatus, agentId: string | null, email: string): Pick<ItemRow, keyof typeof NO_PROPOSAL> {
+  return { proposed_status: status, proposed_agent_id: agentId ?? "", proposed_email: email, proposed_at: now() };
 }
 
 /** A fresh work item, with the limits and defaults that apply wherever one is made — the API, or an agent over MCP. */
@@ -78,6 +100,7 @@ export function newItemRow(projectId: string, title: unknown, notes: unknown): I
     status: "open",
     agent_ids: "[]",
     created_at: now(),
+    ...NO_PROPOSAL,
   };
 }
 
@@ -214,11 +237,16 @@ export async function patchItem(ctx: AppContext, req: Request, id: string, itemI
   const cur = ctx.db.getItem(itemId);
   if (!cur || cur.project_id !== id) throw new HttpError(404, "not_found", "No such work item.");
   const body = await readJson(req);
-  const p: Partial<Pick<ItemRow, "title" | "notes" | "status" | "agent_ids">> = {};
+  const p: ItemPatch = {};
   if (typeof body.title === "string") p.title = str(body.title, 300).trim() || "Untitled work item";
   if (typeof body.notes === "string") p.notes = str(body.notes, 20000);
   if (isItemStatus(body.status)) p.status = body.status;
   if (Array.isArray(body.agentIds)) p.agent_ids = JSON.stringify(body.agentIds.filter((x: unknown): x is string => typeof x === "string").slice(0, 100));
+  // A person answering the question ends it: deciding the status either way
+  // settles a standing proposal, and `proposal: null` dismisses one without
+  // deciding, leaving the item open. Nobody proposes from here — a proposal is
+  // an agent saying what it thinks (server/mcp.ts); a person just decides.
+  if (p.status !== undefined || body.proposal === null) Object.assign(p, NO_PROPOSAL);
   ctx.db.updateItem(itemId, p);
   ctx.events.emit(id, { kind: "items" });
   // Both ways of closing an item end the work, so both take its computers
@@ -322,6 +350,7 @@ export function reconcileItems(ctx: AppContext, project: ProjectRow, conversatio
           status: "open",
           agent_ids: JSON.stringify(c.agent_id ? [c.agent_id] : []),
           created_at: c.inserted_at ?? now(),
+          ...NO_PROPOSAL,
         }) || changed;
     } else if (existing.project_id === project.id && c.agent_id) {
       changed = addTeammate(ctx, existing.id, c.agent_id) || changed;
@@ -413,6 +442,8 @@ export async function importState(ctx: AppContext, req: Request): Promise<Respon
         status: parseItemStatus(w.status),
         agent_ids: JSON.stringify(Array.isArray(w.agentIds) ? w.agentIds.filter((x: unknown): x is string => typeof x === "string") : []),
         created_at: str(w.createdAt, 40) || now(),
+        // A browser's old tree predates proposals; whatever it holds, nothing is proposed on it.
+        ...NO_PROPOSAL,
       })
     ) {
       ni += 1;
