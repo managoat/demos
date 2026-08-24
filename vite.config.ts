@@ -9,8 +9,8 @@ import react from "@vitejs/plugin-react";
 // FOUNTAIN_PROXY=https://fountain.example.com and point the app at
 // http://localhost:5173 instead: Vite forwards /api and /oauth there.
 //
-// `VITE_BASE` is the path the build is served under (GitHub Pages serves a
-// project site at /<repo>/); unset means the root.
+// `VITE_BASE` is the path the build is served under; unset means the root,
+// which is where workbench.inevitable.fyi serves it.
 const proxyTarget = process.env.FOUNTAIN_PROXY;
 
 export default defineConfig({

@@ -16,9 +16,20 @@ Fountain the button still works; the conversation starts on a new computer and
 the app says so. The sandbox identity `(agent, environment, vault)` falls out
 of the tree — same project, same agent — which is what makes sharing legal.
 
-Hosted at **https://jakegaylor.com/fountain-workbench/** — sign in with any
-Fountain that lists that origin in `API_CORS_ORIGINS` and registers the
+Hosted at **https://workbench.inevitable.fyi/** — sign in with any Fountain
+that lists that origin in `API_CORS_ORIGINS` and registers the
 `fountain-workbench` OAuth client.
+
+## Deploy
+
+`.github/workflows/build.yml` builds the bundle on the runner, packages it as
+nginx + `dist/` (`Dockerfile`, multi-arch), pushes
+`ghcr.io/jhgaylor/fountain-workbench:sha-<commit>` and pins that tag into
+`k8s/deployment.yaml`. [home-cloud](https://github.com/jhgaylor/home-cloud)
+runs a Flux `GitRepository` + `Kustomization` over `k8s/` (namespace,
+Deployment, Service, Traefik IngressRoutes, cert-manager Certificate), so a
+push to `main` is a deploy. The same shape as the other apps on
+`*.inevitable.fyi`.
 
 ## How it stores things
 
