@@ -237,6 +237,42 @@ letting an item close while its computers stay up — is exactly what "Done
 means done" is there to prevent, so it is not a shortcut, it is a different
 promise.
 
+**The board answers where the work stands.** The list says what is there;
+**Board**, the other half of the toggle on a project, says where each item has
+got to — one column per state, cards you can drag between them. The columns
+are the point, because an item carries only three statuses and a board with
+three columns is a list with gaps in it. So the open half is split by what the
+app already knows from the conversation list and the item's own proposal
+(`src/lib/board.ts`): **To do**, open with nothing running on it · **In
+progress**, a conversation still live · **Needs you**, a teammate has proposed
+a verdict nobody has answered · **Done** · **Won't do**. That third column is
+what the board is for: a proposal is a question standing on an item, and until
+now the only place it was counted was the row it was written on. To do holds
+two different things — never started, and started and stopped without anyone
+closing it — so each card says which, because its column cannot.
+
+Deriving the columns is what stops them lying about the state, and the cost is
+that most drags have no field behind them. The board is straight about which:
+a column that cannot take the card you are holding says so **in the column,
+while you hold it** — "In progress is not a field: an item is there while a
+conversation is live on it. Start a teammate on it and it moves itself." The
+refusal has to arrive before you let go rather than after, because a `dragover`
+that withholds the drop is a drag the browser never fires `drop` for; there is
+no later to explain in. What is left is real: dropping on **Done** or **Won't
+do** closes the item, dragging a closed card back into the open half reopens
+it, and dragging a verdict out of **Needs you** is the Dismiss button. When a
+close would retire something live, the drag stops on a bar naming the item and
+what it costs — the pointer makes that far too easy to do by accident for the
+`Sure?` on a button to be enough. And dragging is never the only way: every
+card carries the same close controls as a list row, so the board works from a
+keyboard, and on a touch screen, which has no drag at all.
+
+Which view you read a project in is a setting rather than a place, so it is
+remembered per browser and every link back to the project — the breadcrumb,
+the picker, the last tab closing — lands you in the one you chose. Naming one
+(`#/p/<project>/board`) is what the toggle does, so a board is still a link you
+can send.
+
 **A teammate can file the work itself.** `POST /mcp` is the work-item tree as
 MCP tools — `list_projects`, `list_work_items`, `create_work_item`,
 `update_work_item` — so "split this into three items" is something the agent
@@ -436,12 +472,13 @@ src/
   lib/turns.ts       fold a log feed into turns for the chat view
   lib/digest.ts      a work item's stage stream → what happened since you last looked
   lib/details.ts     what a conversation runs with: its computer, its skills and MCP servers, the policy in force
+  lib/board.ts       the items as columns, and which drags between them are real writes
   lib/blocks.ts      arrange server-parsed blocks (from fountain-conversations)
   lib/markdown.tsx   allow-list markdown → React nodes, no innerHTML
   lib/draft.ts       a field's draft and the debounced save behind it
   lib/theme.ts       the palette list; the blocks themselves are in styles.css
-  pages/             Projects, Project (items, people), WorkItem, Team, Cost
-  components/        Thread, ThreadFind (⌘F), DetailsPanel, ItemDigest, Palette (⌘K), StartDialog, Attachments, EnvVaultFields, Blocks, ItemStatus, SignIn, Layout
+  pages/             Projects, Project (items as a list or a board, people), WorkItem, Team, Cost
+  components/        Thread, ThreadFind (⌘F), DetailsPanel, Board, ItemDigest, Palette (⌘K), StartDialog, Attachments, EnvVaultFields, Blocks, ItemStatus, SignIn, Layout
 ```
 
 ## Licence

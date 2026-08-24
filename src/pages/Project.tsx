@@ -3,20 +3,29 @@
  * — which can put a teammate on it and prompt them in the same submit, since
  * starting a conversation is what assigns one. The project's default teammate
  * is already picked, so the form asks for the work, not for who does it.
+ *
+ * The same items read two ways, and the toggle in the header picks: the
+ * **list**, which answers "what is there", and the **board**
+ * (components/Board.tsx), a column per state, which answers "where does it
+ * stand" — the question a project with agents running in it keeps raising.
+ * The choice is remembered per browser, so every link back to the project
+ * lands in it; the form above them belongs to both.
  */
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useProject } from "../store";
 import { agentFits, channelIsItem, defaultTeammate, isClosed, proposerName } from "../lib/workbench";
+import { loadProjectView, saveProjectView, type ProjectView } from "../lib/board";
 import { itemAsPrompt } from "../lib/start";
 import { describeError } from "../lib/errors";
 import { href, navigate } from "../router";
 import { TwoStep } from "../components/Thread";
 import { CloseControls, ItemStatusPill } from "../components/ItemStatus";
 import { AgentAvatar } from "../components/AgentAvatar";
+import { Board } from "../components/Board";
 import { AttachmentStrip, useAttachments } from "../components/Attachments";
 import { formatTime } from "../lib/format";
 
-export function Project() {
+export function Project({ view: named }: { view: ProjectView | null }) {
   const { project, items, isOwner, conversations, agents, environments, vaults, createItem, updateItem, removeItem, startConversation, updateProject, toast } = useProject();
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -26,6 +35,16 @@ export function Project() {
   const [showClosed, setShowClosed] = useState(false);
   const [busy, setBusy] = useState(false);
   const attachments = useAttachments((message) => toast(message, "error"));
+
+  // A URL that names a view wins and becomes the preference; a bare project
+  // URL is answered with whatever this browser last chose.
+  const [remembered, setRemembered] = useState<ProjectView>(() => loadProjectView());
+  const view = named ?? remembered;
+  useEffect(() => {
+    if (!named || named === remembered) return;
+    setRemembered(named);
+    saveProjectView(named);
+  }, [named, remembered]);
 
   const team = useMemo(() => [...agents.values()].sort((a, b) => a.name.localeCompare(b.name)), [agents]);
   const boss = useMemo(() => defaultTeammate(project, agents), [project, agents]);
@@ -136,7 +155,7 @@ export function Project() {
   };
 
   return (
-    <div className="page narrow">
+    <div className={`page${view === "list" ? " narrow" : " wide"}`}>
       <div className="page-header">
         <div>
           <h1>{project.name}</h1>
@@ -147,6 +166,20 @@ export function Project() {
           </div>
         </div>
         <div className="row">
+          {/* The same items, read two ways. Naming the view in the URL is also what remembers it. */}
+          <div className="seg" role="group" aria-label="How to read the work">
+            {(["list", "board"] as const).map((v) => (
+              <a
+                key={v}
+                className={`button ${view === v ? "on" : ""}`}
+                href={href.projectView(project.id, v)}
+                aria-current={view === v ? "true" : undefined}
+                title={v === "list" ? "Every item, open then closed" : "A column per state: to do, in progress, needs you, done, won't do"}
+              >
+                {v === "list" ? "List" : "Board"}
+              </a>
+            ))}
+          </div>
           {/* The owner pays for everyone's conversations here, so the owner is the one shown what they came to. */}
           {isOwner && (
             <a className="button secondary small" href={href.cost()} title="What the work on your account came to, this project included">
@@ -221,16 +254,22 @@ export function Project() {
         </div>
       </form>
 
-      <h2 className="h2 section">Open</h2>
-      {open.length === 0 ? <p className="muted">Nothing open.</p> : <ul className="conv-list">{open.map(row)}</ul>}
-      {closed.length > 0 && (
+      {view === "board" ? (
+        <Board />
+      ) : (
         <>
-          <h2 className="h2 section">
-            <button className="linklike" onClick={() => setShowClosed((v) => !v)}>
-              {showClosed ? "Hide" : "Show"} {closedLabel}
-            </button>
-          </h2>
-          {showClosed && <ul className="conv-list">{closed.map(row)}</ul>}
+          <h2 className="h2 section">Open</h2>
+          {open.length === 0 ? <p className="muted">Nothing open.</p> : <ul className="conv-list">{open.map(row)}</ul>}
+          {closed.length > 0 && (
+            <>
+              <h2 className="h2 section">
+                <button className="linklike" onClick={() => setShowClosed((v) => !v)}>
+                  {showClosed ? "Hide" : "Show"} {closedLabel}
+                </button>
+              </h2>
+              {showClosed && <ul className="conv-list">{closed.map(row)}</ul>}
+            </>
+          )}
         </>
       )}
     </div>

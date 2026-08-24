@@ -168,7 +168,7 @@ function Router() {
         ) : route.page === "conversation" ? (
           <Conversation conversationId={route.conversationId} turnId={route.turnId} />
         ) : (
-          <Project />
+          <Project view={route.page === "project" ? route.view : null} />
         )}
       </Shell>
     </ProjectProvider>
