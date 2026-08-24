@@ -22,7 +22,7 @@ spec:
       containers:
         - name: web
           # Pinned to an immutable sha tag by .github/workflows/build.yml.
-          image: ghcr.io/jhgaylor/fountain-workbench:sha-baedf81135acd161c6f781c436bda2a77e54f9fa
+          image: ghcr.io/jhgaylor/fountain-workbench:sha-899e6a454c4750f12371acd9bbdcd93a0d3e4994
           ports:
             - containerPort: 8080
           env:
