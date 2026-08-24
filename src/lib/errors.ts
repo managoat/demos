@@ -16,8 +16,11 @@ export function describeError(err: unknown): string {
         return "The sandbox is still coming up — try again in a moment.";
       case "sandbox_not_found":
         return "That computer is gone.";
-      case "sandbox_not_attachable":
-        return "That computer cannot take another conversation.";
+      case "sandbox_not_attachable": {
+        // Fountain says which state it is in: "the sandbox is starting; …".
+        const m = /sandbox is (\w+)/.exec(err.message ?? "");
+        return m ? `That computer is ${m[1]} — a second conversation attaches once it is ready (or suspended).` : "That computer cannot take another conversation until it is ready.";
+      }
       case "sandbox_identity_mismatch":
         return "A computer is shared only by conversations of the same teammate in the same project.";
       case "sandbox_runtime_mismatch":

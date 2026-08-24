@@ -28,6 +28,8 @@ interface Computer {
 }
 
 const LIVE_STATUSES = new Set<Conversation["status"]>(["pending", "running", "idle"]);
+/** Fountain attaches a conversation only to a sandbox in one of these states (`check_attachable`). */
+const ATTACHABLE = new Set<string>(["ready", "suspended"]);
 
 export function WorkItem({ itemId, conversationId }: { itemId: string; conversationId: string | null }) {
   const { project, items, conversations, agents, environments, vaults, fountain, toast, refresh, updateItem, addTeammate, removeTeammate } = useProject();
@@ -54,7 +56,7 @@ export function WorkItem({ itemId, conversationId }: { itemId: string; conversat
         comp = {
           key,
           sandboxId: c.sandbox_id ?? null,
-          sandbox: c.sandbox ?? (c.sandbox_id ? sandboxes.get(c.sandbox_id) ?? null : null),
+          sandbox: (c.sandbox_id ? sandboxes.get(c.sandbox_id) : null) ?? c.sandbox ?? null,
           conversations: [],
           agent: c.agent_id ? agents.get(c.agent_id) ?? null : null,
         };
@@ -72,9 +74,15 @@ export function WorkItem({ itemId, conversationId }: { itemId: string; conversat
     });
   }, [convs, agents, sandboxes]);
 
-  // The list does not say what a computer is called or how it is doing; its record does.
+  // The list does not say what a computer is called or how it is doing; its
+  // record does. Read it for every live computer, and again whenever a
+  // conversation on one changes state — that is when starting becomes ready.
+  const liveKey = computers
+    .filter((c) => c.sandboxId && isLive(c))
+    .map((c) => `${c.key}:${c.conversations.map((x) => x.status).join("")}`)
+    .join(",");
   useEffect(() => {
-    const want = computers.filter((c) => c.sandboxId && !c.sandbox && isLive(c));
+    const want = computers.filter((c) => c.sandboxId && isLive(c));
     if (want.length === 0) return;
     let cancelled = false;
     for (const comp of want) {
@@ -89,9 +97,8 @@ export function WorkItem({ itemId, conversationId }: { itemId: string; conversat
     return () => {
       cancelled = true;
     };
-    // Keyed on which live computers lack a record, not on every list tick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [computers.filter((c) => c.sandboxId && !c.sandbox && isLive(c)).map((c) => c.key).join(","), fountain]);
+  }, [liveKey, fountain]);
 
   if (!item) {
     return (
@@ -240,7 +247,14 @@ export function WorkItem({ itemId, conversationId }: { itemId: string; conversat
                   {live && comp.sandboxId && comp.agent && (
                     <button
                       className="secondary small"
-                      title="Another conversation with the same teammate on this computer"
+                      disabled={!comp.sandbox || !ATTACHABLE.has(comp.sandbox.status)}
+                      title={
+                        !comp.sandbox
+                          ? "Checking the computer…"
+                          : ATTACHABLE.has(comp.sandbox.status)
+                            ? "Another conversation with the same teammate on this computer"
+                            : `The computer is ${comp.sandbox.status}; a second conversation attaches once it is ready`
+                      }
                       onClick={() => setDialog({ join: { sandboxId: comp.sandboxId!, label: comp.sandbox?.sprite_name ?? shortId(comp.sandboxId!), agentId: comp.agent!.id }, agentId: comp.agent!.id })}
                     >
                       + Here
