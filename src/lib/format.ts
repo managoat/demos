@@ -44,6 +44,14 @@ export function formatHours(h: number | null | undefined): string {
   return `${Math.round(h * 10) / 10} h`;
 }
 
+/** Turn time measured in seconds, in the unit that reads: seconds under the minute, then minutes, then hours. */
+export function formatTurnTime(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return "—";
+  if (seconds <= 0) return "0";
+  if (seconds < 60) return `${Math.round(seconds)} s`;
+  return formatHours(seconds / 3600);
+}
+
 /** Fountain prices plans in USD cents, and shows whole dollars when it can (`Fountain.Plans.format_usd/1`). */
 export function formatUsd(cents: number | null | undefined): string {
   if (cents === null || cents === undefined || !Number.isFinite(cents)) return "—";

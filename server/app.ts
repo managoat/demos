@@ -8,6 +8,7 @@
  *   GET    /api/me
  *   GET    /api/me/resources                my environments and vaults, for a new project
  *   GET    /api/me/cost                     my bill, and the projects I own that it paid for (cost.ts)
+ *   GET    /api/me/cost/period              the same projects in turn hours over the bill's own window (cost.ts)
  *   GET    /api/projects                    mine: owned and shared with me
  *   POST   /api/projects
  *   GET    /api/projects/activity           live counts and last activity, per project
@@ -76,6 +77,9 @@ export function buildApp(ctx: AppContext): (req: Request) => Promise<Response> {
   // The caller's own account and their own projects. Not a project route, and
   // not through the proxy: a member's boundary is not where a bill belongs.
   on("GET", "/api/me/cost", (req) => cost.show(ctx, req));
+  // Split from the route above, not folded into it: this one costs a request
+  // per conversation, so the cheap view paints first and this arrives behind it.
+  on("GET", "/api/me/cost/period", (req) => cost.period(ctx, req));
 
   on("GET", "/api/projects", (req) => projects.list(ctx, req));
   on("POST", "/api/projects", (req) => projects.create(ctx, req));

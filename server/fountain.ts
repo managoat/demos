@@ -27,6 +27,23 @@ export interface ConversationSummary {
   [k: string]: unknown;
 }
 
+/**
+ * One turn of a conversation, as `GET /api/conversations/:id/turns` reports it.
+ * The three fields that matter to a bill: when it ran, and what it spent.
+ * `started_at` is null for a turn that never started; `ended_at` is null while
+ * it is still running.
+ */
+export interface TurnSummary {
+  id: string;
+  turn_number?: number;
+  status?: string;
+  started_at?: string | null;
+  ended_at?: string | null;
+  /** End-of-turn tokens; null while the turn runs, and on turns that predate the field. */
+  usage?: { input?: number; output?: number; cache_read?: number | null; cache_write?: number | null } | null;
+  [k: string]: unknown;
+}
+
 /** One hit from `GET /api/search`: what matched, and where to jump. */
 export interface SearchHit {
   kind: "title" | "prompt" | "reply";
@@ -119,6 +136,17 @@ export class FountainClient {
   async terminate(id: string): Promise<void> {
     const res = await this.fetch(`/api/conversations/${encodeURIComponent(id)}/terminate`, { method: "POST" });
     if (!res.ok) throw new FountainHttpError(res.status, await res.text());
+  }
+
+  /**
+   * One conversation's turns. There is no turns-by-user endpoint and no query
+   * on this one — no window, no paging — so a caller wanting turns across an
+   * account pays a request per conversation. `server/cost.ts` is the only
+   * caller, and it prunes and caches before it fans out.
+   */
+  async turns(id: string): Promise<TurnSummary[]> {
+    const body = await this.json<{ data: TurnSummary[] }>(`/api/conversations/${encodeURIComponent(id)}/turns`);
+    return body.data ?? [];
   }
 
   async conversation(id: string): Promise<ConversationSummary | null> {

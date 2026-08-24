@@ -8,6 +8,7 @@ import type { Config } from "./config";
 import { ProjectEvents } from "./context";
 import { Cipher } from "./crypto";
 import { Db } from "./db";
+import { resetCostCache } from "./cost";
 import { resetMcpCache } from "./mcp";
 import { itemDto, proposalFields } from "./projects";
 import { resetProxyCache } from "./proxy";
@@ -26,7 +27,23 @@ interface FakeConv {
   inserted_at: string;
   turn_count?: number;
   usage_total?: { input: number; output: number };
+  last_active_at?: string | null;
 }
+
+/** What `GET /api/conversations/:id/turns` answers, per conversation id. */
+interface FakeTurn {
+  id: string;
+  turn_number: number;
+  status: string;
+  started_at: string | null;
+  ended_at: string | null;
+  usage?: { input: number; output: number } | null;
+}
+const turnsOf: Record<string, FakeTurn[]> = {};
+/** Every conversation the server asked turns for, in order — the fan-out, made visible. */
+let turnsAsked: string[] = [];
+/** A conversation id in here makes the turns endpoint fail, the way one dead row should not fail a page. */
+const turnsBroken = new Set<string>();
 
 const KEYS: Record<string, { id: string; email: string }> = {
   "key-alice": { id: "u-alice", email: "Alice@Example.com" },
@@ -61,6 +78,17 @@ const answers: { conversation: string; request: string; option_id: unknown }[] =
 let streamEvents: { conversation_id: string; id: number }[] = [];
 /** An instance with billing switched off answers 404 there; flip this to be one. */
 let billingEnabled = true;
+/**
+ * The fake's billing period, anchored to now rather than written out: the
+ * per-period cost route measures against the wall clock (a turn still running
+ * accrues only as far as *now*), so a hard-coded month would pass today and
+ * fail next year.
+ */
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** One instant every relative timestamp in these tests is measured from, so the arithmetic is exact. */
+const NOW = Date.now();
+const PERIOD_START = new Date(NOW - 10 * DAY_MS).toISOString();
+const PERIOD_END = new Date(NOW + 20 * DAY_MS).toISOString();
 
 function whose(req: Request): string | null {
   const auth = req.headers.get("authorization") ?? "";
@@ -99,7 +127,13 @@ const fountain = Bun.serve({
       const c = convs[key]!.find((x) => x.id === one[1]);
       if (!c) return Response.json({ error: "not_found" }, { status: 404 });
       if (!one[2]) return Response.json({ data: c });
-      if (one[2] === "/turns") return Response.json({ data: [{ id: "t1", prompt: "hi", image_count: 1 }] });
+      if (one[2] === "/turns") {
+        turnsAsked.push(c.id);
+        if (turnsBroken.has(c.id)) return Response.json({ error: "boom" }, { status: 500 });
+        const own = turnsOf[c.id];
+        if (own) return Response.json({ data: own });
+        return Response.json({ data: [{ id: "t1", prompt: "hi", image_count: 1 }] });
+      }
       if (one[2] === "/prompts") {
         const body = (await req.json()) as { prompt?: string; images?: unknown[] };
         prompted.push(body);
@@ -151,7 +185,7 @@ const fountain = Bun.serve({
       return Response.json({
         data: {
           status: "active",
-          period: { start: "2026-08-01T00:00:00Z", end: "2026-09-01T00:00:00Z", source: "subscription" },
+          period: { start: PERIOD_START, end: PERIOD_END, source: "subscription" },
           plan: { name: "Team", slug: "team", monthly_cents: 9900, included_turn_hours: 100 },
           usage: { conversations: 12, turns: 40, turn_hours: 7.5, turn_hours_included: 100, turn_hours_remaining: 92.5, sandbox_minutes: 900 },
         },
@@ -200,6 +234,8 @@ afterAll(() => {
 beforeEach(() => {
   resetProxyCache();
   resetMcpCache();
+  resetCostCache();
+  turnsAsked = [];
 });
 
 const cookies: Record<string, string> = {};
@@ -1229,6 +1265,206 @@ describe("what a project cost, for the owner who paid for it", () => {
     expect(cost.billing).toBeNull();
     expect(cost.billingUnavailable).toBe("disabled");
     expect(cost.projects.find((p) => p.id === projectId)!.turns).toBe(6);
+    billingEnabled = true;
+  });
+});
+
+// ── the same work, in the unit the bill is in, over the window it covers ──
+//
+// `/api/me/cost` answers in lifetime tokens; the bill is turn hours over one
+// period. This route closes both gaps by measuring each turn's own interval,
+// so what it reports is a division of the account figure rather than a second
+// number beside it. The clock matters here: the window is real, and a turn
+// still running accrues only as far as now.
+
+describe("what a project cost this billing period, measured in turn hours", () => {
+  let cp = "";
+  let thisMonth = "";
+  let mixed = "";
+  const HOUR_MS = 60 * 60 * 1000;
+  const ago = (ms: number) => new Date(NOW - ms).toISOString();
+  /** Carol owns more than this describe's project, so never index the list. */
+  const mine = (p: import("./cost").PeriodCostDto) => p.projects.find((x) => x.id === cp)!;
+
+  const conv = (id: string, channel: string | null, lastActive: string): FakeConv => ({
+    id,
+    channel_id: channel,
+    title: null,
+    agent_id: "a1",
+    environment_id: "e1",
+    vault_id: "v1",
+    sandbox_id: "sbC",
+    status: "idle",
+    inserted_at: ago(30 * DAY_MS),
+    last_active_at: lastActive,
+    turn_count: 1,
+    usage_total: { input: 1, output: 1 },
+  });
+
+  const turn = (n: number, startedAgo: number, endedAgo: number | null, input = 0, output = 0): FakeTurn => ({
+    id: `t${n}`,
+    turn_number: n,
+    status: endedAgo === null ? "running" : "completed",
+    started_at: ago(startedAgo),
+    ended_at: endedAgo === null ? null : ago(endedAgo),
+    usage: input || output ? { input, output } : null,
+  });
+
+  beforeAll(async () => {
+    billingEnabled = true;
+    await signIn("carol");
+    cp = (await (await call("carol", "POST", "/api/projects", { name: "Carol's", environmentId: "e1", vaultId: "v1" })).json()).data.id;
+    thisMonth = (await (await call("carol", "POST", `/api/projects/${cp}/items`, { title: "this month" })).json()).data.id;
+    mixed = (await (await call("carol", "POST", `/api/projects/${cp}/items`, { title: "still going" })).json()).data.id;
+
+    const on = (item: string) => `workbench:${cp}/${item}/${item.slice(0, 8)}`;
+    convs["key-carol"] = [
+      // Two ordinary turns wholly inside the window: 1 h and 30 min.
+      conv("c1", on(thisMonth), ago(3 * DAY_MS)),
+      // One turn that began before the period and ended inside it: only the
+      // day inside counts, and its tokens land here because it ended here.
+      conv("c2", on(thisMonth), ago(9 * DAY_MS)),
+      // Last touched before the period opened: it cannot hold a turn inside
+      // it, so this one is never asked about at all.
+      conv("c3", on(mixed), ago(19 * DAY_MS)),
+      // A turn still running: it accrues to now and no further.
+      conv("c4", on(mixed), ago(0)),
+      // A turn that never started bills nothing, and Fountain reports no start.
+      conv("c5", on(mixed), ago(2 * DAY_MS)),
+      // Recent, but with one turn wholly before the window: that one is not a
+      // turn "this period" and its tokens were spent in the last one.
+      conv("c6", on(thisMonth), ago(1 * DAY_MS)),
+      // Fountain will not answer for this one; it is a hole, not a failed page.
+      conv("cbroken", on(mixed), ago(2 * DAY_MS)),
+      // Not a project of hers, so not a candidate and never a request.
+      conv("cteam", "fountain:team", ago(1 * DAY_MS)),
+    ];
+    turnsOf.c1 = [turn(1, 3 * DAY_MS, 3 * DAY_MS - HOUR_MS, 100, 50), turn(2, 2 * DAY_MS, 2 * DAY_MS - HOUR_MS / 2, 20, 10)];
+    turnsOf.c2 = [turn(1, 11 * DAY_MS, 9 * DAY_MS, 900, 900)];
+    turnsOf.c3 = [turn(1, 20 * DAY_MS, 19 * DAY_MS, 7, 7)];
+    turnsOf.c4 = [turn(1, HOUR_MS, null)];
+    turnsOf.c5 = [{ id: "t1", turn_number: 1, status: "pending", started_at: null, ended_at: null, usage: null }];
+    turnsOf.c6 = [turn(1, 12 * DAY_MS, 11 * DAY_MS, 500, 500), turn(2, 1 * DAY_MS, 1 * DAY_MS - 2 * HOUR_MS, 5, 5)];
+    turnsBroken.add("cbroken");
+  });
+
+  afterAll(() => {
+    billingEnabled = true;
+    turnsBroken.delete("cbroken");
+    convs["key-carol"] = [];
+  });
+
+  const periodOf = async (who: string) => (await (await call(who, "GET", "/api/me/cost/period")).json()).data as import("./cost").PeriodCostDto;
+
+  test("no session, no breakdown", async () => {
+    expect((await call(null, "GET", "/api/me/cost/period")).status).toBe(401);
+  });
+
+  test("the window is the bill's own, and measuring stops at now rather than at a period end that has not happened", async () => {
+    const p = await periodOf("carol");
+    expect(p.period).toEqual({ start: PERIOD_START, end: PERIOD_END, source: "subscription" });
+    // The period runs 20 days into the future; the measurement does not.
+    expect(Date.parse(p.measuredTo)).toBeLessThanOrEqual(Date.now() + 1000);
+    expect(Date.parse(p.measuredTo)).toBeGreaterThan(Date.now() - 60_000);
+    // The account figure is Fountain's, carried, not computed from our sum.
+    expect(p.accountTurnHours).toBe(7.5);
+  });
+
+  test("a turn's own start and end are the measure, and a turn straddling the period start counts only the part inside", async () => {
+    const p = await periodOf("carol");
+    const item = mine(p).items.find((w) => w.id === thisMonth)!;
+    // c1: 3600 + 1800. c2: began 11 days back, ended 9 days back, period opened
+    // 10 days back, so one day of it — 86400 — not two. c6's second turn: 7200.
+    expect(item.seconds).toBe(3600 + 1800 + 86_400 + 7200);
+    expect(item.turns).toBe(4);
+    expect(item.conversations).toBe(3);
+    expect(item.title).toBe("this month");
+  });
+
+  test("tokens follow the turn that ended, so a turn spent in the last period is not spent again in this one", async () => {
+    const p = await periodOf("carol");
+    const item = mine(p).items.find((w) => w.id === thisMonth)!;
+    // c1 120/60, c2 900/900 (it ended inside), c6's second turn 5/5. c6's
+    // first turn ended before the window opened and its 500/500 stays there.
+    expect(item.input).toBe(1025);
+    expect(item.output).toBe(965);
+  });
+
+  test("a turn still running accrues as far as now and no further; one that never started bills nothing", async () => {
+    const p = await periodOf("carol");
+    const item = mine(p).items.find((w) => w.id === mixed)!;
+    // c4's turn began an hour ago and has not ended: an hour, plus however
+    // long this test took. c5 has a turn with no start, which is not a turn.
+    expect(item.seconds).toBeGreaterThanOrEqual(3600);
+    expect(item.seconds).toBeLessThan(3660);
+    expect(item.turns).toBe(1);
+    expect(item.conversations).toBe(1);
+  });
+
+  test("a conversation that cannot have run inside the window is not asked about", async () => {
+    await periodOf("carol");
+    // c3 was last touched before the period opened; cteam is not hers to attribute.
+    expect(turnsAsked).not.toContain("c3");
+    expect(turnsAsked).not.toContain("cteam");
+    expect(turnsAsked.sort()).toEqual(["c1", "c2", "c4", "c5", "c6", "cbroken"]);
+  });
+
+  test("one conversation Fountain will not answer for is a hole it names, not a failed page", async () => {
+    const p = await periodOf("carol");
+    expect(p.fanout).toEqual({ candidates: 7, fetched: 5, cached: 0, skipped: 1, dropped: 0, failed: 1 });
+    // And everything it could read still adds up.
+    expect(p.measured.seconds).toBe(p.projects.reduce((n, x) => n + x.seconds, 0));
+    expect(mine(p).seconds).toBe(mine(p).items.reduce((n, w) => n + w.seconds, 0));
+  });
+
+  test("a reload asks Fountain again only for what could have moved", async () => {
+    await periodOf("carol");
+    turnsAsked = [];
+    const again = await periodOf("carol");
+    // The finished conversations are cached against their turn count and last
+    // activity. The one with a turn in flight is not — its figure grows with
+    // the clock — and the one that errored was never cached.
+    expect(turnsAsked.sort()).toEqual(["c4", "cbroken"]);
+    expect(again.fanout.cached).toBe(4);
+    expect(again.fanout.fetched).toBe(1);
+    expect(again.fanout.failed).toBe(1);
+  });
+
+  test("a new turn invalidates the cache, because the stamp it was read at moved", async () => {
+    await periodOf("carol");
+    const c1 = convs["key-carol"]!.find((c) => c.id === "c1")!;
+    const wasCount = c1.turn_count;
+    const wasActive = c1.last_active_at;
+    c1.turn_count = 9;
+    c1.last_active_at = ago(0);
+    turnsOf.c1 = [...turnsOf.c1!, turn(3, HOUR_MS, HOUR_MS / 2, 1, 1)];
+    turnsAsked = [];
+    const p = await periodOf("carol");
+    expect(turnsAsked).toContain("c1");
+    expect(mine(p).items.find((w) => w.id === thisMonth)!.turns).toBe(5);
+    turnsOf.c1 = turnsOf.c1.slice(0, 2);
+    c1.turn_count = wasCount;
+    c1.last_active_at = wasActive;
+  });
+
+  test("a member sees their own account, never the owner's — the period breakdown is not behind the project boundary either", async () => {
+    const carol = await periodOf("carol");
+    expect(carol.projects.map((x) => x.id)).toContain(cp);
+    // Alice owns the project carol is not in; nothing of hers is here, and
+    // carol's project is nothing alice can see the cost of.
+    const alice = await periodOf("alice");
+    expect(alice.projects.map((x) => x.id)).not.toContain(cp);
+    expect(alice.projects.map((x) => x.id)).toContain(projectId);
+  });
+
+  test("billing switched off falls back to the calendar month and offers no account figure to be a share of", async () => {
+    billingEnabled = false;
+    const p = await periodOf("carol");
+    expect(p.period.source).toBe("calendar_month");
+    expect(p.accountTurnHours).toBeNull();
+    // The window changed, so the numbers did; that it still measured has not.
+    expect(p.fanout.candidates).toBe(7);
+    expect(p.projects.map((x) => x.id)).toContain(cp);
     billingEnabled = true;
   });
 });

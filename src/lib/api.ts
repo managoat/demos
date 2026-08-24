@@ -102,6 +102,52 @@ export interface Cost {
   total: CostBucket;
 }
 
+// The same projects, in the bill's unit over the bill's window: turn seconds
+// summed from each turn's own timestamps. A second request because it costs a
+// round trip per conversation, so the view above paints without waiting for it.
+
+export interface PeriodBucket {
+  conversations: number;
+  turns: number;
+  /** Turn time inside the window, clipped to it exactly as Fountain's meter clips it. */
+  seconds: number;
+  /** Tokens on turns that ended inside the window. */
+  input: number;
+  output: number;
+}
+
+export interface ItemPeriodCost extends PeriodBucket {
+  id: string;
+  title: string | null;
+  status: ItemStatus | null;
+}
+
+export interface ProjectPeriodCost extends PeriodBucket {
+  id: string;
+  name: string;
+  items: ItemPeriodCost[];
+}
+
+/** What the fan-out did, so the page can say what is missing rather than imply nothing is. */
+export interface CostFanout {
+  candidates: number;
+  fetched: number;
+  cached: number;
+  skipped: number;
+  dropped: number;
+  failed: number;
+}
+
+export interface PeriodCost {
+  period: { start: string; end: string; source: string };
+  measuredTo: string;
+  /** Fountain's own account-wide turn hours for the same window. Null when there is no bill. */
+  accountTurnHours: number | null;
+  projects: ProjectPeriodCost[];
+  measured: PeriodBucket;
+  fanout: CostFanout;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -144,6 +190,8 @@ export const api = {
   // Your own bill and your own projects. Not `/f/<project>/…`: the proxy is the
   // member boundary, and a bill does not belong on the far side of it.
   cost: () => data(call<{ data: Cost }>("GET", "/api/me/cost")),
+  // A request per conversation upstream, so the page asks for it after it paints.
+  costPeriod: () => data(call<{ data: PeriodCost }>("GET", "/api/me/cost/period")),
 
   projects: () => data(call<{ data: ProjectDto[] }>("GET", "/api/projects")),
   activity: () => data(call<{ data: Record<string, Activity> }>("GET", "/api/projects/activity")),
