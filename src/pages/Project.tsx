@@ -1,11 +1,13 @@
 /**
  * The project's work: its items, open then closed, and a form for the next one
  * — which can put a teammate on it and prompt them in the same submit, since
- * starting a conversation is what assigns one.
+ * starting a conversation is what assigns one. The project's default teammate
+ * is already picked, so the form asks for the work, not for who does it.
  */
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useProject } from "../store";
-import { agentFits, channelIsItem, isClosed, proposerName } from "../lib/workbench";
+import { agentFits, channelIsItem, defaultTeammate, isClosed, proposerName } from "../lib/workbench";
+import { itemAsPrompt } from "../lib/start";
 import { describeError } from "../lib/errors";
 import { href, navigate } from "../router";
 import { TwoStep } from "../components/Thread";
@@ -15,21 +17,30 @@ import { AttachmentStrip, useAttachments } from "../components/Attachments";
 import { formatTime } from "../lib/format";
 
 export function Project() {
-  const { project, items, isOwner, conversations, agents, environments, vaults, createItem, updateItem, removeItem, startConversation, toast } = useProject();
+  const { project, items, isOwner, conversations, agents, environments, vaults, createItem, updateItem, removeItem, startConversation, updateProject, toast } = useProject();
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [agentId, setAgentId] = useState("");
+  const [picking, setPicking] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [showClosed, setShowClosed] = useState(false);
   const [busy, setBusy] = useState(false);
   const attachments = useAttachments((message) => toast(message, "error"));
 
   const team = useMemo(() => [...agents.values()].sort((a, b) => a.name.localeCompare(b.name)), [agents]);
+  const boss = useMemo(() => defaultTeammate(project, agents), [project, agents]);
   const picked = agentId ? agents.get(agentId) ?? null : null;
 
-  // The images ride on the first prompt — the notes and the words together —
-  // so they need one, and a teammate to send it to.
-  const orphanImages = !!attachments.payload && (!picked || (!prompt.trim() && !notes.trim()));
+  // The default fills the box until someone picks for themselves — and the
+  // team arrives from Fountain after the first render, so it fills it late.
+  useEffect(() => {
+    if (!picking && boss) setAgentId(boss.id);
+  }, [picking, boss]);
+
+  // The images ride on the first prompt, and there is always one to ride when
+  // a teammate is picked — the item is the ask when the box is empty. So all
+  // they need is somebody to go to.
+  const orphanImages = !!attachments.payload && !picked;
 
   async function create(e: FormEvent) {
     e.preventDefault();
@@ -48,9 +59,12 @@ export function Project() {
       return;
     }
     try {
-      const conversation = await startConversation({ item: w, agent: picked, prompt, includeNotes: true, images: attachments.payload });
+      // Nothing written in the prompt box: the item is the ask, so they get
+      // it rather than a computer that comes up with nothing to do.
+      const said = prompt.trim() ? { prompt, includeNotes: true } : itemAsPrompt(w);
+      const conversation = await startConversation({ item: w, agent: picked, ...said, images: attachments.payload });
       setPrompt("");
-      setAgentId("");
+      setPicking(false);
       attachments.clear();
       navigate(href.conversation(project.id, conversation.id));
     } catch (err) {
@@ -156,33 +170,50 @@ export function Project() {
           <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Foo 500s when… Repro: …" />
         </label>
         <label>
-          Teammate <span className="hint">Optional. Picking one puts them on the item and starts them off — that is all assigning is.</span>
-          <select value={agentId} onChange={(e) => setAgentId(e.target.value)} disabled={team.length === 0}>
+          Teammate{" "}
+          <span className="hint">
+            {boss ? `${boss.name} is this project's default and is already picked. ` : "Optional. "}
+            Picking one puts them on the item and starts them off — that is all assigning is.
+          </span>
+          <select
+            value={agentId}
+            onChange={(e) => {
+              setPicking(true);
+              setAgentId(e.target.value);
+            }}
+            disabled={team.length === 0}
+          >
             <option value="">{team.length === 0 ? `No agents on ${project.ownerEmail}'s Fountain` : "Nobody yet"}</option>
             {team.map((a) => {
               const fit = agentFits(a, project);
               return (
                 <option key={a.id} value={a.id} disabled={!fit.ok}>
                   {a.name} ({a.runtime})
+                  {a.id === project.defaultAgentId ? " — default" : ""}
                   {fit.ok ? "" : ` — ${fit.reason}`}
                 </option>
               );
             })}
           </select>
         </label>
+        {/* Set the default where you notice you want one: the third time you pick the same name. */}
+        {isOwner && picked && picked.id !== project.defaultAgentId && (
+          <button type="button" className="linklike self-start" onClick={() => void updateProject({ defaultAgentId: picked.id })}>
+            Always start with {picked.name} here
+          </button>
+        )}
         {picked && (
           <label>
-            First prompt <span className="hint">What {picked.name} should do on it. Leave it empty to just bring their computer up. Attach, paste or drop a screenshot to send with it.</span>
+            First prompt{" "}
+            <span className="hint">
+              What {picked.name} should do on it. Left empty, the work item itself is what they get. Attach, paste or drop a screenshot to send with it.
+            </span>
             <textarea rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} onPaste={attachments.paste} placeholder="Start with the repro, then…" />
           </label>
         )}
         {/* The button sits with the prompt it goes on; a drop still lands before a teammate is picked, and says so below. */}
         <AttachmentStrip items={attachments.items} onRemove={attachments.remove} add={picked ? attachments.add : undefined} />
-        {orphanImages && (
-          <div className="error">
-            {picked ? "Write the prompt the images go with — on their own there is no turn to attach them to." : "Pick a teammate for the images to go to."}
-          </div>
-        )}
+        {orphanImages && <div className="error">Pick a teammate for the images to go to.</div>}
         <div className="row end">
           <button type="submit" disabled={!title.trim() || busy || orphanImages}>
             {busy ? (picked ? "Starting…" : "Creating…") : picked ? `Create & talk to ${picked.name}` : "Create"}

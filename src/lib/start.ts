@@ -50,6 +50,37 @@ export function startBody(projectId: string, input: StartInput): Record<string, 
   return body;
 }
 
+/** As long as a work item's title gets before it stops being a title. */
+const TITLE_MAX = 72;
+
+/**
+ * Typed text as a work item: the first line names it, the rest is its notes.
+ * What you type in the explorer is the whole ask, and none of it is thrown
+ * away — the title is what the tree shows, the notes are the briefing every
+ * conversation on the item starts with.
+ */
+export function splitAsk(text: string): { title: string; notes: string } {
+  const trimmed = text.trim();
+  const br = trimmed.indexOf("\n");
+  const first = (br === -1 ? trimmed : trimmed.slice(0, br)).trim();
+  const rest = br === -1 ? "" : trimmed.slice(br + 1).trim();
+  if (first.length <= TITLE_MAX) return { title: first, notes: rest };
+  // A paragraph typed as one line: the title is cut at a word, and the whole
+  // of it goes to the notes, so the cut costs nothing.
+  const space = first.lastIndexOf(" ", TITLE_MAX);
+  const head = first.slice(0, space > TITLE_MAX / 3 ? space : TITLE_MAX).trimEnd();
+  return { title: `${head}…`, notes: rest ? `${first}\n\n${rest}` : first };
+}
+
+/**
+ * What to send when nobody wrote a first prompt of their own: the item is the
+ * ask. With notes that is the briefing; with only a title, the title is the
+ * words — so "fix foo" on its own still says something to whoever gets it.
+ */
+export function itemAsPrompt(item: WorkItem): { prompt: string; includeNotes: boolean } {
+  return item.notes.trim() ? { prompt: "", includeNotes: true } : { prompt: item.title, includeNotes: false };
+}
+
 export function buildPrompt(item: WorkItem, prompt: string, includeNotes: boolean): string {
   const body = prompt.trim();
   const notes = includeNotes ? item.notes.trim() : "";

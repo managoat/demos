@@ -20,6 +20,8 @@ export interface ProjectDto {
   notes: string;
   environmentId: string | null;
   vaultId: string | null;
+  /** Who new work here starts with unless someone picks otherwise; null is "ask every time". */
+  defaultAgentId: string | null;
   createdAt: string;
   ownerEmail: string;
   role: Role;
@@ -58,6 +60,7 @@ function projectDto(ctx: AppContext, p: ProjectRow, role: Role, counts?: ItemCou
     notes: p.notes,
     environmentId: p.environment_id,
     vaultId: p.vault_id,
+    defaultAgentId: p.default_agent_id,
     createdAt: p.created_at,
     ownerEmail: p.owner_email,
     role,
@@ -157,6 +160,7 @@ export async function create(ctx: AppContext, req: Request): Promise<Response> {
     notes: str(body.notes),
     environment_id: optId(body.environmentId),
     vault_id: optId(body.vaultId),
+    default_agent_id: optId(body.defaultAgentId),
     created_at: now(),
   };
   ctx.db.insertProject(row);
@@ -174,11 +178,14 @@ export async function patch(ctx: AppContext, req: Request, id: string): Promise<
   const { role } = projectAccess(ctx, user, id);
   requireOwner(role);
   const body = await readJson(req);
-  const p: Partial<Pick<ProjectRow, "name" | "notes" | "environment_id" | "vault_id">> = {};
+  const p: Partial<Pick<ProjectRow, "name" | "notes" | "environment_id" | "vault_id" | "default_agent_id">> = {};
   if (typeof body.name === "string") p.name = str(body.name, 200).trim() || "Untitled project";
   if (typeof body.notes === "string") p.notes = str(body.notes);
   if ("environmentId" in body) p.environment_id = optId(body.environmentId);
   if ("vaultId" in body) p.vault_id = optId(body.vaultId);
+  // Not checked against Fountain: agents come and go on the owner's account,
+  // so the browser resolves it against the team and ignores one that is gone.
+  if ("defaultAgentId" in body) p.default_agent_id = optId(body.defaultAgentId);
   ctx.db.updateProject(id, p);
   ctx.events.emit(id, { kind: "project" });
   return json({ data: projectDto(ctx, ctx.db.getProject(id)!, role) });
@@ -383,6 +390,8 @@ export async function recover(ctx: AppContext, req: Request): Promise<Response> 
         notes: "",
         environment_id: c.environment_id ?? null,
         vault_id: c.vault_id ?? null,
+        // The conversations say who worked here, not who should by default.
+        default_agent_id: null,
         created_at: c.inserted_at ?? now(),
       };
       if (ctx.db.insertProject(p)) projects += 1;
@@ -422,6 +431,7 @@ export async function importState(ctx: AppContext, req: Request): Promise<Respon
         notes: str(p.notes),
         environment_id: optId(p.environmentId),
         vault_id: optId(p.vaultId),
+        default_agent_id: optId(p.defaultAgentId),
         created_at: str(p.createdAt, 40) || now(),
       })
     )

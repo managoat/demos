@@ -17,6 +17,20 @@ the thread. On an item that already exists, the whole team is a row of chips
 under its teammates: click one and write the prompt. ("+" on a chip only
 earmarks them, for an item you are staffing before there is anything to say.)
 
+**A default teammate makes it no steps at all.** Settings & sharing has
+*Default teammate* — who new work here starts with. With one set, the
+explorer's composer stops being a title box: type what needs doing, press
+Enter, and the item is filed *and* they are on it, with the thread open. The
+first line names the item, the rest is its notes, and what you typed is what
+they get (`splitAsk`, `itemAsPrompt` in `src/lib/start.ts`); leaving the
+project form's prompt box empty does the same, because the work item is the
+ask. That Enter spends the owner's money and boots a computer, so the composer
+says whose name is on it — `↵ starts Coder on it` — and never guesses one: no
+default, no start, just the item. A default naming an agent that has left the
+owner's Fountain, or that the project's environment and vault no longer admit,
+counts as none (`defaultTeammate` in `src/lib/workbench.ts`). Filing over MCP
+still starts nobody: recording work is not spending money.
+
 **The notes are the briefing.** A work item's notes are what whoever picks it
 up starts from — a person reading the item, or a teammate reading
 `list_work_items` over MCP — so they render as markdown: headings, a fenced
@@ -258,8 +272,10 @@ browser ──(session cookie)──▶ workbench server ──(owner's Fountain
   cookie. Signing out ends the session but keeps the key, so a shared project
   does not stop when its owner closes a tab; every sign-in replaces it, and it
   is revocable in Fountain under Account → API keys.
-- **The tree** — projects (owner, members, environment, vault) and work items
-  (teammates) — lives in the server's SQLite database, `server/db.ts`.
+- **The tree** — projects (owner, members, environment, vault, default
+  teammate) and work items (teammates) — lives in the server's SQLite
+  database, `server/db.ts`. That file outlives the image it is served from, so
+  a column added later is added by `Db.migrate`, not by the schema.
 - **Fountain through a project.** The browser's SDK client for a project has
   base URL `/f/<project>`; the server (`server/proxy.ts`) forwards to Fountain
   on the owner's key and admits only conversations whose `channel_id` starts

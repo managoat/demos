@@ -1,6 +1,7 @@
-/** Who is in the project, and — for the owner — its settings: name, notes, the computer it runs on. */
+/** Who is in the project, and — for the owner — its settings: name, notes, the computer it runs on, and who does the work by default. */
 import { useMemo, useState, type FormEvent } from "react";
 import { useProject, useWorkbench } from "../store";
+import { agentFits, defaultTeammate } from "../lib/workbench";
 import { api } from "../lib/api";
 import { describeError } from "../lib/errors";
 import { useDraft } from "../lib/draft";
@@ -10,8 +11,9 @@ import { EnvVaultFields } from "../components/EnvVaultFields";
 
 export function People() {
   const { me, refreshProjects, toast } = useWorkbench();
-  const { project, isOwner, environments, vaults, resourcesLoaded, updateProject, addMember, removeMember } = useProject();
+  const { project, isOwner, agents, environments, vaults, resourcesLoaded, updateProject, addMember, removeMember } = useProject();
   const [invite, setInvite] = useState("");
+  const team = useMemo(() => [...agents.values()].sort((a, b) => a.name.localeCompare(b.name)), [agents]);
 
   // What is saved, against what the fields show: one PATCH per pause in the
   // typing and not one per keystroke, and another member's rename still lands
@@ -113,6 +115,32 @@ export function People() {
               onEnvironment={(id) => void updateProject({ environmentId: id || null })}
               onVault={(id) => void updateProject({ vaultId: id || null })}
             />
+            <label>
+              Default teammate{" "}
+              <span className="hint">
+                Who new work here starts with. With one set, a work item typed in the explorer starts them on it the moment you press Enter — which brings a
+                computer up on your account. Leave it at “ask every time” to keep that a decision.
+              </span>
+              <select value={project.defaultAgentId ?? ""} onChange={(e) => void updateProject({ defaultAgentId: e.target.value || null })} disabled={team.length === 0}>
+                <option value="">{team.length === 0 ? "No agents on your Fountain" : "Ask every time"}</option>
+                {team.map((a) => {
+                  const fit = agentFits(a, project);
+                  return (
+                    <option key={a.id} value={a.id} disabled={!fit.ok}>
+                      {a.name} ({a.runtime})
+                      {fit.ok ? "" : ` — ${fit.reason}`}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            {/* A default naming an agent this project cannot run is no default; the pickers ignore it, so say so here. */}
+            {project.defaultAgentId && !defaultTeammate(project, agents) && (
+              <p className="muted small">
+                The teammate set as the default {agents.has(project.defaultAgentId) ? "does not fit this project's environment or vault" : "is no longer on your Fountain"}, so
+                new work asks every time until you pick another.
+              </p>
+            )}
             <p className="muted small">Changing the environment or vault affects conversations started from now on; running ones keep their computer.</p>
             <div className="row end">
               <TwoStep

@@ -12,6 +12,8 @@ export interface ProjectDto {
   notes: string;
   environmentId: string | null;
   vaultId: string | null;
+  /** The teammate new work here starts with unless someone picks otherwise. */
+  defaultAgentId: string | null;
   createdAt: string;
   ownerEmail: string;
   role: "owner" | "member";
@@ -197,7 +199,7 @@ export const api = {
   activity: () => data(call<{ data: Record<string, Activity> }>("GET", "/api/projects/activity")),
   createProject: (input: { name: string; notes?: string; environmentId?: string | null; vaultId?: string | null }) => data(call<{ data: ProjectDto }>("POST", "/api/projects", input)),
   project: (id: string) => data(call<{ data: { project: ProjectDto; items: ItemDto[] } }>("GET", `/api/projects/${id}`)),
-  patchProject: (id: string, patch: Partial<Pick<ProjectDto, "name" | "notes" | "environmentId" | "vaultId">>) => data(call<{ data: ProjectDto }>("PATCH", `/api/projects/${id}`, patch)),
+  patchProject: (id: string, patch: Partial<Pick<ProjectDto, "name" | "notes" | "environmentId" | "vaultId" | "defaultAgentId">>) => data(call<{ data: ProjectDto }>("PATCH", `/api/projects/${id}`, patch)),
   deleteProject: (id: string) => call<{ ok: true }>("DELETE", `/api/projects/${id}`),
   addMember: (id: string, email: string) => data(call<{ data: ProjectDto }>("POST", `/api/projects/${id}/members`, { email })),
   removeMember: (id: string, email: string) => data(call<{ data: ProjectDto }>("DELETE", `/api/projects/${id}/members/${encodeURIComponent(email)}`)),

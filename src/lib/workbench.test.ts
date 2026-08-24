@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { agentFits, normalizeLegacy, retiredMessage } from "./workbench";
+import { agentFits, defaultTeammate, normalizeLegacy, retiredMessage } from "./workbench";
 
 describe("agentFits", () => {
   const project = { environmentId: "e1", vaultId: "v1" };
@@ -64,5 +64,23 @@ describe("normalizeLegacy", () => {
   test("anything else is empty", () => {
     expect(normalizeLegacy(null)).toEqual({ projects: [], items: [] });
     expect(normalizeLegacy("x")).toEqual({ projects: [], items: [] });
+  });
+});
+
+describe("defaultTeammate", () => {
+  const project = { environmentId: "e1", vaultId: "v1", defaultAgentId: "a1" };
+  const coder = { id: "a1", allowed_environment_ids: ["e1"], allowed_vault_ids: null };
+  const team = new Map([["a1", coder]]);
+  test("the agent the project names", () => {
+    expect(defaultTeammate(project, team)).toBe(coder);
+  });
+  test("none set: nobody, so every picker asks", () => {
+    expect(defaultTeammate({ ...project, defaultAgentId: null }, team)).toBeNull();
+  });
+  test("gone from the owner's Fountain: nobody", () => {
+    expect(defaultTeammate(project, new Map())).toBeNull();
+  });
+  test("still there but no longer allowed in this project: nobody", () => {
+    expect(defaultTeammate({ ...project, environmentId: "e9" }, team)).toBeNull();
   });
 });

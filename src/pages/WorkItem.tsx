@@ -59,7 +59,9 @@ export function WorkItem({ itemId }: { itemId: string }) {
 
   const team = [...agents.values()].sort((a, b) => a.name.localeCompare(b.name));
   const onItem = item.agentIds.map((id) => agents.get(id)).filter((a): a is Agent => !!a);
-  const available = team.filter((a) => !item.agentIds.includes(a.id));
+  // The project's default first: on an item it is not on yet, it is still the
+  // name you most likely want, so it should not be somewhere in the alphabet.
+  const available = team.filter((a) => !item.agentIds.includes(a.id)).sort((a, b) => Number(b.id === project.defaultAgentId) - Number(a.id === project.defaultAgentId));
   const envName = project.environmentId ? environments.get(project.environmentId)?.name ?? "?" : "each agent's own";
   const vaultName = project.vaultId ? vaults.get(project.vaultId)?.name ?? "?" : "none";
 

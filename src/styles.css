@@ -526,6 +526,7 @@ button.attach:hover:not(:disabled) { background: var(--bg-2); }
 .crumbs .navlink.ellipsis { max-width: 30ch; }
 .banner.error { border-radius: 0; margin: 0; }
 .self-center { align-self: center; margin-right: 8px; }
+.self-start { align-self: flex-start; }
 .new-form { margin: 16px 0 24px; }
 .h2.section { margin: 20px 0 8px; }
 .pre { white-space: pre-wrap; }
@@ -821,6 +822,8 @@ body.resizing-col { cursor: col-resize; user-select: none; }
 .new-item-input { flex: 1; min-width: 0; padding: 1px 4px; border-radius: 4px; border-color: var(--brand); font: inherit; font-size: 12.5px; font-weight: 600; color: var(--text); }
 .new-item-input::placeholder { font-weight: 400; color: var(--muted); }
 .new-item-input:disabled { opacity: 0.6; }
+/* What Enter is about to do, under the box that does it. */
+.new-item-hint { font-size: 11px; line-height: 1.4; padding: 1px 4px 3px 21px; }
 .sidebar-empty .linklike { font: inherit; text-decoration: underline; }
 
 /* level 2 — the computer: a line its colour marks, not a band its colour fills */

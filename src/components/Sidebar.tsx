@@ -11,22 +11,25 @@
  * lib/sidebar, which ranks on start times, not on activity. Work in flight
  * shows as a dot on the row it belongs to.
  *
- * The row at the top of the tree adds a work item where you read them:
- * type a title, Enter, and it is there — the composer stays open for the
- * next one, and the page you are on does not move.
+ * The row at the top of the tree adds a work item where you read them: type
+ * what needs doing, Enter, and it is there. With a default teammate set on
+ * the project, that same Enter starts them on it and opens the thread — the
+ * item and the first prompt are one thought, and this is where it is typed.
+ * Without one, the item is made and the composer stays open for the next.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useProject } from "../store";
-import { href, useRoute } from "../router";
+import { href, navigate, useRoute } from "../router";
 import { attachable, clampWidth, coarseTime, computerLabel, groupByItem, hueOf, loadSidebarWidth, saveSidebarWidth, type Computer, type ItemGroup } from "../lib/sidebar";
-import { isClosed, type WorkItem } from "../lib/workbench";
-import type { JoinTarget } from "../lib/start";
+import { defaultTeammate, isClosed, type WorkItem } from "../lib/workbench";
+import { itemAsPrompt, splitAsk, type JoinTarget } from "../lib/start";
+import { describeError } from "../lib/errors";
 import { ItemStatusPill } from "./ItemStatus";
 import { StartDialog } from "./StartDialog";
 import type { Conversation } from "../types";
 
 export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }) {
-  const { project, items, conversations, agents, sandboxes, createItem } = useProject();
+  const { project, items, conversations, agents, sandboxes, createItem, startConversation, toast } = useProject();
   const route = useRoute();
   const [dialog, setDialog] = useState<{ join: JoinTarget | null; agentId: string | null; itemId: string | null } | null>(null);
   const [showClosed, setShowClosed] = useState(false);
@@ -78,19 +81,42 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
     if (currentItem) setExpanded(currentItem);
   }, [currentItem]);
 
-  // A title is the whole of a new item here; notes and teammates come after,
-  // on the item itself. Failure keeps what was typed — the store has toasted.
+  // Who Enter starts. Null when the project has no default, or when the one
+  // it names has left the team or stopped fitting — then Enter only files it.
+  const boss = useMemo(() => defaultTeammate(project, agents), [project, agents]);
+
+  // What was typed is the whole ask: its first line names the item, the rest
+  // is the briefing, and the default teammate — when there is one — gets it
+  // as their first prompt. Failure keeps what was typed; the store toasted.
   const addItem = async (e: FormEvent) => {
     e.preventDefault();
-    const title = newTitle.trim();
+    const { title, notes } = splitAsk(newTitle);
     if (!title || creating) return;
     setCreating(true);
-    const created = await createItem(title);
-    setCreating(false);
-    if (!created) return;
+    const created = await createItem(title, notes);
+    if (!created) {
+      setCreating(false);
+      return;
+    }
     setNewTitle("");
     setExpanded(created.id);
-    newInput.current?.focus();
+    if (!boss) {
+      setCreating(false);
+      newInput.current?.focus();
+      return;
+    }
+    try {
+      const conversation = await startConversation({ item: created, agent: boss, ...itemAsPrompt(created) });
+      setAdding(false);
+      navigate(href.conversation(project.id, conversation.id));
+      onNavigate();
+    } catch (err) {
+      // The item is made and in the tree; only the conversation failed.
+      toast(describeError(err), "error");
+      newInput.current?.focus();
+    } finally {
+      setCreating(false);
+    }
   };
 
   const openComposer = () => {
@@ -219,28 +245,35 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
       </div>
       <div className="sidebar-list">
         {adding ? (
-          <form className="tree-row new-item" onSubmit={addItem}>
-            <span className="tree-twisty" aria-hidden="true">
-              ▸
-            </span>
-            <input
-              ref={newInput}
-              className="new-item-input"
-              value={newTitle}
-              autoFocus
-              disabled={creating}
-              placeholder="fix foo"
-              aria-label="New work item title"
-              onChange={(e) => setNewTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key !== "Escape") return;
-                setAdding(false);
-                setNewTitle("");
-              }}
-              onBlur={() => {
-                if (!newTitle.trim() && !creating) setAdding(false);
-              }}
-            />
+          <form className="new-item-form" onSubmit={addItem}>
+            <div className="tree-row new-item">
+              <span className="tree-twisty" aria-hidden="true">
+                ▸
+              </span>
+              <input
+                ref={newInput}
+                className="new-item-input"
+                value={newTitle}
+                autoFocus
+                disabled={creating}
+                placeholder={boss ? "what needs doing?" : "fix foo"}
+                aria-label="New work item"
+                aria-describedby="new-item-hint"
+                onChange={(e) => setNewTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Escape") return;
+                  setAdding(false);
+                  setNewTitle("");
+                }}
+                onBlur={() => {
+                  if (!newTitle.trim() && !creating) setAdding(false);
+                }}
+              />
+            </div>
+            {/* Enter spends the owner's money and boots a computer: say whose name is on it before it does. */}
+            <div className="new-item-hint muted" id="new-item-hint">
+              {creating ? (boss ? `starting ${boss.name}…` : "adding…") : boss ? `↵ starts ${boss.name} on it` : "↵ adds it · nobody starts"}
+            </div>
           </form>
         ) : (
           <button type="button" className="tree-row new-item-button" onClick={openComposer} title={`New work item in ${project.name}`}>

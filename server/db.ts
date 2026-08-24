@@ -27,6 +27,8 @@ export interface ProjectRow {
   notes: string;
   environment_id: string | null;
   vault_id: string | null;
+  /** The teammate new work here starts with, when nobody says otherwise. A Fountain agent id, the owner's. */
+  default_agent_id: string | null;
   created_at: string;
 }
 
@@ -88,6 +90,7 @@ CREATE TABLE IF NOT EXISTS projects (
   notes TEXT NOT NULL DEFAULT '',
   environment_id TEXT,
   vault_id TEXT,
+  default_agent_id TEXT,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS projects_owner ON projects(owner_email);
@@ -120,16 +123,23 @@ CREATE INDEX IF NOT EXISTS items_project ON items(project_id);
 `;
 
 /**
- * Columns added to `items` after the table existed. `CREATE TABLE IF NOT
- * EXISTS` leaves a table that is already there alone, so a database written
- * by an older build needs them added; the defaults make an old row a row
- * nobody has proposed anything on.
+ * Columns added after their table existed. `CREATE TABLE IF NOT EXISTS`
+ * leaves a table that is already there alone, and the database is a file on a
+ * volume that outlives the image, so a database written by an older build
+ * needs them added. The defaults make an old row a row nobody has proposed
+ * anything on, in a project that asks every time who does the work.
  */
-const ADDED_ITEM_COLUMNS: [string, string][] = [
-  ["proposed_status", "TEXT NOT NULL DEFAULT ''"],
-  ["proposed_agent_id", "TEXT NOT NULL DEFAULT ''"],
-  ["proposed_email", "TEXT NOT NULL DEFAULT ''"],
-  ["proposed_at", "TEXT NOT NULL DEFAULT ''"],
+const ADDED_COLUMNS: [string, [string, string][]][] = [
+  [
+    "items",
+    [
+      ["proposed_status", "TEXT NOT NULL DEFAULT ''"],
+      ["proposed_agent_id", "TEXT NOT NULL DEFAULT ''"],
+      ["proposed_email", "TEXT NOT NULL DEFAULT ''"],
+      ["proposed_at", "TEXT NOT NULL DEFAULT ''"],
+    ],
+  ],
+  ["projects", [["default_agent_id", "TEXT"]]],
 ];
 
 export function now(): string {
@@ -149,9 +159,11 @@ export class Db {
 
   /** Bring a database written by an older build up to the schema above. */
   private migrate(): void {
-    const have = new Set((this.sql.query("PRAGMA table_info(items)").all() as { name: string }[]).map((c) => c.name));
-    for (const [name, decl] of ADDED_ITEM_COLUMNS) {
-      if (!have.has(name)) this.sql.exec(`ALTER TABLE items ADD COLUMN ${name} ${decl}`);
+    for (const [table, columns] of ADDED_COLUMNS) {
+      const have = new Set((this.sql.query(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name));
+      for (const [name, decl] of columns) {
+        if (!have.has(name)) this.sql.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${decl}`);
+      }
     }
   }
 
@@ -231,20 +243,20 @@ export class Db {
   insertProject(p: ProjectRow): boolean {
     const r = this.sql
       .query(
-        `INSERT OR IGNORE INTO projects (id, owner_email, name, notes, environment_id, vault_id, created_at)
-         VALUES ($id, $owner_email, $name, $notes, $environment_id, $vault_id, $created_at)`,
+        `INSERT OR IGNORE INTO projects (id, owner_email, name, notes, environment_id, vault_id, default_agent_id, created_at)
+         VALUES ($id, $owner_email, $name, $notes, $environment_id, $vault_id, $default_agent_id, $created_at)`,
       )
       .run(p as unknown as Record<string, string | null>);
     return r.changes > 0;
   }
 
-  updateProject(id: string, patch: Partial<Pick<ProjectRow, "name" | "notes" | "environment_id" | "vault_id">>): void {
+  updateProject(id: string, patch: Partial<Pick<ProjectRow, "name" | "notes" | "environment_id" | "vault_id" | "default_agent_id">>): void {
     const cur = this.getProject(id);
     if (!cur) return;
     const next = { ...cur, ...patch };
     this.sql
-      .query("UPDATE projects SET name = $name, notes = $notes, environment_id = $environment_id, vault_id = $vault_id WHERE id = $id")
-      .run({ id, name: next.name, notes: next.notes, environment_id: next.environment_id, vault_id: next.vault_id });
+      .query("UPDATE projects SET name = $name, notes = $notes, environment_id = $environment_id, vault_id = $vault_id, default_agent_id = $default_agent_id WHERE id = $id")
+      .run({ id, name: next.name, notes: next.notes, environment_id: next.environment_id, vault_id: next.vault_id, default_agent_id: next.default_agent_id });
   }
 
   deleteProject(id: string): void {

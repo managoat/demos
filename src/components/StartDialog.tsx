@@ -9,7 +9,7 @@
 import { useState, type FormEvent } from "react";
 import { useProject } from "../store";
 import type { Agent } from "../types";
-import { agentFits, type WorkItem } from "../lib/workbench";
+import { agentFits, defaultTeammate, type WorkItem } from "../lib/workbench";
 import { buildPrompt, type JoinTarget } from "../lib/start";
 import { describeError } from "../lib/errors";
 import { href, navigate } from "../router";
@@ -25,7 +25,9 @@ export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?
   const all = [...agents.values()].sort((a, b) => a.name.localeCompare(b.name));
   const onItem = item ? all.filter((a) => item.agentIds.includes(a.id)) : [];
   const others = item ? all.filter((a) => !item.agentIds.includes(a.id)) : all;
-  const [agentId, setAgentId] = useState<string>(join?.agentId ?? initialAgentId ?? onItem[0]?.id ?? all[0]?.id ?? "");
+  // Who this is about: the computer's teammate, or the one the caller named,
+  // or someone already on the item, or the project's default — then anybody.
+  const [agentId, setAgentId] = useState<string>(join?.agentId ?? initialAgentId ?? onItem[0]?.id ?? defaultTeammate(project, agents)?.id ?? all[0]?.id ?? "");
   const [prompt, setPrompt] = useState("");
   const [includeNotes, setIncludeNotes] = useState(true);
   const [busy, setBusy] = useState(false);

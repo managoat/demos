@@ -150,7 +150,7 @@ export interface ProjectStore {
   subscribe: (conversationId: string, handler: EventHandler) => () => void;
   toast: Workbench["toast"];
   // Mutations go to the server; the stream (or the returned record) brings the change back.
-  updateProject: (patch: Partial<Pick<ProjectDto, "name" | "notes" | "environmentId" | "vaultId">>) => Promise<void>;
+  updateProject: (patch: Partial<Pick<ProjectDto, "name" | "notes" | "environmentId" | "vaultId" | "defaultAgentId">>) => Promise<void>;
   addMember: (email: string) => Promise<void>;
   removeMember: (email: string) => Promise<void>;
   createItem: (title: string, notes?: string) => Promise<ItemDto | null>;

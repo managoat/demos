@@ -58,8 +58,8 @@ function count(n: number, noun: string): string {
  * the project's environment and vault. The server refuses otherwise (422), so
  * the picker says so first.
  */
-export function agentFits(
-  agent: { allowed_environment_ids?: string[] | null; allowed_vault_ids?: string[] | null },
+export function agentFits<A extends { allowed_environment_ids?: string[] | null; allowed_vault_ids?: string[] | null }>(
+  agent: A,
   project: { environmentId: string | null; vaultId: string | null },
 ): { ok: true } | { ok: false; reason: string } {
   const envs = agent.allowed_environment_ids ?? [];
@@ -71,6 +71,22 @@ export function agentFits(
     return { ok: false, reason: "does not allow this project's vault" };
   }
   return { ok: true };
+}
+
+/**
+ * The project's default teammate — who new work starts with when nobody says
+ * otherwise. Null when none is set, when the agent has left the owner's
+ * Fountain, or when it no longer fits the project: a default that cannot run
+ * is not one, and every picker falls back to asking.
+ */
+export function defaultTeammate<A extends { allowed_environment_ids?: string[] | null; allowed_vault_ids?: string[] | null }>(
+  project: { environmentId: string | null; vaultId: string | null; defaultAgentId: string | null },
+  agents: Map<string, A>,
+): A | null {
+  if (!project.defaultAgentId) return null;
+  const agent = agents.get(project.defaultAgentId);
+  if (!agent) return null;
+  return agentFits(agent, project).ok ? agent : null;
 }
 
 // ── the tree an earlier build kept in this browser ─────────────────────────

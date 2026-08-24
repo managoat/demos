@@ -323,6 +323,24 @@ describe("projects and sharing", () => {
     expect((await ok.json()).data.name).toBe("Fountain!");
   });
 
+  test("the owner sets who new work starts with; a member reads it but cannot set it", async () => {
+    const before = (await (await call("alice", "GET", `/api/projects/${projectId}`)).json()).data.project;
+    expect(before.defaultAgentId).toBeNull();
+    expect((await call("bob", "PATCH", `/api/projects/${projectId}`, { defaultAgentId: "a1" })).status).toBe(403);
+    const set = await call("alice", "PATCH", `/api/projects/${projectId}`, { defaultAgentId: "a1" });
+    expect((await set.json()).data.defaultAgentId).toBe("a1");
+    // The member's explorer needs it: it is who their Enter starts.
+    const forBob = (await (await call("bob", "GET", `/api/projects/${projectId}`)).json()).data.project;
+    expect(forBob.defaultAgentId).toBe("a1");
+    const cleared = await call("alice", "PATCH", `/api/projects/${projectId}`, { defaultAgentId: null });
+    expect((await cleared.json()).data.defaultAgentId).toBeNull();
+    // Another setting on its own leaves it alone.
+    await call("alice", "PATCH", `/api/projects/${projectId}`, { defaultAgentId: "a1" });
+    await call("alice", "PATCH", `/api/projects/${projectId}`, { notes: "github.com/x/y" });
+    expect((await (await call("alice", "GET", `/api/projects/${projectId}`)).json()).data.project.defaultAgentId).toBe("a1");
+    await call("alice", "PATCH", `/api/projects/${projectId}`, { defaultAgentId: null, notes: "" });
+  });
+
   test("a member creates items the owner sees", async () => {
     const res = await call("bob", "POST", `/api/projects/${projectId}/items`, { title: "fix foo", notes: "repro…" });
     expect(res.status).toBe(201);
