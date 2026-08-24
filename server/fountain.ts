@@ -46,6 +46,22 @@ export interface TurnSummary {
   [k: string]: unknown;
 }
 
+/**
+ * One row of a conversation's log, as `GET /api/conversations/:id/events`
+ * reports it — the same rows the SSE stream carries, as JSON. `data` is output
+ * text for an `output` event and JSON-encoded metadata for a `stage` one.
+ */
+export interface LogEventRow {
+  id: number;
+  kind?: string;
+  stream?: string;
+  stage?: string | null;
+  state?: string | null;
+  data?: string | null;
+  ts?: string;
+  [k: string]: unknown;
+}
+
 /** One hit from `GET /api/search`: what matched, and where to jump. */
 export interface SearchHit {
   kind: "title" | "prompt" | "reply";
@@ -148,6 +164,19 @@ export class FountainClient {
    */
   async turns(id: string): Promise<TurnSummary[]> {
     const body = await this.json<{ data: TurnSummary[] }>(`/api/conversations/${encodeURIComponent(id)}/turns`);
+    return body.data ?? [];
+  }
+
+  /**
+   * One conversation's log events, oldest first — the read model behind the
+   * SSE stream. Cursor-paginated on the event id: `after` is exclusive, and
+   * `meta.next_cursor` is the last id of the page. `streams` narrows to
+   * `stdout` / `stderr` / `stage`, which is what makes a lifecycle read cheap
+   * on a conversation that has printed a megabyte.
+   */
+  async events(id: string, query: Record<string, string> = {}): Promise<LogEventRow[]> {
+    const qs = new URLSearchParams(query).toString();
+    const body = await this.json<{ data: LogEventRow[] }>(`/api/conversations/${encodeURIComponent(id)}/events${qs ? `?${qs}` : ""}`);
     return body.data ?? [];
   }
 

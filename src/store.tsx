@@ -43,6 +43,15 @@ const LAST_PROJECT = "fountain-workbench.lastProject";
  */
 const SURVEY_MS = 60_000;
 
+/**
+ * How often to survey while an agent somewhere is blocked on a permission
+ * request. Fountain denies an unanswered one after five minutes, so the
+ * countdown on that row is the only thing in this app with a deadline, and a
+ * minute of it can be spent finding out. It is the same one request per owner;
+ * it goes back to a minute the moment nobody is waiting.
+ */
+const BLOCKED_MS = 15_000;
+
 /** The project this browser was in last, to land there again. */
 export function loadLastProject(): string | null {
   try {
@@ -129,17 +138,18 @@ export function WorkbenchProvider({ me, onSignOut, children }: { me: Me; onSignO
   // See SURVEY_MS: nothing streams across projects, so this is what notices.
   // Coming back to the tab surveys straight away — that is the moment the
   // question "what happened while I was away" is actually being asked.
+  const blocked = activity.waiting.length > 0;
   useEffect(() => {
     const tick = () => {
       if (document.visibilityState === "visible") void refreshActivity();
     };
-    const timer = window.setInterval(tick, SURVEY_MS);
+    const timer = window.setInterval(tick, blocked ? BLOCKED_MS : SURVEY_MS);
     document.addEventListener("visibilitychange", tick);
     return () => {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [refreshActivity]);
+  }, [refreshActivity, blocked]);
 
   const signOut = useCallback(() => {
     void api.signOut().catch(() => undefined);

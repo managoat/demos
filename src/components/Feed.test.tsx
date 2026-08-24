@@ -8,10 +8,24 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { FeedList } from "./Feed";
 import { NO_ACTIVITY } from "../lib/feed";
-import type { ActivityDto, FeedEntry } from "../lib/api";
+import type { ActivityDto, FeedEntry, WaitingEntry } from "../lib/api";
 
 const T0 = Date.parse("2026-08-24T10:00:00Z");
 const at = (mins: number) => new Date(T0 + mins * 60_000).toISOString();
+
+/** Asked `mins` after T0, and denied by Fountain five minutes after that. */
+const asking = (mins: number, over: Partial<WaitingEntry> & Pick<WaitingEntry, "conversationId" | "projectId">): WaitingEntry => ({
+  projectName: "Fountain",
+  itemId: "w1",
+  itemTitle: "fix foo",
+  title: "Coder: fix foo",
+  agentId: "a1",
+  requestId: "r1",
+  tool: "Bash",
+  askedAt: at(mins),
+  expiresAt: at(mins + 5),
+  ...over,
+});
 
 const entry = (over: Partial<FeedEntry> & Pick<FeedEntry, "conversationId" | "projectId" | "at">): FeedEntry => ({
   projectName: "Fountain",
@@ -34,7 +48,7 @@ describe("FeedList", () => {
   });
 
   test("a row names the conversation, the item and the project, and links to the thread", () => {
-    const html = render({ projects: {}, dropped: 0, feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0) })] });
+    const html = render({ projects: {}, dropped: 0, waiting: [], feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0) })] });
     expect(html).toContain("Coder: fix foo");
     expect(html).toContain("fix foo");
     // The project is the fact the reader is missing: they are in another one.
@@ -44,7 +58,7 @@ describe("FeedList", () => {
   });
 
   test("a failed conversation says so where the row is read, not only in its colour", () => {
-    const html = render({ projects: {}, dropped: 0, feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0), status: "failed" })] });
+    const html = render({ projects: {}, dropped: 0, waiting: [], feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0), status: "failed" })] });
     expect(html).toContain("feed-row failed");
     expect(html).toContain("failed ·");
   });
@@ -53,6 +67,7 @@ describe("FeedList", () => {
     const a: ActivityDto = {
       projects: {},
       dropped: 0,
+      waiting: [],
       feed: [
         entry({ conversationId: "c1", projectId: "here", projectName: "Here", at: at(0) }),
         entry({ conversationId: "c2", projectId: "p2", projectName: "Elsewhere", at: at(-10) }),
@@ -65,14 +80,41 @@ describe("FeedList", () => {
   });
 
   test("what the server capped off is stated, not swallowed", () => {
-    const html = render({ projects: {}, dropped: 7, feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0) })] });
+    const html = render({ projects: {}, dropped: 7, waiting: [], feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0) })] });
     expect(html).toContain("7 more not shown");
     // The count in the head is everything waiting, including those seven.
     expect(html).toContain("8 conversations finished and unread");
   });
 
+  test("a blocked agent is first, says what it wants to run, and counts down", () => {
+    const html = render({
+      projects: {},
+      dropped: 0,
+      waiting: [asking(27, { conversationId: "c9", projectId: "p9", projectName: "Ravioli" })],
+      feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0) })],
+    });
+    expect(html).toContain("Waiting on you");
+    expect(html).toContain("wants to run Bash");
+    // Two minutes to answer before Fountain answers for you, with a refusal.
+    expect(html).toContain("2m left");
+    expect(html).toContain('href="#/p/p9/c/c9"');
+    // Above what merely finished: one of these is on a clock and the other
+    // will still be there tomorrow.
+    expect(html.indexOf("Waiting on you")).toBeLessThan(html.indexOf("Coder: fix foo"));
+    // And the head leads with it.
+    expect(html).toContain("1 agent is blocked waiting on you");
+  });
+
+  test("a request that has already run out is not offered — Fountain has answered it", () => {
+    // Asked at 20, denied at 25, and it is 30: a row here would be a link to
+    // a question nobody can answer any more.
+    const html = render({ projects: {}, dropped: 0, waiting: [asking(20, { conversationId: "c9", projectId: "p9" })], feed: [] });
+    expect(html).not.toContain("feed-group waiting");
+    expect(html).toContain("Nothing waiting");
+  });
+
   test("a conversation Fountain has not titled yet still renders as a row", () => {
-    const html = render({ projects: {}, dropped: 0, feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0), title: null, itemTitle: null })] });
+    const html = render({ projects: {}, dropped: 0, waiting: [], feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0), title: null, itemTitle: null })] });
     expect(html).toContain("Untitled conversation");
     expect(html).toContain("no longer here");
   });

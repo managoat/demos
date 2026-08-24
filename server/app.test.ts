@@ -12,6 +12,7 @@ import { resetCostCache } from "./cost";
 import { resetMcpCache } from "./mcp";
 import { itemDto, proposalFields } from "./projects";
 import { resetProxyCache } from "./proxy";
+import { resetWatch } from "./watch";
 
 // ── a fake Fountain ──────────────────────────────────────────────────────
 
@@ -78,6 +79,27 @@ const terminated: string[] = [];
 /** Permission answers this fake accepted. A second one for the same request is too late. */
 const answers: { conversation: string; request: string; option_id: unknown }[] = [];
 let streamEvents: { conversation_id: string; id: number }[] = [];
+/**
+ * Stage events per conversation, oldest first — what
+ * `GET /api/conversations/:id/events?streams=stage` answers, and what the
+ * user-wide `?streams=stage` stream replays. A held permission request lives
+ * only here: it is on no conversation record, which is the whole reason
+ * server/watch.ts exists.
+ */
+const stageEvents: Record<string, { id: number; stage: string; state: string | null; ts: string; data: Record<string, unknown> }[]> = {};
+/** Every conversation whose history the server read, in order — the fan-out, made visible. */
+let historyAsked: string[] = [];
+
+function stageRow(conversationId: string, ev: { id: number; stage: string; state: string | null; ts: string; data: Record<string, unknown> }) {
+  return { id: ev.id, conversation_id: conversationId, kind: "stage", stream: "", stage: ev.stage, state: ev.state, data: JSON.stringify(ev.data), ts: ev.ts, turn_id: "t1" };
+}
+
+/** A `request · started` and, optionally, the close that resolved it. */
+function ask(conversationId: string, id: number, requestId: string, tool: string, at: string, closedBy?: string): void {
+  const rows = (stageEvents[conversationId] ??= []);
+  rows.push({ id, stage: "request", state: "started", ts: at, data: { request_id: requestId, tool, options: [{ optionId: "o-once", kind: "allow_once" }], timeout_ms: 5 * 60 * 1000 } });
+  if (closedBy) rows.push({ id: id + 1, stage: "request", state: "done", ts: at, data: { request_id: requestId, outcome: closedBy } });
+}
 /** An instance with billing switched off answers 404 there; flip this to be one. */
 let billingEnabled = true;
 /**
@@ -135,6 +157,12 @@ const fountain = Bun.serve({
         const own = turnsOf[c.id];
         if (own) return Response.json({ data: own });
         return Response.json({ data: [{ id: "t1", prompt: "hi", image_count: 1 }] });
+      }
+      if (one[2] === "/events") {
+        historyAsked.push(c.id);
+        const after = Number(url.searchParams.get("after") ?? 0);
+        const rows = (stageEvents[c.id] ?? []).filter((e) => e.id > after).map((e) => stageRow(c.id, e));
+        return Response.json({ data: rows, meta: { next_cursor: rows[rows.length - 1]?.id ?? after } });
       }
       if (one[2] === "/prompts") {
         const body = (await req.json()) as { prompt?: string; images?: unknown[] };
@@ -214,6 +242,17 @@ const fountain = Bun.serve({
     if (path === "/api/environments") return Response.json({ data: [{ id: "e1", name: "one" }, { id: "e2", name: "two" }] });
     if (path === "/api/vaults") return Response.json({ data: [{ id: "v1", name: "v-one" }, { id: "v2", name: "v-two" }] });
     if (path === "/api/events/stream") {
+      // `?streams=stage` is what server/watch.ts follows: every conversation
+      // of this key, its stage events only, resumable on `Last-Event-ID`.
+      if (url.searchParams.get("streams") === "stage") {
+        const since = Number(req.headers.get("last-event-id") ?? 0);
+        const rows = (convs[key] ?? [])
+          .flatMap((c) => (stageEvents[c.id] ?? []).map((e) => ({ id: e.id, chunk: stageRow(c.id, e) })))
+          .filter((r) => r.id > since)
+          .sort((a, b) => a.id - b.id);
+        const parts = [": connected\n\n", ...rows.map((r) => `id: ${r.id}\nevent: stage\ndata: ${JSON.stringify(r.chunk)}\n\n`), ": heartbeat\n\n"];
+        return new Response(parts.join(""), { headers: { "content-type": "text/event-stream" } });
+      }
       const parts = [": connected\n\n"];
       for (const ev of streamEvents) parts.push(`id: ${ev.id}\nevent: output\ndata: ${JSON.stringify({ ...ev, kind: "output" })}\n\n`);
       parts.push(`event: conversations\ndata: {"reason":"changed"}\n\n`);
@@ -246,6 +285,7 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
+  resetWatch();
   fountain.stop(true);
   db.close();
 });
@@ -254,7 +294,11 @@ beforeEach(() => {
   resetProxyCache();
   resetMcpCache();
   resetCostCache();
+  // Every test starts with nothing folded and no stream open: what one test
+  // learned off the stage stream must not be another test's answer.
+  resetWatch();
   turnsAsked = [];
+  historyAsked = [];
 });
 
 const cookies: Record<string, string> = {};
@@ -264,6 +308,21 @@ async function call(who: string | null, method: string, path: string, body?: unk
   if (who) h.cookie = cookies[who]!;
   if (body !== undefined) h["content-type"] = "application/json";
   return app(new Request(`http://wb.test${path}`, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) }));
+}
+
+/**
+ * Ask until it is true, or give up. For the one thing here that is not
+ * request/response: the stage stream is followed in the background, so a fact
+ * that arrives on it arrives a moment after the survey that started it.
+ */
+async function until<T>(f: () => Promise<T | null | undefined>, ms = 3000): Promise<T | null> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const v = await f();
+    if (v) return v;
+    if (Date.now() > deadline) return null;
+    await new Promise((r) => setTimeout(r, 50));
+  }
 }
 
 async function signIn(who: string): Promise<Response> {
@@ -1006,7 +1065,12 @@ describe("the survey: what is live per project, and what stopped unread across a
       conv("s-team", "fountain:team", "idle", true, "2026-08-24T13:00:00Z"),
       conv("s-elsewhere", "workbench:otherproj/item9/aaaaaaaa", "idle", true, "2026-08-24T13:00:00Z"),
     ];
-    convs["key-bob"] = [conv("s-bob", "workbench:bobproj/bobitem/bbbbbbbb", "idle", true, "2026-08-24T07:00:00Z")];
+    convs["key-bob"] = [
+      conv("s-bob", "workbench:bobproj/bobitem/bbbbbbbb", "idle", true, "2026-08-24T07:00:00Z"),
+      // A second account with a turn in flight, so there is somewhere for a
+      // request of Bob's own to be held.
+      conv("s-bob-running", "workbench:bobproj/bobitem/bbbbbbbb", "running", true, "2026-08-24T07:30:00Z"),
+    ];
   });
 
   afterAll(() => {
@@ -1079,6 +1143,133 @@ describe("the survey: what is live per project, and what stopped unread across a
       expect([...times].sort().reverse()).toEqual(times);
     } finally {
       convs["key-alice"] = kept;
+    }
+  });
+
+  // ── who is blocked (server/watch.ts) ───────────────────────────────────
+  //
+  // The other half of a notification, and the louder one: a held permission
+  // request is on no conversation record, and the conversation holding one is
+  // `running` — which the feed above counts as live and deliberately excludes
+  // as "still working, not news". It is read off the stage stream instead.
+
+  const REQUEST_AT = new Date(NOW - 60_000).toISOString();
+
+  test("an agent blocked on a permission request is in the survey, with where it is and when it runs out", async () => {
+    ask("s-running", 10, "req-1", "Bash", REQUEST_AT);
+    try {
+      const s = await surveyOf("alice");
+      expect(s.waiting).toHaveLength(1);
+      const w = s.waiting[0]!;
+      expect(w.conversationId).toBe("s-running");
+      expect(w.requestId).toBe("req-1");
+      expect(w.tool).toBe("Bash");
+      // Where it is: whoever reads this is in another project and has no
+      // store for this one.
+      expect(w.projectId).toBe(projectId);
+      expect(w.projectName).toBe(db.getProject(projectId)!.name);
+      expect(w.itemId).toBe(itemId);
+      expect(w.itemTitle).toBe(db.getItem(itemId)!.title);
+      expect(w.title).toBe("Coder: s-running");
+      expect(w.agentId).toBe("a1");
+      // Five minutes from when it was asked, which is what the countdown counts.
+      expect(Date.parse(w.expiresAt) - Date.parse(w.askedAt)).toBe(5 * 60 * 1000);
+      // And it is still live and still not news in the other half: the feed
+      // is what finished, this is what is waiting.
+      expect(s.feed.map((e) => e.conversationId)).not.toContain("s-running");
+      expect(s.projects[projectId]!.live).toBe(2);
+    } finally {
+      delete stageEvents["s-running"];
+    }
+  });
+
+  test("one that has been answered, and one that has run out, are not", async () => {
+    // Answered — `request · done` closes it, whatever the outcome was.
+    ask("s-running", 20, "req-2", "Bash", REQUEST_AT, "allow_once");
+    // Raised an hour ago: Fountain denied this one 55 minutes ago. A row that
+    // said otherwise would be asking you to click on nothing.
+    ask("s-pending", 30, "req-3", "Edit", new Date(NOW - 60 * 60_000).toISOString());
+    try {
+      expect((await surveyOf("alice")).waiting).toEqual([]);
+    } finally {
+      delete stageEvents["s-running"];
+      delete stageEvents["s-pending"];
+    }
+  });
+
+  test("a running conversation's history is read once, not once a minute", async () => {
+    ask("s-running", 40, "req-4", "Bash", REQUEST_AT);
+    try {
+      expect((await surveyOf("alice")).waiting.map((w) => w.requestId)).toEqual(["req-4"]);
+      // `s-running` is the only one running; `s-pending` has not started, and
+      // a conversation that has stopped cannot be holding a request.
+      expect(historyAsked).toEqual(["s-running"]);
+      // The second survey is a join against what the stream has been saying
+      // since, not a re-read: the request-per-live-conversation-per-tick this
+      // was built to avoid is spent exactly once.
+      expect((await surveyOf("alice")).waiting.map((w) => w.requestId)).toEqual(["req-4"]);
+      expect(historyAsked).toEqual(["s-running"]);
+    } finally {
+      delete stageEvents["s-running"];
+    }
+  });
+
+  test("a conversation that has stopped is not holding anything, whatever the last event said", async () => {
+    // The backstop for a `request · done` that never arrived: a permission
+    // request lives on a turn in flight, so a conversation the listing calls
+    // finished cannot still be blocked on one.
+    ask("s-running", 50, "req-5", "Bash", REQUEST_AT);
+    const c = convs["key-alice"]!.find((x) => x.id === "s-running")!;
+    try {
+      expect((await surveyOf("alice")).waiting.map((w) => w.requestId)).toEqual(["req-5"]);
+      c.status = "idle";
+      expect((await surveyOf("alice")).waiting).toEqual([]);
+    } finally {
+      c.status = "running";
+      delete stageEvents["s-running"];
+    }
+  });
+
+  test("a request raised after the history was read arrives on the owner's stream", async () => {
+    // Nothing to backfill: this one is raised while the workbench is already
+    // following the account, which is the case the stream is for.
+    expect((await surveyOf("alice")).waiting).toEqual([]);
+    ask("s-running", 60, "req-6", "Write", REQUEST_AT);
+    try {
+      const found = await until(async () => (await surveyOf("alice")).waiting.find((w) => w.requestId === "req-6") ?? null);
+      expect(found?.tool).toBe("Write");
+      expect(found?.conversationId).toBe("s-running");
+      // And it came down the stream, not off a second read of the history:
+      // that conversation was read once, before the request existed.
+      expect(historyAsked).toEqual(["s-running"]);
+    } finally {
+      delete stageEvents["s-running"];
+    }
+  });
+
+  test("each owner's stream keeps its own cursor: one account's event ids are not the other's", async () => {
+    // The trap this design exists to avoid, and the reason these are folded
+    // per owner in the server rather than merged into one SSE for the browser.
+    // Fountain's event ids are per account and monotonic, so a single cursor
+    // across two owners silently skips the account whose ids run lower. Alice's
+    // is far ahead of Bob's here; Bob is in both, and must be told about both.
+    expect((await surveyOf("bob")).waiting).toEqual([]);
+    ask("s-running", 9000, "req-alice", "Bash", REQUEST_AT);
+    ask("s-bob-running", 5, "req-bob", "Edit", REQUEST_AT);
+    try {
+      const both = await until(async () => {
+        const ids = (await surveyOf("bob")).waiting.map((w) => w.requestId).sort();
+        return ids.length === 2 ? ids : null;
+      });
+      expect(both).toEqual(["req-alice", "req-bob"]);
+      const s = await surveyOf("bob");
+      expect(s.waiting.find((w) => w.requestId === "req-bob")!.projectId).toBe("bobproj");
+      expect(s.waiting.find((w) => w.requestId === "req-alice")!.projectId).toBe(projectId);
+      // Alice is not in Bob's project, and is told about her own only.
+      expect((await surveyOf("alice")).waiting.map((w) => w.requestId)).toEqual(["req-alice"]);
+    } finally {
+      delete stageEvents["s-running"];
+      delete stageEvents["s-bob-running"];
     }
   });
 

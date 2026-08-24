@@ -13,6 +13,7 @@ import { authenticate, ownerClient, projectAccess, requireOwner, userClient, typ
 import { NO_PROPOSAL, now, parseAgentIds, type ItemPatch, type ItemRow, type ProjectRow, type Role } from "./db";
 import { FountainHttpError, type ConversationSummary, type FountainClient } from "./fountain";
 import { HttpError, isEmail, json, normalizeEmail, optId, readJson, str } from "./http";
+import { heldRequests, type HeldRequest } from "./watch";
 
 export interface ProjectDto {
   id: string;
@@ -146,12 +147,42 @@ export interface FeedEntry {
   at: string;
 }
 
+/**
+ * One agent blocked on a permission request, wherever it is.
+ *
+ * The feed's other half answers "what finished"; this answers "what is waiting
+ * on *you*", which is the louder of the two — a finished conversation waits
+ * indefinitely, and this one is denied by Fountain when `expiresAt` passes.
+ * Carries where it is for the same reason a `FeedEntry` does: whoever is
+ * reading is in another project and has no store for this one.
+ */
+export interface WaitingEntry {
+  conversationId: string;
+  projectId: string;
+  projectName: string;
+  itemId: string;
+  /** Null for an item deleted here whose conversation still names it. */
+  itemTitle: string | null;
+  /** Fountain generates one from the first turn; null until there is one. */
+  title: string | null;
+  agentId: string | null;
+  /** The id to answer with, so a client can go straight to the request. */
+  requestId: string;
+  /** The tool it wants to run, in the runtime's words. */
+  tool: string | null;
+  askedAt: string;
+  /** When Fountain answers for you, with a refusal. */
+  expiresAt: string;
+}
+
 export interface ActivityDto {
   projects: Record<string, Activity>;
   /** Newest first, capped. */
   feed: FeedEntry[];
   /** Entries past the cap, so the panel says what it is not showing rather than implying there is no more. */
   dropped: number;
+  /** Held permission requests, oldest first — the ones closest to running out. */
+  waiting: WaitingEntry[];
 }
 
 /**
@@ -183,6 +214,13 @@ const FEED_MAX = 50;
  * it is the owner's: every conversation in a project runs on the owner's key,
  * so opening a thread marks it read for everyone in the project, exactly as
  * the sidebar's unread dot already works. A shared project shares its inbox.
+ *
+ * The one thing the listing cannot answer is who is *blocked*: a held
+ * permission request is not on the conversation record at all, and the
+ * conversation holding one is `running`, which this counts as live and not as
+ * news. That is folded off the owner's stage stream instead (server/watch.ts,
+ * which is also where the choice between asking Fountain and streaming is
+ * argued) and joined on here, in the same pass, out of the same listing.
  */
 export async function activity(ctx: AppContext, req: Request): Promise<Response> {
   const user = await authenticate(ctx, req);
@@ -193,10 +231,15 @@ export async function activity(ctx: AppContext, req: Request): Promise<Response>
   const out: Record<string, Activity> = {};
   for (const p of rows) out[p.id] = { live: 0, latest: null };
   const feed: FeedEntry[] = [];
+  const waiting: WaitingEntry[] = [];
   await Promise.allSettled(
     [...byOwner.values()].map(async (p) => {
       const client = await ownerClient(ctx, p);
       const convs = await client.conversations({ roots_only: "true" });
+      // What this owner's agents are blocked on, by conversation. Best effort
+      // and separately settled: a stream that is not answering must not cost
+      // this owner the feed, which is the part that works without it.
+      const held = await heldRequests(p.owner_email, client, convs).catch(() => new Map<string, HeldRequest>());
       for (const c of convs) {
         const ref = parseChannel(c.channel_id);
         if (!ref) continue;
@@ -207,6 +250,22 @@ export async function activity(ctx: AppContext, req: Request): Promise<Response>
         if (c.status === "running" || c.status === "pending") a.live += 1;
         const at = c.last_active_at ?? c.updated_at ?? c.inserted_at ?? null;
         if (at && (!a.latest || at > a.latest)) a.latest = at;
+        const ask = held.get(c.id);
+        if (ask) {
+          waiting.push({
+            conversationId: c.id,
+            projectId: project.id,
+            projectName: project.name,
+            itemId: ref.itemId,
+            itemTitle: ctx.db.getItem(ref.itemId)?.title ?? null,
+            title: typeof c.title === "string" && c.title ? c.title : null,
+            agentId: typeof c.agent_id === "string" && c.agent_id ? c.agent_id : null,
+            requestId: ask.requestId,
+            tool: ask.tool,
+            askedAt: ask.askedAt,
+            expiresAt: ask.expiresAt,
+          });
+        }
         if (!at || c.unread !== true || !FEED_STATUSES.has(c.status ?? "")) continue;
         feed.push({
           conversationId: c.id,
@@ -225,7 +284,10 @@ export async function activity(ctx: AppContext, req: Request): Promise<Response>
   // Ties break on id so the order is total, and the panel does not shuffle
   // two conversations that stopped in the same millisecond under the pointer.
   feed.sort((a, b) => b.at.localeCompare(a.at) || a.conversationId.localeCompare(b.conversationId));
-  const dto: ActivityDto = { projects: out, feed: feed.slice(0, FEED_MAX), dropped: Math.max(0, feed.length - FEED_MAX) };
+  // Waiting sorts the other way up: oldest first is closest to being denied,
+  // and the one about to run out is the one to answer.
+  waiting.sort((a, b) => a.askedAt.localeCompare(b.askedAt) || a.conversationId.localeCompare(b.conversationId));
+  const dto: ActivityDto = { projects: out, feed: feed.slice(0, FEED_MAX), dropped: Math.max(0, feed.length - FEED_MAX), waiting };
   return json({ data: dto });
 }
 

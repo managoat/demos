@@ -202,9 +202,8 @@ conversation, shared by everyone in the project the way everything else in a
 project is, so answering a teammate on your laptop does not leave the same row
 waiting on your desk.
 
-It is a **poll**, once a minute, and only while the tab is on screen — because
-there is no cross-project stream to read, and one request a minute is cheaper
-than inventing one. It costs a conversation-list call per distinct project
+It is a **poll**, once a minute — fifteen seconds while somebody is blocked,
+see below — and only while the tab is on screen. It costs a conversation-list call per distinct project
 owner, which is what the projects list already spends on every visit, and both
 facts come out of that one listing: `GET /api/projects/activity` answers what
 is live per project *and* the feed across all of them. Rows are grouped by
@@ -213,6 +212,34 @@ the project you are standing in sinks to the bottom, labelled, since what is in
 front of you is the one thing you did not need telling about. The list is
 capped at 50 and the panel says how many it is not showing, rather than
 implying there is no more.
+
+**The louder half of the bell is who is blocked.** A finished conversation
+waits for you indefinitely; an agent held on an `ask` permission is on a clock —
+Fountain denies an unanswered request after five minutes. So those go first in
+the panel, oldest first, each with its countdown and a link to the thread; the
+bell counts them and says so in words ("2 agents are blocked waiting on you"),
+and the survey quickens to fifteen seconds while any of them is up. It is a
+link and not a pair of buttons on purpose: answering "Bash — `rm -rf build/`"
+off a summary row, in a project you are not even in, is a worse decision than
+answering it under the transcript that explains it, and a countdown makes that
+pressure worse rather than better.
+
+That half cannot be surveyed, and it is the one place the server keeps a
+connection open. A held request is on no conversation record — Fountain writes
+it to the *turn* and announces it on the `stage` stream — and the conversation
+holding one is `running`, which the rule above excludes as "still working, not
+news". It is the one running conversation that is news. So the server follows
+one user-wide `?streams=stage` stream per project *owner* and folds it into the
+map the survey joins against (`server/watch.ts`, which argues the choice out in
+full). What it deliberately does not do is merge those streams into one SSE for
+the browser: Fountain's event ids are per account, so a merged `id:` field would
+break `Last-Event-ID` replay for anybody who is in two owners' projects. Each
+owner's cursor stays in the server, where the two id spaces never meet. And
+because a stream cannot say what was already true when it opened, a running
+conversation this process has never seen has its stage history read once,
+directly, before the stream is joined onto the end of it — once, not once a
+minute. The right shape is still a held-request count on the conversation
+record, which would delete all of this; that is filed as an ask on Fountain.
 
 **And you can unblock it where it asked.** An agent under an `ask` permission
 stops before the tool runs, and Fountain puts the ask on the conversation as a
@@ -508,6 +535,7 @@ server/
   projects.ts        projects, members, items; recovery and import
   cost.ts            your bill, the projects you own that it paid for, and their turn hours inside its period
   proxy.ts           Fountain as seen from inside one project, on the owner's key
+  watch.ts           one stage stream per owner, folded into who is blocked on a permission request
   mcp.ts             the work items as MCP tools, for an agent holding a Fountain key
   db.ts              SQLite: users, sessions, projects, members, items
   crypto.ts          keys at rest, session token hashing
@@ -526,7 +554,7 @@ src/
   lib/search.ts      what ⌘K and ⌘F search: names locally, messages through the proxy
   lib/turns.ts       fold a log feed into turns for the chat view
   lib/digest.ts      a work item's stage stream → what happened since you last looked
-  lib/feed.ts        the same question across every project: what stopped unread, and where
+  lib/feed.ts        the same question across every project: what stopped unread and who is blocked, and where
   lib/details.ts     what a conversation runs with: its computer, its skills and MCP servers, the policy in force
   lib/board.ts       the items as columns, and which drags between them are real writes
   lib/blocks.ts      arrange server-parsed blocks (from fountain-conversations)

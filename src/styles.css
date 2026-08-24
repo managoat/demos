@@ -932,6 +932,12 @@ body.resizing-col { cursor: col-resize; user-select: none; }
 .feed-row-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .feed-row.failed .feed-row-sub { color: var(--bad); }
 .feed-row-time { flex: none; font-size: 11px; }
+/* Waiting on you: the one section here with a deadline, so it says so in the
+   one way the rest of the panel does not — colour it and put it first. */
+.feed-group.waiting { background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.feed-row.asking .feed-dot { background: var(--warn); }
+.feed-bell.blocked { color: var(--warn); }
+.feed-badge.blocked { background: var(--warn); }
 .feed-foot { margin: 0; padding: 8px 10px; border-top: 1px solid var(--border); background: var(--bg-1); }
 
 /* ── the cost view ──────────────────────────────────────────────────────

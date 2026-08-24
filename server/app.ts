@@ -12,7 +12,8 @@
  *   GET    /api/projects                    mine: owned and shared with me
  *   POST   /api/projects
  *   GET    /api/projects/activity           per project: live counts and last activity; and across
- *                                           all of them, the conversations that stopped unread
+ *                                           all of them, the conversations that stopped unread and
+ *                                           the agents blocked on a permission request (watch.ts)
  *   POST   /api/projects/recover            rebuild my projects from my Fountain conversations
  *   POST   /api/import                      the tree an old browser kept in localStorage
  *   GET    /api/projects/:id                project + items

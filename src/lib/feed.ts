@@ -1,5 +1,6 @@
 /**
- * The feed: what finished in your other projects while you were in this one.
+ * The feed: what finished in your other projects while you were in this one,
+ * and who is blocked waiting on you in them.
  *
  * The digest (`src/lib/digest.ts`) answers the same question one work item at
  * a time, folded out of the stage stream the page already holds. This is the
@@ -25,20 +26,42 @@
  * by everyone in the project the way every other thing in a project is, and it
  * clears by opening the thread — which is the act the feed exists to prompt.
  *
+ * The third measurement, added later, is not a mark at all:
+ *
+ *   waiting  a permission request an agent is *still* held on, folded off the
+ *            owner's stage stream by server/watch.ts — current state, not
+ *            history, and on a five-minute clock rather than waiting for you
+ *
+ * It is not read state and nothing clears it by being looked at: a request
+ * goes away when it is answered, or when Fountain denies it for you. Which is
+ * why it is shown above the rest and counted separately — "3 finished" can
+ * wait until tomorrow and "an agent is blocked, 2m left" cannot.
+ *
  * Everything here is pure; the panel is components/Feed.tsx.
  */
-import type { ActivityDto, FeedEntry } from "./api";
+import type { ActivityDto, FeedEntry, WaitingEntry } from "./api";
 
 /** Nothing surveyed yet. */
-export const NO_ACTIVITY: ActivityDto = { projects: {}, feed: [], dropped: 0 };
+export const NO_ACTIVITY: ActivityDto = { projects: {}, feed: [], dropped: 0, waiting: [] };
+
+/**
+ * Requests still worth answering. The server drops them on the same deadline,
+ * but a survey is up to a minute old by the time it is read and a countdown
+ * that reaches zero must take its row with it — Fountain has already answered
+ * that one with a refusal, and a row that says otherwise is asking you to
+ * click on nothing.
+ */
+export function feedWaiting(a: ActivityDto, now: number = Date.now()): WaitingEntry[] {
+  return a.waiting.filter((w) => Date.parse(w.expiresAt) > now);
+}
 
 /**
  * The number on the bell: everything waiting, including what the server
  * capped off the list. A badge that counted only the rows shown would go
  * quiet while there was more, which is the failure this whole thing is for.
  */
-export function feedCount(a: ActivityDto): number {
-  return a.feed.length + a.dropped;
+export function feedCount(a: ActivityDto, now: number = Date.now()): number {
+  return feedWaiting(a, now).length + a.feed.length + a.dropped;
 }
 
 /** What to call a conversation that has not been given a title yet. */
@@ -83,13 +106,36 @@ export function feedGroups(entries: readonly FeedEntry[], hereProjectId?: string
 /**
  * The bell's tooltip — the count in words, so the button says what it means
  * without being opened, and a screen reader gets the same sentence.
+ *
+ * A blocked agent leads, whatever else is in there. It is the only part of
+ * this that expires, and the sentence is what somebody reads instead of
+ * opening the panel.
  */
-export function feedSummary(a: ActivityDto): string {
-  const n = feedCount(a);
-  if (n === 0) return "Nothing waiting: every conversation in your projects has been read.";
-  const failed = a.feed.filter((e) => e.status === "failed").length;
-  const head = `${n} conversation${n === 1 ? "" : "s"} finished and unread`;
-  return failed ? `${head} — ${failed} failed` : head;
+export function feedSummary(a: ActivityDto, now: number = Date.now()): string {
+  const blocked = feedWaiting(a, now).length;
+  const rest = a.feed.length + a.dropped;
+  if (blocked === 0 && rest === 0) return "Nothing waiting: every conversation in your projects has been read.";
+  const parts: string[] = [];
+  if (blocked) parts.push(`${blocked} agent${blocked === 1 ? " is" : "s are"} blocked waiting on you`);
+  if (rest) {
+    const failed = a.feed.filter((e) => e.status === "failed").length;
+    parts.push(`${rest} conversation${rest === 1 ? "" : "s"} finished and unread${failed ? ` — ${failed} failed` : ""}`);
+  }
+  return parts.join(" · ");
+}
+
+/**
+ * What to call whoever is asking. The conversation's own title, not the
+ * agent's name: the top bar is outside every project, so it holds no team for
+ * the project this is in and cannot look one up without a request per row.
+ */
+export function waitingWho(w: WaitingEntry): string {
+  return w.title || "An agent";
+}
+
+/** "wants to run Bash" — what it is asking for, in the runtime's words. */
+export function waitingWhat(w: WaitingEntry): string {
+  return `wants to run ${w.tool ?? "a tool"}`;
 }
 
 /**

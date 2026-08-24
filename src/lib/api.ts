@@ -71,12 +71,30 @@ export interface FeedEntry {
   at: string;
 }
 
+/** One agent blocked on a permission request, in whichever project it is in. */
+export interface WaitingEntry {
+  conversationId: string;
+  projectId: string;
+  projectName: string;
+  itemId: string;
+  itemTitle: string | null;
+  title: string | null;
+  agentId: string | null;
+  requestId: string;
+  tool: string | null;
+  askedAt: string;
+  /** When Fountain answers for you, with a refusal. */
+  expiresAt: string;
+}
+
 /** What one survey of every project you are in came back with. */
 export interface ActivityDto {
   projects: Record<string, Activity>;
   feed: FeedEntry[];
   /** Entries past the server's cap; shown, never silently dropped. */
   dropped: number;
+  /** Oldest first: the one closest to running out is the one to answer. */
+  waiting: WaitingEntry[];
 }
 
 export interface Me {

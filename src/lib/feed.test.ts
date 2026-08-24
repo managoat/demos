@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { feedCount, feedGroups, feedRead, feedSummary, feedTitle, feedWhere, NO_ACTIVITY } from "./feed";
-import type { ActivityDto, FeedEntry } from "./api";
+import { feedCount, feedGroups, feedRead, feedSummary, feedTitle, feedWaiting, feedWhere, NO_ACTIVITY, waitingWhat, waitingWho } from "./feed";
+import type { ActivityDto, FeedEntry, WaitingEntry } from "./api";
 
 function entry(over: Partial<FeedEntry> & Pick<FeedEntry, "conversationId" | "projectId" | "at">): FeedEntry {
   return {
@@ -14,8 +14,28 @@ function entry(over: Partial<FeedEntry> & Pick<FeedEntry, "conversationId" | "pr
   };
 }
 
-function survey(feed: FeedEntry[], dropped = 0): ActivityDto {
-  return { projects: {}, feed, dropped };
+function survey(feed: FeedEntry[], dropped = 0, waiting: WaitingEntry[] = []): ActivityDto {
+  return { projects: {}, feed, dropped, waiting };
+}
+
+const NOW = Date.parse("2026-08-24T12:00:00Z");
+
+/** A request asked `mins` before NOW; Fountain denies it five minutes after it was asked. */
+function held(mins: number, over: Partial<WaitingEntry> = {}): WaitingEntry {
+  return {
+    conversationId: "c9",
+    projectId: "p9",
+    projectName: "Elsewhere",
+    itemId: "w9",
+    itemTitle: "ship it",
+    title: "Coder: ship it",
+    agentId: "a1",
+    requestId: "r1",
+    tool: "Bash",
+    askedAt: new Date(NOW - mins * 60_000).toISOString(),
+    expiresAt: new Date(NOW + (5 - mins) * 60_000).toISOString(),
+    ...over,
+  };
 }
 
 describe("the feed", () => {
@@ -74,6 +94,35 @@ describe("the feed", () => {
       entry({ conversationId: "c2", projectId: "p1", at: "x", status: "failed" }),
     ]);
     expect(feedSummary(mixed)).toBe("2 conversations finished and unread — 1 failed");
+  });
+
+  test("a blocked agent counts on the bell too, and leads the sentence", () => {
+    const a = survey([entry({ conversationId: "c1", projectId: "p1", at: "x" })], 0, [held(1), held(3, { conversationId: "c8", requestId: "r2" })]);
+    expect(feedCount(a, NOW)).toBe(3);
+    // Blocked first, whatever else is in there: it is the only part of this
+    // that expires, and the tooltip is what somebody reads instead of opening
+    // the panel.
+    expect(feedSummary(a, NOW)).toBe("2 agents are blocked waiting on you · 1 conversation finished and unread");
+    expect(feedSummary(survey([], 0, [held(1)]), NOW)).toBe("1 agent is blocked waiting on you");
+  });
+
+  test("a request past its deadline is gone: Fountain has already answered it with a refusal", () => {
+    // Asked six minutes ago, denied one minute ago. The survey may be most of
+    // a minute old by the time it is read, so the browser drops it too — a
+    // countdown that reaches zero takes its row with it.
+    const a = survey([], 0, [held(6)]);
+    expect(feedWaiting(a, NOW)).toEqual([]);
+    expect(feedCount(a, NOW)).toBe(0);
+    expect(feedSummary(a, NOW)).toContain("Nothing waiting");
+    // One second left is still worth showing; it is still answerable.
+    expect(feedWaiting(survey([], 0, [held(5 - 1 / 60)]), NOW)).toHaveLength(1);
+  });
+
+  test("what a waiting row says when Fountain has not named the conversation or the tool", () => {
+    expect(waitingWho(held(1))).toBe("Coder: ship it");
+    expect(waitingWho(held(1, { title: null }))).toBe("An agent");
+    expect(waitingWhat(held(1))).toBe("wants to run Bash");
+    expect(waitingWhat(held(1, { tool: null }))).toBe("wants to run a tool");
   });
 
   test("a conversation Fountain has not titled yet, and an item that is gone, still read as something", () => {
