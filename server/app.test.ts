@@ -69,6 +69,7 @@ const fountain = Bun.serve({
       if (!one[2]) return Response.json({ data: c });
       if (one[2] === "/turns") return Response.json({ data: [{ id: "t1", prompt: "hi" }] });
       if (one[2] === "/prompts") return Response.json({ data: { ok: true, prompt: (await req.json()).prompt } }, { status: 202 });
+      if (one[2] === "/terminate") return new Response(null, { status: 204 });
       return Response.json({ error: "not_found" }, { status: 404 });
     }
     if (path === "/api/agents") return Response.json({ data: [{ id: "a1", name: "Coder" }] });
@@ -305,6 +306,12 @@ describe("the project-scoped proxy", () => {
     const res = await call("bob", "POST", `/f/${projectId}/api/conversations/c1/prompts`, { prompt: "more" });
     expect(res.status).toBe(202);
     expect((await res.json()).data.prompt).toBe("more");
+  });
+
+  test("a bodyless answer (terminate is 204) passes through", async () => {
+    const res = await call("bob", "POST", `/f/${projectId}/api/conversations/c1/terminate`);
+    expect(res.status).toBe(204);
+    expect(await res.text()).toBe("");
   });
 
   test("the rest of the API is closed", async () => {

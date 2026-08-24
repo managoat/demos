@@ -175,7 +175,8 @@ const browserFetch: FetchLike = (input, init) => {
 
 export function makeProjectClient(projectId: string): Fountain {
   // The bearer is a placeholder: the server authenticates the session cookie and swaps in the owner's key.
-  return new Fountain({ baseUrl: projectFountainBase(projectId), apiKey: "session", appUrl: "", fetch: browserFetch });
+  // Retiring a conversation waits for Fountain to tear the computer down, which can take longer than the SDK's 30 s default.
+  return new Fountain({ baseUrl: projectFountainBase(projectId), apiKey: "session", appUrl: "", fetch: browserFetch, timeoutMs: 120_000 });
 }
 
 export function ProjectProvider({ projectId, children, fallback }: { projectId: string; children: ReactNode; fallback: (state: "loading" | "missing") => ReactNode }) {

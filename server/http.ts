@@ -16,6 +16,10 @@ export function json(body: unknown, status = 200, headers: Record<string, string
 
 export function errorResponse(err: unknown): Response {
   if (err instanceof HttpError) return json({ error: err.code, message: err.message }, err.status);
+  if (err instanceof DOMException && err.name === "AbortError") {
+    // The browser went away mid-request; nothing to answer, nothing to alarm about.
+    return json({ error: "client_closed", message: "The request was abandoned." }, 499);
+  }
   console.error("workbench:", err);
   return json({ error: "internal", message: "Something went wrong on the workbench server." }, 500);
 }

@@ -168,7 +168,13 @@ async function startConversation(ctx: AppContext, { project, client }: Scope, re
 
 // ── forwarding ───────────────────────────────────────────────────────────
 
-/** Send the request on as it is — method, query, body, accept — and hand the answer back, streamed. */
+/**
+ * Send the request on as it is — method, query, body, accept — and hand the
+ * answer back, streamed. A read follows the browser's abort (a closed
+ * stream should not hold a Fountain connection); a mutation does not — a
+ * terminate that Fountain is half-way through must finish whether or not
+ * the tab that asked for it is still waiting.
+ */
 async function forward(client: FountainClient, req: Request, path: string, search: string): Promise<Response> {
   const headers: Record<string, string> = {};
   for (const h of ["accept", "content-type", "last-event-id"]) {
@@ -176,14 +182,17 @@ async function forward(client: FountainClient, req: Request, path: string, searc
     if (v) headers[h] = v;
   }
   const method = req.method.toUpperCase();
-  const body = method === "GET" || method === "HEAD" ? undefined : await req.arrayBuffer();
-  const res = await client.fetch(`${path}${search}`, { method, headers, body, signal: req.signal });
+  const read = method === "GET" || method === "HEAD";
+  const body = read ? undefined : await req.arrayBuffer();
+  const res = await client.fetch(`${path}${search}`, { method, headers, body, signal: read ? req.signal : undefined });
   const out = new Headers();
   for (const h of ["content-type", "cache-control", "content-disposition"]) {
     const v = res.headers.get(h);
     if (v) out.set(h, v);
   }
-  return new Response(res.body, { status: res.status, headers: out });
+  // 204 and friends may not carry a body, even an empty stream.
+  const bodyless = res.status === 204 || res.status === 205 || res.status === 304;
+  return new Response(bodyless ? null : res.body, { status: res.status, headers: out });
 }
 
 function passthrough(res: Response, text: string): Response {
