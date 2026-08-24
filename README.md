@@ -12,9 +12,17 @@ you paste in once.
   an unread dot, turn and sub-conversation counts; roots-only and per-agent
   filters.
 - **Conversations** — the full table: status, task, agent, runtime, source,
-  started and last-active (both sortable), terminate and delete per row.
+  started and last-active (both sortable), terminate and delete per row. A
+  **home** badge marks a conversation on a persistent sandbox (ADR 0023: the
+  agent's own machine, shared by its conversations); hovering lists the others
+  on it and which is mid-turn, clicking opens the machine.
+- **Machine** — one sandbox: status, mode, provider, last resumed, the
+  conversations on it, and *New conversation here*, which opens another one
+  on the same disk (`sandbox_id`).
 - **New** — agent, environment (the agent's own by default, narrowed by its
-  allowlist), vault, first prompt, images; ⌘/Ctrl+Enter to start.
+  allowlist), vault, where it runs (its own sandbox or the agent's shared
+  home, when the agent carries a `sandbox_mode`), first prompt, images;
+  ⌘/Ctrl+Enter to start.
 - **Conversation** — *Chat* mode (bubbles, tool cards, thinking, the agent's
   avatar), *Timeline* mode (every lifecycle stage — provision, setup, turn,
   sandbox, terminate — with icons, durations, the stage's own `k=v` detail,
@@ -90,7 +98,8 @@ The only build-time knob is `VITE_BASE`, the path the files are served under
 |---|---|
 | List, unread, status | `GET /api/conversations` |
 | Live updates for everything | `GET /api/events/stream?blocks=true` — one SSE connection, `Last-Event-ID` on reconnect |
-| New | `POST /api/conversations`, with `GET /api/agents`, `/api/environments`, `/api/vaults` |
+| New | `POST /api/conversations` (with `sandbox_id` / `sandbox_mode`), with `GET /api/agents`, `/api/environments`, `/api/vaults` |
+| Home badge, machine | `GET /api/sandboxes` (once per list), `GET /api/sandboxes/:id` |
 | Transcript | `GET /api/conversations/:id/turns` + `/events?blocks=true` (paged until drained) |
 | Prompt, interrupt, terminate, delete, read | `POST …/prompts`, `POST …/interrupt`, `POST …/terminate`, `DELETE`, `POST …/read` |
 | Spawn tree, images | `GET …/tree`, `GET …/turns/:turn_id/images/:position` |
@@ -104,7 +113,7 @@ allow-list renderer to React nodes (`src/lib/markdown.tsx`) — never HTML.
 
 ```bash
 bun run typecheck
-bun test           # SSE parser, block arranging, markdown
+bun test           # SSE parser, block arranging, markdown, routes
 ```
 
 Vite + React + TypeScript, no other runtime dependencies. Bun is the toolchain.

@@ -9,6 +9,7 @@ import { IndexPage } from "./pages/Index";
 import { NewPage } from "./pages/New";
 import { ShowPage } from "./pages/Show";
 import { LogsPage } from "./pages/Logs";
+import { SandboxPage } from "./pages/Sandbox";
 import { AgentsPage } from "./pages/Agents";
 import { AgentFormPage } from "./pages/AgentForm";
 import { EnvironmentsPage, EnvironmentFormPage } from "./pages/Environments";
@@ -86,7 +87,7 @@ function Shell({ onSettings, onSignOut }: { onSettings: () => void; onSignOut: (
   const [theme, setTheme] = useState(() => loadTheme());
   const [drawer, setDrawer] = useState(false);
   const currentId = route.page === "show" || route.page === "logs" ? route.id : null;
-  const convPage = route.page === "index" || route.page === "new" || route.page === "show" || route.page === "logs";
+  const convPage = route.page === "index" || route.page === "new" || route.page === "show" || route.page === "logs" || route.page === "sandbox";
 
   const cycleTheme = () => {
     const t = nextTheme(theme);
@@ -136,9 +137,10 @@ function Shell({ onSettings, onSignOut }: { onSettings: () => void; onSignOut: (
         {drawer && <div className="drawer-backdrop" onClick={() => setDrawer(false)} />}
         <main className="main">
           {route.page === "index" && <IndexPage />}
-          {route.page === "new" && <NewPage parentId={route.parentId} />}
+          {route.page === "new" && <NewPage key={route.sandboxId ?? ""} parentId={route.parentId} sandboxId={route.sandboxId} />}
           {route.page === "show" && <ShowPage key={route.id} id={route.id} />}
           {route.page === "logs" && <LogsPage key={route.id} id={route.id} />}
+          {route.page === "sandbox" && <SandboxPage key={route.id} id={route.id} />}
           {route.page === "agents" && <AgentsPage />}
           {route.page === "agent" && <AgentFormPage key={route.id} id={route.id} />}
           {route.page === "environments" && <EnvironmentsPage />}

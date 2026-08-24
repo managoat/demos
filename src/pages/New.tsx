@@ -2,17 +2,23 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useStore } from "../store";
 import { navigate, paths } from "../router";
 import { describeError } from "../api/client";
-import type { Agent, Environment, ImageInput, Vault } from "../api/types";
+import type { Agent, Environment, ImageInput, SandboxDetail, SandboxMode, Vault } from "../api/types";
 import { ImagePicker } from "../components/ImagePicker";
 
-export function NewPage({ parentId }: { parentId?: string }) {
+const ATTACHABLE = new Set(["ready", "suspended"]);
+
+export function NewPage({ parentId, sandboxId }: { parentId?: string; sandboxId?: string }) {
   const { client, toast, refresh } = useStore();
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [envs, setEnvs] = useState<Environment[]>([]);
   const [vaults, setVaults] = useState<Vault[]>([]);
+  // The machine to attach to (`?sandbox=`): it fixes the agent, environment
+  // and vault, since a launch must match the identity the disk was built for.
+  const [sandbox, setSandbox] = useState<SandboxDetail | null>(null);
   const [agentId, setAgentId] = useState("");
   const [envId, setEnvId] = useState("");
   const [vaultId, setVaultId] = useState("");
+  const [mode, setMode] = useState<SandboxMode | "">("");
   const [prompt, setPrompt] = useState("");
   const [images, setImages] = useState<ImageInput[]>([]);
   const [busy, setBusy] = useState(false);
@@ -20,21 +26,29 @@ export function NewPage({ parentId }: { parentId?: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([client.listAgents(), client.listEnvironments(), client.listVaults()])
-      .then(([a, e, v]) => {
+    Promise.all([client.listAgents(), client.listEnvironments(), client.listVaults(), sandboxId ? client.getSandbox(sandboxId) : null])
+      .then(([a, e, v, s]) => {
         if (cancelled) return;
         setAgents(a);
         setEnvs(e);
         setVaults(v);
+        setSandbox(s);
         const preselected = sessionStorage.getItem("fountain-conversations.new-agent");
         sessionStorage.removeItem("fountain-conversations.new-agent");
-        setAgentId(preselected && a.some((x) => x.id === preselected) ? preselected : a[0]?.id ?? "");
+        if (s) {
+          setAgentId(s.agent_id ?? "");
+          const own = a.find((x) => x.id === s.agent_id)?.environment_id ?? null;
+          setEnvId(s.environment_id && s.environment_id !== own ? s.environment_id : "");
+          setVaultId(s.vault_id ?? "");
+        } else {
+          setAgentId(preselected && a.some((x) => x.id === preselected) ? preselected : a[0]?.id ?? "");
+        }
       })
       .catch((err) => !cancelled && setError(describeError(err)));
     return () => {
       cancelled = true;
     };
-  }, [client]);
+  }, [client, sandboxId]);
 
   const agent = agents?.find((a) => a.id === agentId) ?? null;
   const allowedEnvs = useMemo(
@@ -44,15 +58,20 @@ export function NewPage({ parentId }: { parentId?: string }) {
   const ownEnv = allowedEnvs.find((e) => e.id === agent?.environment_id) ?? null;
   const otherEnvs = allowedEnvs.filter((e) => e.id !== agent?.environment_id);
   const allowedVaults = useMemo(() => (agent ? vaults.filter((v) => allowed(v.id, agent.allowed_vault_ids, null)) : []), [agent, vaults]);
+  const defaultMode = agent?.sandbox_mode ?? null;
 
   useEffect(() => {
+    if (sandbox) return;
     if (envId && !otherEnvs.some((e) => e.id === envId)) setEnvId("");
     if (vaultId && !allowedVaults.some((v) => v.id === vaultId)) setVaultId("");
+    setMode(defaultMode ?? "");
   }, [agentId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const attachable = !sandbox || ATTACHABLE.has(sandbox.status);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!agentId || !prompt.trim()) return;
+    if (!agentId || !prompt.trim() || !attachable) return;
     setBusy(true);
     setError(null);
     try {
@@ -63,7 +82,10 @@ export function NewPage({ parentId }: { parentId?: string }) {
         ...(envId ? { environment_id: envId } : {}),
         ...(vaultId ? { vault_id: vaultId } : {}),
         ...(parentId ? { parent_conversation_id: parentId } : {}),
-      } as Parameters<typeof client.startConversation>[0]);
+        ...(sandbox ? { sandbox_id: sandbox.id } : {}),
+        // Only an override travels; the agent's own default stays implicit.
+        ...(!sandbox && mode && defaultMode && mode !== defaultMode ? { sandbox_mode: mode } : {}),
+      });
       toast("Conversation started");
       void refresh();
       navigate(paths.show(conv.id));
@@ -77,8 +99,8 @@ export function NewPage({ parentId }: { parentId?: string }) {
   return (
     <div className="page narrow">
       <header className="page-header">
-        <h1>New conversation</h1>
-        <a href={paths.index} className="button secondary small">
+        <h1>{sandbox ? "New conversation here" : "New conversation"}</h1>
+        <a href={sandbox ? paths.sandbox(sandbox.id) : paths.index} className="button secondary small">
           Cancel
         </a>
       </header>
@@ -90,9 +112,26 @@ export function NewPage({ parentId }: { parentId?: string }) {
       )}
       {agents && agents.length > 0 && (
         <form className="card stack" onSubmit={submit}>
+          {sandbox && (
+            <div className="field">
+              <span className="field-label">Machine</span>
+              <div>
+                <a href={paths.sandbox(sandbox.id)} className="mono">
+                  {sandbox.sprite_name}
+                </a>{" "}
+                <span className={`pill ${sandbox.status}`}>{sandbox.status}</span>
+                {sandbox.mode === "persistent" && <span className="home-badge static">⌂ home</span>}
+              </div>
+              <span className="hint">
+                The conversation opens on this machine's disk, beside the {sandbox.conversations.length} already there; agent, environment and
+                vault are the ones it was built for.
+              </span>
+              {!attachable && <div className="error">Only a ready or suspended machine takes a new conversation — this one is {sandbox.status}.</div>}
+            </div>
+          )}
           <label>
             Agent
-            <select value={agentId} onChange={(e) => setAgentId(e.target.value)}>
+            <select value={agentId} onChange={(e) => setAgentId(e.target.value)} disabled={!!sandbox}>
               {agents.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name} ({a.runtime} · {a.model})
@@ -103,7 +142,7 @@ export function NewPage({ parentId }: { parentId?: string }) {
           {otherEnvs.length > 0 && (
             <label>
               Environment
-              <select value={envId} onChange={(e) => setEnvId(e.target.value)}>
+              <select value={envId} onChange={(e) => setEnvId(e.target.value)} disabled={!!sandbox}>
                 <option value="">{ownEnv ? `Agent's default (${ownEnv.name})` : "Agent's default"}</option>
                 {otherEnvs.map((e) => (
                   <option key={e.id} value={e.id}>
@@ -117,7 +156,7 @@ export function NewPage({ parentId }: { parentId?: string }) {
           {allowedVaults.length > 0 && (
             <label>
               Vault <span className="muted">(optional)</span>
-              <select value={vaultId} onChange={(e) => setVaultId(e.target.value)}>
+              <select value={vaultId} onChange={(e) => setVaultId(e.target.value)} disabled={!!sandbox}>
                 <option value="">— none —</option>
                 {allowedVaults.map((v) => (
                   <option key={v.id} value={v.id}>
@@ -127,6 +166,29 @@ export function NewPage({ parentId }: { parentId?: string }) {
               </select>
               <span className="hint">Layered on top of the environment's secrets. Vault values win on key collision.</span>
             </label>
+          )}
+          {!sandbox && defaultMode && (
+            <div className="field">
+              <span className="field-label">Where it runs</span>
+              <div className="mode-options" role="radiogroup">
+                <ModeOption
+                  value="ephemeral"
+                  current={mode}
+                  isDefault={defaultMode === "ephemeral"}
+                  title="Its own sandbox"
+                  onPick={setMode}
+                  hint="A fresh machine for this conversation alone, reclaimed when the conversation ends."
+                />
+                <ModeOption
+                  value="persistent"
+                  current={mode}
+                  isDefault={defaultMode === "persistent"}
+                  title="The agent's home"
+                  onPick={setMode}
+                  hint="One shared disk: every conversation of this agent (with the same environment and vault) lands on the same machine, and it stays when a conversation ends. What one conversation leaves behind — including anything a bad turn wrote — is visible to the others."
+                />
+              </div>
+            </div>
           )}
           <label>
             First prompt
@@ -154,7 +216,7 @@ export function NewPage({ parentId }: { parentId?: string }) {
           {error && <div className="error">{error}</div>}
           <div className="row end">
             <span className="muted small">⌘/Ctrl+Enter to start</span>
-            <button type="submit" disabled={busy || !agentId || !prompt.trim()}>
+            <button type="submit" disabled={busy || !agentId || !prompt.trim() || !attachable}>
               {busy ? "Starting…" : "Start"}
             </button>
           </div>
@@ -163,6 +225,32 @@ export function NewPage({ parentId }: { parentId?: string }) {
       {!agents && !error && <div className="muted">Loading…</div>}
       {!agents && error && <div className="error">{error}</div>}
     </div>
+  );
+}
+
+function ModeOption({
+  value,
+  current,
+  isDefault,
+  title,
+  hint,
+  onPick,
+}: {
+  value: SandboxMode;
+  current: SandboxMode | "";
+  isDefault: boolean;
+  title: string;
+  hint: string;
+  onPick: (m: SandboxMode) => void;
+}) {
+  return (
+    <label className={`mode-option ${current === value ? "on" : ""}`}>
+      <input type="radio" name="sandbox_mode" value={value} checked={current === value} onChange={() => onPick(value)} />
+      <span>
+        <span className="strong">{title}</span> <span className="muted">({value}{isDefault ? ", the agent's default" : ""})</span>
+        <span className="hint">{hint}</span>
+      </span>
+    </label>
   );
 }
 

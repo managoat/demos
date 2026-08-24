@@ -1,12 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../store";
 import { navigate, paths } from "../router";
 import { loadPrefs, savePrefs, type SortKey } from "../lib/prefs";
 import { formatTime } from "../lib/format";
 import { cleanTitle, relativeTime } from "../lib/sidebar";
 import { describeError } from "../api/client";
-import type { Conversation } from "../api/types";
+import type { Conversation, SandboxDetail } from "../api/types";
 import { StatusPill } from "../components/StatusPill";
+import { HomeBadge } from "../components/HomeBadge";
 
 /**
  * Every conversation as a table, the way the web UI's index listed them:
@@ -32,6 +33,22 @@ export function IndexPage() {
     setPref(prefs.sortBy === key ? { sortDir: prefs.sortDir === "desc" ? "asc" : "desc" } : { sortBy: key, sortDir: "desc" });
 
   const arrow = (key: SortKey) => (prefs.sortBy !== key ? "↕" : prefs.sortDir === "desc" ? "↓" : "↑");
+
+  // The home badges' hover lists: one `GET /api/sandboxes` per list, never
+  // one per row, and only when some row has a home to show.
+  const anyHome = useMemo(() => conversations.some((c) => c.sandbox?.mode === "persistent"), [conversations]);
+  const [sandboxes, setSandboxes] = useState<Map<string, SandboxDetail>>(new Map());
+  useEffect(() => {
+    if (!anyHome) return;
+    let cancelled = false;
+    client
+      .listSandboxes()
+      .then((list) => !cancelled && setSandboxes(new Map(list.map((s) => [s.id, s]))))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [client, conversations, anyHome]);
 
   const act = async (id: string, label: string, fn: () => Promise<unknown>, confirm: string) => {
     if (!window.confirm(confirm)) return;
@@ -104,6 +121,9 @@ export function IndexPage() {
                       </a>
                       {c.parent_conversation_id && <span className="tag">sub</span>}
                       {c.channel_id && <span className="tag">{c.channel_id === "fountain:team" ? "team" : "channel"}</span>}
+                      {c.sandbox?.mode === "persistent" && (
+                        <HomeBadge sandbox={c.sandbox} currentId={c.id} siblings={sandboxes.get(c.sandbox.id)?.conversations ?? null} />
+                      )}
                     </td>
                     <td>
                       <a href={paths.show(c.id)} className="plain">

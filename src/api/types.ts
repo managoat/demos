@@ -8,14 +8,43 @@ export interface Runner {
   path: string | null;
 }
 
+export type SandboxMode = "ephemeral" | "persistent";
+export type SandboxStatus = "pending" | "starting" | "ready" | "suspended" | "terminated" | "failed";
+
+/** One machine, as a conversation embeds it (`conversation.sandbox`). */
 export interface Sandbox {
   id: string;
   sprite_name: string;
-  status: string;
+  status: SandboxStatus;
   provider?: string | null;
+  /** The identity the disk was built from (ADR 0023): what a launch must match to attach with `sandbox_id`. */
+  agent_id?: string | null;
+  environment_id?: string | null;
+  vault_id?: string | null;
+  /** `persistent`: the agent identity's home, shared by its conversations and kept when one ends. */
+  mode?: SandboxMode;
   url: string | null;
   /** Where a runner-backed sandbox lives; null for hosted providers. */
   runner?: Runner | null;
+}
+
+/** A conversation as its sandbox lists it (`GET /api/sandboxes`). */
+export interface SandboxConversation {
+  id: string;
+  status: ConversationStatus;
+  title: string | null;
+  runtime: string;
+  /** True while this conversation is running a turn on the machine. */
+  mid_turn: boolean;
+  inserted_at: string;
+}
+
+/** `GET /api/sandboxes` and `/api/sandboxes/:id`: the machine plus its history and the conversations on it. */
+export interface SandboxDetail extends Sandbox {
+  inserted_at: string;
+  last_resumed_at: string | null;
+  /** Every conversation ever opened on this machine, newest first. */
+  conversations: SandboxConversation[];
 }
 
 export type ConversationStatus = "pending" | "running" | "idle" | "failed" | "terminated";
@@ -64,6 +93,8 @@ export interface Agent {
   runtime: string;
   acp?: boolean;
   sandbox_provider?: string | null;
+  /** Where a conversation of this agent runs by default (ADR 0023). */
+  sandbox_mode?: SandboxMode;
   environment_id: string | null;
   skills?: Skill[];
   mcp_servers?: Record<string, McpServer>;
@@ -96,6 +127,7 @@ export interface AgentInput {
   model: string;
   runtime: string;
   sandbox_provider?: string | null;
+  sandbox_mode?: SandboxMode;
   environment_id?: string | null;
   skills?: Skill[];
   mcp_servers?: Record<string, McpServer>;
