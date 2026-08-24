@@ -16,7 +16,8 @@
  *                                           is in the project
  *   GET  /api/sandboxes/:id                 one computer, if a conversation of the project is on it
  *   GET  /api/search                        full text, cut down to hits in this project's conversations
- *   GET  /api/agents, /api/agents/:id/avatar  the owner's agents (the team)
+ *   GET  /api/agents, /api/agents/:id/avatar  the owner's agents (the team), with the values of
+ *                                           every MCP server's `env` and `headers` withheld
  *   GET  /api/environments, /api/vaults     the owner sees all; a member sees the project's
  *   GET  /api/events/stream                 the owner's stream, filtered to the project, plus
  *                                           `event: workbench` when items or settings change
@@ -105,7 +106,14 @@ export async function handleProxy(ctx: AppContext, req: Request, projectId: stri
 
   if (method === "GET" && path === "/api/search") return search(scope, url);
 
-  if (method === "GET" && (path === "/api/agents" || /^\/api\/agents\/[^/]+\/avatar$/.test(path))) {
+  if (method === "GET" && path === "/api/agents") {
+    const res = await forward(client, req, path, url.search);
+    if (!res.ok) return res;
+    const body = (await res.json()) as { data?: unknown[] };
+    return json({ ...body, data: (body.data ?? []).map(withoutMcpSecrets) }, res.status);
+  }
+
+  if (method === "GET" && /^\/api\/agents\/[^/]+\/avatar$/.test(path)) {
     return forward(client, req, path, url.search);
   }
 
@@ -121,6 +129,70 @@ export async function handleProxy(ctx: AppContext, req: Request, projectId: stri
   if (method === "GET" && path === "/api/events/stream") return stream(ctx, scope, req, url);
 
   throw new HttpError(404, "not_found");
+}
+
+// ── agents ───────────────────────────────────────────────────────────────
+
+/** What a value that carried a credential is replaced with, so the shape survives and the secret does not. */
+const WITHHELD = "[withheld by the workbench]";
+
+/**
+ * An agent, with the parts of its MCP configuration that are *designed* to
+ * carry credentials taken out: the values of every server's `env` and
+ * `headers`. The names stay, because the names are what a reader is asking
+ * about — "what is this teammate plugged into" — and the values are what
+ * nobody outside Fountain needs.
+ *
+ * This is a boundary and not a display choice. `GET /api/agents` is the
+ * owner's agents as Fountain renders them (`FountainWeb.AgentJSON.data/1`),
+ * and it renders `mcp_servers` whole — so an MCP server configured the way
+ * this repo's own README configures one, with `Authorization: Bearer ftn_…`
+ * in its headers, put the owner's Fountain key in every member's browser the
+ * moment the member opened the project. Nothing read the field, so nothing
+ * showed it; the details panel reads it now, which is what made an
+ * already-crossed line visible. The fix belongs here rather than in the
+ * panel: the proxy is the boundary, and a member's browser should not hold
+ * what it must not show.
+ *
+ * The owner is not exempt. Their own key would read these from Fountain
+ * directly, so exempting them buys nothing and costs the one rule — and a
+ * rule with a role in it is one an later route can forget to apply.
+ *
+ * What this does **not** claim: a credential written into an `args` entry or
+ * a query string on a `url` still passes, because those fields are the
+ * server's identity and blanking them would leave the panel unable to say
+ * what is plugged in at all. The two fields cut here are the two that exist
+ * to hold secrets; the rest is a config a reader has to be able to read.
+ */
+function withoutMcpSecrets(agent: unknown): unknown {
+  if (!isRecord(agent) || !isRecord(agent.mcp_servers)) return agent;
+  const servers: Record<string, unknown> = {};
+  for (const [name, entry] of Object.entries(agent.mcp_servers)) {
+    if (!isRecord(entry)) {
+      servers[name] = entry;
+      continue;
+    }
+    const out: Record<string, unknown> = { ...entry };
+    for (const field of ["env", "headers"]) if (field in out) out[field] = blankValues(out[field]);
+    servers[name] = out;
+  }
+  return { ...agent, mcp_servers: servers };
+}
+
+/**
+ * The values of a name → value map, blanked. Fountain stores these as Claude's
+ * own map, but `Fountain.Runtimes.ACP.name_value_list/1` also accepts the
+ * `[{name, value}]` list ACP delivers, so a row written that way is blanked
+ * too rather than passed through the gap between the two shapes.
+ */
+function blankValues(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map((e) => (isRecord(e) && "value" in e ? { ...e, value: WITHHELD } : e));
+  if (isRecord(v)) return Object.fromEntries(Object.keys(v).map((k) => [k, WITHHELD]));
+  return v;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
 /** The images on a prompt must be ones Fountain would take, said here rather than as a 422 from there. */

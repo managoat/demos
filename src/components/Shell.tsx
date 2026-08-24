@@ -5,6 +5,11 @@
  * area for whatever has been opened, and a status bar along the bottom. On
  * a narrow screen the explorer is a drawer behind ☰. ⌘K opens the palette
  * over the project — the one way to find something across its threads.
+ *
+ * The details panel is the other side of the same frame: the explorer says
+ * what there is, the panel says what the thread you are reading is running
+ * with (`DetailsPanel`). It describes a conversation, so its toggle is in
+ * the top bar only while you are on one.
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { useProjectMaybe, useWorkbench } from "../store";
@@ -14,6 +19,8 @@ import { TabBar } from "./TabBar";
 import { StatusBar } from "./StatusBar";
 import { ThemePicker } from "./ThemePicker";
 import { Palette } from "./Palette";
+import { DetailsPanel } from "./DetailsPanel";
+import { loadPanelOpen, savePanelOpen } from "../lib/details";
 
 export function Shell({ children }: { children: ReactNode }) {
   const { me, projects, signOut } = useWorkbench();
@@ -21,7 +28,9 @@ export function Shell({ children }: { children: ReactNode }) {
   const route = useRoute();
   const [drawer, setDrawer] = useState(false);
   const [palette, setPalette] = useState(false);
+  const [details, setDetails] = useState(() => loadPanelOpen());
   const projectId = "projectId" in route ? route.projectId : "";
+  const conversationId = route.page === "conversation" ? route.conversationId : null;
   const project = store?.project ?? projects.find((p) => p.id === projectId) ?? null;
 
   // Search is a project's, so the key only means anything inside one. It is
@@ -41,6 +50,13 @@ export function Shell({ children }: { children: ReactNode }) {
 
   // A palette left open across a move to another project would search the wrong one.
   useEffect(() => setPalette(false), [projectId]);
+
+  // Open or shut is remembered, so the panel is still there on the next
+  // thread — which is the point of a panel rather than a page.
+  const toggleDetails = (open: boolean) => {
+    setDetails(open);
+    savePanelOpen(open);
+  };
 
   return (
     <div className="app ide">
@@ -91,6 +107,17 @@ export function Shell({ children }: { children: ReactNode }) {
             <span aria-hidden="true">⌕</span> search <kbd>⌘K</kbd>
           </button>
         )}
+        {store && conversationId && (
+          <button
+            type="button"
+            className={`secondary small details-toggle ${details ? "on" : ""}`}
+            onClick={() => toggleDetails(!details)}
+            aria-pressed={details}
+            title="What this conversation is running with: its computer, skills, MCP servers and permissions"
+          >
+            <span aria-hidden="true">◨</span> details
+          </button>
+        )}
         {!store && (
           <span className="muted small host" title={me.email}>
             {me.email}
@@ -109,6 +136,7 @@ export function Shell({ children }: { children: ReactNode }) {
           {store && <TabBar />}
           <main className="main">{children}</main>
         </div>
+        {store && conversationId && details && <DetailsPanel conversationId={conversationId} onClose={() => toggleDetails(false)} />}
       </div>
       {store && <StatusBar />}
       {store && palette && <Palette onClose={() => setPalette(false)} />}

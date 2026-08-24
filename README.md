@@ -130,6 +130,45 @@ the app says so. The sandbox identity `(owner, agent, environment, vault)`
 falls out of the tree — same project, same agent — which is what makes sharing
 a computer legal, whichever member opens the second conversation.
 
+**And what is inside the machine.** A transcript says what an agent said; it
+never said what it was *running with*. So a teammate reaches for a tool you did
+not know it had, or fails to reach one you were sure it had, and there is
+nowhere to look. **Details** — the top bar's ◨ while you are on a conversation,
+opening a panel down the right — is that place: the teammate and model behind
+the thread, the computer under it (sprite, provider, and whether it is this
+conversation's own machine or the teammate's), the skills and MCP servers
+loaded into it, and the permission policy actually in force. All of it was
+already on the wire and none of it was on a screen. It is the explorer's
+mirror, down to the dragged edge and the remembered width, because the tree
+says what there is and this says what one of them is made of.
+
+Two of those lists are the *teammate's* rather than the machine's, and the
+panel says so rather than letting you assume otherwise (`src/lib/details.ts`).
+Skills are written onto a sprite once, when it is built, so editing the
+teammate does not reach a computer that is already up; MCP servers are re-read
+at every turn, so those do follow an edit, from the next turn. And Fountain
+adds to both sets without reporting either. Every sprite gets bundled skills
+that are in no teammate's definition — the panel lists them, rather than
+implying a shorter set than is on the disk — and a conversation whose *vault*
+carries a Buzz identity gets a server of Fountain's own that no endpoint will
+name, which is the one thing the panel says outright that it cannot show. (The
+other two Fountain injects, the team pair, reach only a conversation on
+Fountain's own `fountain:team` channel, which a workbench conversation never
+is.) The policy is the merge Fountain itself performs, recomputed here: the
+teammate's and the launch's, tool by tool, whichever withholds more — so a
+launch can tighten it and never loosen it.
+
+The panel is also why `GET /api/agents` stopped being a straight forward.
+Fountain renders an agent whole, `mcp_servers` included, and an MCP server
+configured the way this README configures one carries `Authorization: Bearer
+ftn_…` in its headers — so a member's browser held the owner's key from the
+moment they opened the project. Nothing read the field, so nothing showed it;
+a panel that lists what is plugged in is what made an already-crossed line
+visible. The proxy now replaces the values of every server's `env` and
+`headers` on the way out, for the owner as much as for a member, and keeps the
+names. The names are the question — what is this teammate plugged into — and
+the values are the answer to nobody's.
+
 **What happened while you were away.** A work item opens on a digest of
 itself: turns finished, turns that failed, computers that went away, and —
 loudest — how many agents are blocked on a permission request, each one a
@@ -282,8 +321,10 @@ browser ──(session cookie)──▶ workbench server ──(owner's Fountain
   with `workbench:<project>/`: it filters the list, checks every
   per-conversation call, forces the project's environment and vault on a new
   conversation, cuts full-text search down to hits in the project's
-  conversations, and lets a member see only the project's environment and
-  vault (the owner sees all). The owner's user-wide event stream
+  conversations, lets a member see only the project's environment and
+  vault (the owner sees all), and withholds the values of every agent's MCP
+  `env` and `headers` — the two fields that exist to hold credentials — while
+  keeping their names. The owner's user-wide event stream
   (`GET /api/events/stream`) is proxied the same way, filtered per project,
   with `event: workbench` records mixed in when another member changes an
   item or a setting — so every open screen follows along.
@@ -394,12 +435,13 @@ src/
   lib/search.ts      what ⌘K and ⌘F search: names locally, messages through the proxy
   lib/turns.ts       fold a log feed into turns for the chat view
   lib/digest.ts      a work item's stage stream → what happened since you last looked
+  lib/details.ts     what a conversation runs with: its computer, its skills and MCP servers, the policy in force
   lib/blocks.ts      arrange server-parsed blocks (from fountain-conversations)
   lib/markdown.tsx   allow-list markdown → React nodes, no innerHTML
   lib/draft.ts       a field's draft and the debounced save behind it
   lib/theme.ts       the palette list; the blocks themselves are in styles.css
   pages/             Projects, Project (items, people), WorkItem, Team, Cost
-  components/        Thread, ThreadFind (⌘F), ItemDigest, Palette (⌘K), StartDialog, Attachments, EnvVaultFields, Blocks, ItemStatus, SignIn, Layout
+  components/        Thread, ThreadFind (⌘F), DetailsPanel, ItemDigest, Palette (⌘K), StartDialog, Attachments, EnvVaultFields, Blocks, ItemStatus, SignIn, Layout
 ```
 
 ## Licence

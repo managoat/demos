@@ -191,7 +191,24 @@ const fountain = Bun.serve({
         },
       });
     }
-    if (path === "/api/agents") return Response.json({ data: [{ id: "a1", name: "Coder" }] });
+    if (path === "/api/agents")
+      return Response.json({
+        data: [
+          {
+            id: "a1",
+            name: "Coder",
+            // Fountain renders `mcp_servers` whole, credentials and all — the
+            // README's own worked example puts a Fountain key in `headers`.
+            mcp_servers: {
+              gh: { command: "gh-mcp", args: ["--repo", "acme/thing"], env: { GITHUB_TOKEN: "ghp_supersecret", GH_HOST: "github.com" } },
+              workbench: { type: "http", url: "https://workbench.inevitable.fyi/mcp", headers: { Authorization: "Bearer ftn_supersecret" } },
+              acp: { command: "x", env: [{ name: "TOKEN", value: "ftn_supersecret" }] },
+              odd: "not a map",
+            },
+            skills: [{ name: "house-style", content: "# House style" }],
+          },
+        ],
+      });
     if (path === "/api/environments") return Response.json({ data: [{ id: "e1", name: "one" }, { id: "e2", name: "two" }] });
     if (path === "/api/vaults") return Response.json({ data: [{ id: "v1", name: "v-one" }, { id: "v2", name: "v-two" }] });
     if (path === "/api/events/stream") {
@@ -570,6 +587,32 @@ describe("the project-scoped proxy", () => {
     const res = await call("bob", "POST", `/f/${projectId}/api/conversations/c1/terminate`);
     expect(res.status).toBe(204);
     expect(await res.text()).toBe("");
+  });
+
+  test("an agent's MCP credentials are withheld, and the rest of its configuration is not", async () => {
+    // The details panel lists what a teammate is plugged into, off this
+    // route. `env` and `headers` are where a credential lives by design, so
+    // the values go and the names stay — the owner's key must not reach a
+    // member's browser just because a panel wanted the server's name.
+    for (const who of ["alice", "bob"]) {
+      const res = await call(who, "GET", `/f/${projectId}/api/agents`);
+      expect(res.status).toBe(200);
+      const text = await res.text();
+      expect(text).not.toContain("supersecret");
+      const [a] = (JSON.parse(text) as { data: { mcp_servers: Record<string, unknown>; skills: unknown[] }[] }).data;
+      const mcp = a!.mcp_servers;
+      const entry = (name: string) => mcp[name] as Record<string, unknown>;
+      // Names kept, values gone — in the map shape and in the list shape both.
+      expect(entry("gh").env).toEqual({ GITHUB_TOKEN: "[withheld by the workbench]", GH_HOST: "[withheld by the workbench]" });
+      expect(entry("workbench").headers).toEqual({ Authorization: "[withheld by the workbench]" });
+      expect(entry("acp").env).toEqual([{ name: "TOKEN", value: "[withheld by the workbench]" }]);
+      // What the panel needs to say what is plugged in survives untouched.
+      expect(entry("gh").command).toBe("gh-mcp");
+      expect(entry("gh").args).toEqual(["--repo", "acme/thing"]);
+      expect(entry("workbench").url).toBe("https://workbench.inevitable.fyi/mcp");
+      expect(mcp.odd).toBe("not a map");
+      expect(a!.skills).toEqual([{ name: "house-style", content: "# House style" }]);
+    }
   });
 
   test("the rest of the API is closed", async () => {
