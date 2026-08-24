@@ -10,6 +10,7 @@ import { describeError } from "../lib/errors";
 import { href, navigate } from "../router";
 import { TwoStep } from "../components/Thread";
 import { AgentAvatar } from "../components/AgentAvatar";
+import { AttachmentStrip, useAttachments } from "../components/Attachments";
 import { formatTime } from "../lib/format";
 
 export function Project() {
@@ -20,13 +21,18 @@ export function Project() {
   const [prompt, setPrompt] = useState("");
   const [showDone, setShowDone] = useState(false);
   const [busy, setBusy] = useState(false);
+  const attachments = useAttachments((message) => toast(message, "error"));
 
   const team = useMemo(() => [...agents.values()].sort((a, b) => a.name.localeCompare(b.name)), [agents]);
   const picked = agentId ? agents.get(agentId) ?? null : null;
 
+  // The images ride on the first prompt — the notes and the words together —
+  // so they need one, and a teammate to send it to.
+  const orphanImages = !!attachments.payload && (!picked || (!prompt.trim() && !notes.trim()));
+
   async function create(e: FormEvent) {
     e.preventDefault();
-    if (!title.trim() || busy) return;
+    if (!title.trim() || busy || orphanImages) return;
     setBusy(true);
     const w = await createItem(title, notes);
     if (!w) {
@@ -41,9 +47,10 @@ export function Project() {
       return;
     }
     try {
-      const conversation = await startConversation({ item: w, agent: picked, prompt, includeNotes: true });
+      const conversation = await startConversation({ item: w, agent: picked, prompt, includeNotes: true, images: attachments.payload });
       setPrompt("");
       setAgentId("");
+      attachments.clear();
       navigate(href.conversation(project.id, conversation.id));
     } catch (err) {
       // The item is made; only the conversation failed. Land on it and say why.
@@ -127,7 +134,7 @@ export function Project() {
         </a>
       </div>
 
-      <form className="card stack new-form" onSubmit={create}>
+      <form className={`card stack new-form${attachments.dragging ? " dropping" : ""}`} onSubmit={create} {...attachments.dropzone}>
         <h2 className="h2">New work item</h2>
         <label>
           Title
@@ -154,12 +161,18 @@ export function Project() {
         </label>
         {picked && (
           <label>
-            First prompt <span className="hint">What {picked.name} should do on it. Leave it empty to just bring their computer up.</span>
-            <textarea rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Start with the repro, then…" />
+            First prompt <span className="hint">What {picked.name} should do on it. Leave it empty to just bring their computer up. Paste or drop a screenshot to send with it.</span>
+            <textarea rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} onPaste={attachments.paste} placeholder="Start with the repro, then…" />
           </label>
         )}
+        <AttachmentStrip items={attachments.items} onRemove={attachments.remove} />
+        {orphanImages && (
+          <div className="error">
+            {picked ? "Write the prompt the images go with — on their own there is no turn to attach them to." : "Pick a teammate for the images to go to."}
+          </div>
+        )}
         <div className="row end">
-          <button type="submit" disabled={!title.trim() || busy}>
+          <button type="submit" disabled={!title.trim() || busy || orphanImages}>
             {busy ? (picked ? "Starting…" : "Creating…") : picked ? `Create & talk to ${picked.name}` : "Create"}
           </button>
         </div>

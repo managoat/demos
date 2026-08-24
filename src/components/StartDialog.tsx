@@ -10,10 +10,11 @@ import { useState, type FormEvent } from "react";
 import { useProject } from "../store";
 import type { Agent } from "../types";
 import { agentFits, type WorkItem } from "../lib/workbench";
-import type { JoinTarget } from "../lib/start";
+import { buildPrompt, type JoinTarget } from "../lib/start";
 import { describeError } from "../lib/errors";
 import { href, navigate } from "../router";
 import { AgentAvatar } from "./AgentAvatar";
+import { AttachmentStrip, useAttachments } from "./Attachments";
 
 export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?: string | null; join?: JoinTarget | null; initialAgentId?: string | null; onClose: () => void }) {
   const { project, items, agents, environments, vaults, startConversation } = useProject();
@@ -29,19 +30,22 @@ export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?
   const [includeNotes, setIncludeNotes] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const attachments = useAttachments(setError);
 
   const agent = agents.get(agentId) ?? null;
+  // Images ride on the first prompt; with nothing said there is no turn to put them on.
+  const orphanImages = !!attachments.payload && !(item && buildPrompt(item, prompt, includeNotes));
   const fit = agent ? agentFits(agent, project) : { ok: false as const, reason: "no agent" };
   const envName = project.environmentId ? environments.get(project.environmentId)?.name ?? "?" : agent?.environment_id ? `${environments.get(agent.environment_id)?.name ?? "?"} (agent's own)` : "none";
   const vaultName = project.vaultId ? vaults.get(project.vaultId)?.name ?? "?" : "none";
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!agent || !item || busy || !fit.ok) return;
+    if (!agent || !item || busy || !fit.ok || orphanImages) return;
     setBusy(true);
     setError(null);
     try {
-      const conversation = await startConversation({ item, agent, prompt, includeNotes, join });
+      const conversation = await startConversation({ item, agent, prompt, includeNotes, images: attachments.payload, join });
       navigate(href.conversation(project.id, conversation.id));
       onClose();
     } catch (err) {
@@ -62,7 +66,7 @@ export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+      <form className={`modal${attachments.dragging ? " dropping" : ""}`} onClick={(e) => e.stopPropagation()} onSubmit={submit} {...attachments.dropzone}>
         <h2 className="h2">{join ? `New conversation on ${join.label}` : "Start a conversation"}</h2>
         <p className="muted small">
           {join
@@ -126,9 +130,18 @@ export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?
         {agent && !fit.ok && <div className="error">{agent.name} {fit.reason}.</div>}
 
         <label>
-          First prompt
-          <textarea rows={5} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="What should they do? Leave empty to just bring the computer up." autoFocus />
+          First prompt <span className="hint">Paste or drop a screenshot to send it with the words.</span>
+          <textarea
+            rows={5}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onPaste={attachments.paste}
+            placeholder="What should they do? Leave empty to just bring the computer up."
+            autoFocus
+          />
         </label>
+        <AttachmentStrip items={attachments.items} onRemove={attachments.remove} />
+        {orphanImages && <div className="error">Write the prompt the images go with — on their own there is no turn to attach them to.</div>}
         {item?.notes.trim() && (
           <label className="check">
             <input type="checkbox" checked={includeNotes} onChange={(e) => setIncludeNotes(e.target.checked)} /> Prepend the work item's notes
@@ -140,7 +153,7 @@ export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?
           <button type="button" className="secondary" onClick={onClose} disabled={busy}>
             Cancel
           </button>
-          <button type="submit" disabled={busy || !agent || !item || !fit.ok}>
+          <button type="submit" disabled={busy || !agent || !item || !fit.ok || orphanImages}>
             {busy ? "Starting…" : "Start"}
           </button>
         </div>

@@ -14,11 +14,13 @@ import { describeError } from "../lib/errors";
 import { BlockView } from "./Blocks";
 import { StatusPill } from "./StatusPill";
 import { AgentAvatar } from "./AgentAvatar";
+import { AttachmentStrip, useAttachments } from "./Attachments";
+import { turnImageUrl } from "../lib/api";
 
 const HISTORY_STREAMS: Stream[] = ["acp", "stdout", "stage"];
 
 export function Thread({ conversationId, onClose, context }: { conversationId: string; onClose?: () => void; context?: ReactNode }) {
-  const { fountain, conversations, agents, sandboxes, subscribe, toast, refresh } = useProject();
+  const { project, fountain, conversations, agents, sandboxes, subscribe, toast, refresh } = useProject();
   const listed = conversations.find((c) => c.id === conversationId) ?? null;
   const [fetched, setFetched] = useState<Conversation | null>(null);
   // The list has the live status; the show has the sandbox (the list never embeds it).
@@ -30,6 +32,7 @@ export function Thread({ conversationId, onClose, context }: { conversationId: s
   const [showStdout, setShowStdout] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const attachments = useAttachments(useCallback((message: string) => toast(message, "error"), [toast]));
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
 
@@ -119,11 +122,14 @@ export function Thread({ conversationId, onClose, context }: { conversationId: s
   async function send(e?: FormEvent) {
     e?.preventDefault();
     const prompt = draft.trim();
-    if (!prompt || sending) return;
+    const images = attachments.payload;
+    // A screenshot on its own is a prompt: "here is what it looks like".
+    if ((!prompt && !images) || sending) return;
     setSending(true);
     try {
-      await fountain.request("POST", `/api/conversations/${conversationId}/prompts`, { body: { prompt } });
+      await fountain.request("POST", `/api/conversations/${conversationId}/prompts`, { body: images ? { prompt, images } : { prompt } });
       setDraft("");
+      attachments.clear();
       stickToBottom.current = true;
       void refresh();
     } catch (err) {
@@ -144,8 +150,10 @@ export function Thread({ conversationId, onClose, context }: { conversationId: s
   const lastTurn = folded.turns[folded.turns.length - 1];
   const waiting = running && (!lastTurn || lastTurn.turn.status === "running" || lastTurn.turn.status === "pending");
 
+  const retired = conversation?.status === "terminated";
+
   return (
-    <section className="thread">
+    <section className={`thread${attachments.dragging && !retired ? " dropping" : ""}`} {...(retired ? {} : attachments.dropzone)}>
       <header className="thread-head">
         {onClose && (
           <button className="icon" onClick={onClose} title="Close">
@@ -193,6 +201,15 @@ export function Thread({ conversationId, onClose, context }: { conversationId: s
                 {turn.status === "failed" ? " ✕ failed" : turn.status === "interrupted" ? " ⏹ interrupted" : ""}
               </span>
             </div>
+            {(turn.image_count ?? 0) > 0 && (
+              <div className="turn-images">
+                {Array.from({ length: turn.image_count ?? 0 }, (_, i) => (
+                  <a key={i} href={turnImageUrl(project.id, conversationId, turn.id, i)} target="_blank" rel="noreferrer">
+                    <img src={turnImageUrl(project.id, conversationId, turn.id, i)} alt={`attachment ${i + 1}`} loading="lazy" />
+                  </a>
+                ))}
+              </div>
+            )}
             <div className="term-out">
               {arrange(evs, visible).map((b, i) => (
                 <BlockView key={`${turn.id}-${i}`} block={b} />
@@ -212,19 +229,24 @@ export function Thread({ conversationId, onClose, context }: { conversationId: s
         <span className="ps1" aria-hidden="true">
           ❯
         </span>
-        <textarea
-          rows={2}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={onKey}
-          placeholder={conversation?.status === "terminated" ? "retired" : `${who} — Enter to send, Shift+Enter for a newline`}
-          disabled={conversation?.status === "terminated"}
-          spellCheck={false}
-        />
-        <button className="send" type="submit" disabled={sending || !draft.trim() || conversation?.status === "terminated"} title="Send (Enter)">
+        <div className="composer-main">
+          <AttachmentStrip items={attachments.items} onRemove={attachments.remove} />
+          <textarea
+            rows={2}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={onKey}
+            onPaste={attachments.paste}
+            placeholder={retired ? "retired" : `${who} — Enter to send, Shift+Enter for a newline, paste or drop an image`}
+            disabled={retired}
+            spellCheck={false}
+          />
+        </div>
+        <button className="send" type="submit" disabled={sending || (!draft.trim() && !attachments.payload) || retired} title="Send (Enter)">
           ⏎
         </button>
       </form>
+      {attachments.dragging && !retired && <div className="drop-hint">Drop to attach</div>}
     </section>
   );
 }

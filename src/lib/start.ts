@@ -9,6 +9,7 @@
  * the body here, and the project's store sends it (`startConversation`).
  */
 import { channelFor, conversationTitle } from "../../shared/channel";
+import type { ImageInput } from "../../shared/images";
 import type { ItemDto as WorkItem } from "./api";
 
 /** A computer to start on instead of a new one (ADR 0023): the same teammate's, on the same item. */
@@ -26,6 +27,8 @@ export interface StartInput {
   prompt: string;
   /** Prepend the item's title and notes, so the teammate starts with its context. */
   includeNotes: boolean;
+  /** Screenshots to attach to that first prompt. */
+  images?: ImageInput[];
   join?: JoinTarget | null;
 }
 
@@ -39,6 +42,10 @@ export function startBody(projectId: string, input: StartInput): Record<string, 
   };
   const prompt = buildPrompt(input.item, input.prompt, input.includeNotes);
   if (prompt) body.prompt = prompt;
+  // Images ride on the first prompt, so they need one: with nothing said,
+  // the conversation only brings the computer up and there is no turn to
+  // attach them to.
+  if (prompt && input.images?.length) body.images = input.images;
   if (input.join) body.sandbox_id = input.join.sandboxId;
   return body;
 }

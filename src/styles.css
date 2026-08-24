@@ -429,6 +429,13 @@ details.init summary { color: var(--text-2); }
 .thumb img { height: 48px; border-radius: 6px; display: block; }
 .thumb-x { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%; padding: 0; font-size: 12px; line-height: 1; background: var(--text); color: var(--bg-0); justify-content: center; }
 
+/* a screenshot on its way in: the region taking the drop, and what it says */
+.dropping { outline: 2px dashed var(--brand); outline-offset: -4px; }
+.drop-hint {
+  position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%); z-index: 5; pointer-events: none;
+  padding: 6px 12px; border-radius: 999px; font-size: 12px; background: var(--brand); color: var(--on-brand);
+}
+
 /* logs */
 .log-body { flex: 1; min-height: 0; overflow: auto; padding: 8px 12px; }
 .log-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -523,7 +530,7 @@ details.init summary { color: var(--text-2); }
 .conv-list.flat li.current { background: color-mix(in srgb, var(--brand) 12%, transparent); }
 .conv-list.flat .conv-row { padding: 8px 12px; }
 
-.thread { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.thread { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .thread-head { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--bg-1); flex-wrap: wrap; }
 .thread-title { flex: 1; min-width: 160px; }
 .thread-title .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60ch; }

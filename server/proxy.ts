@@ -10,8 +10,10 @@
  *   POST /api/conversations                 start one; channel must name an item of this project and is
  *                                           re-minted per conversation; environment and vault are the project's;
  *                                           a sandbox_id must be a computer of that same item, same teammate
- *   *    /api/conversations/:id/…           get, turns, events, prompts, read, interrupt, terminate,
- *                                           requests, tree, stream — after checking :id is in the project
+ *   *    /api/conversations/:id/…           get, turns, events, prompts (images checked against
+ *                                           Fountain's rules), read, interrupt, terminate, requests,
+ *                                           tree, stream, a turn's image bytes — after checking :id
+ *                                           is in the project
  *   GET  /api/sandboxes/:id                 one computer, if a conversation of the project is on it
  *   GET  /api/agents, /api/agents/:id/avatar  the owner's agents (the team)
  *   GET  /api/environments, /api/vaults     the owner sees all; a member sees the project's
@@ -22,6 +24,7 @@
  * a `channel_id` does not change.
  */
 import { channelPrefix, newConversationChannel, parseChannel } from "../shared/channel";
+import { imagesProblem } from "../shared/images";
 import { authenticate, ownerClient, projectAccess, type AppContext } from "./context";
 import type { ProjectRow, Role } from "./db";
 import type { ConversationSummary, FountainClient } from "./fountain";
@@ -80,6 +83,13 @@ export async function handleProxy(ctx: AppContext, req: Request, projectId: stri
     const sub = conv[2] ?? "";
     if (!conversationRouteAllowed(method, sub, role)) throw new HttpError(404, "not_found");
     if (!(await belongs(client, projectId, id))) throw new HttpError(404, "not_found", "No such conversation in this project.");
+    // A prompt's images are judged here, on the way in: the request goes on
+    // over the owner's key, so what the proxy admits is the workbench's to say.
+    if (method === "POST" && sub === "/prompts") {
+      const body = await readJson(req);
+      checkImages(body.images);
+      return forward(client, req, path, url.search, JSON.stringify(body));
+    }
     return forward(client, req, path, url.search);
   }
 
@@ -104,9 +114,17 @@ export async function handleProxy(ctx: AppContext, req: Request, projectId: stri
   throw new HttpError(404, "not_found");
 }
 
+/** The images on a prompt must be ones Fountain would take, said here rather than as a 422 from there. */
+function checkImages(images: unknown): void {
+  const problem = imagesProblem(images);
+  if (problem) throw new HttpError(422, "bad_images", problem);
+}
+
 function conversationRouteAllowed(method: string, sub: string, role: Role): boolean {
   if (sub === "" || sub === "/") return method === "GET" || (method === "DELETE" && role === "owner");
-  if (method === "GET") return ["/turns", "/events", "/tree", "/stream"].includes(sub);
+  // `/turns/:turn/images/:position` is the bytes of an image sent on a prompt,
+  // which is how the transcript shows one back.
+  if (method === "GET") return ["/turns", "/events", "/tree", "/stream"].includes(sub) || /^\/turns\/[^/]+\/images\/\d+$/.test(sub);
   if (method === "POST") return ["/prompts", "/read", "/interrupt", "/terminate"].includes(sub) || /^\/requests\/[^/]+$/.test(sub);
   return false;
 }
@@ -146,7 +164,10 @@ async function startConversation(ctx: AppContext, { project, client }: Scope, re
   };
   if (typeof body.title === "string") out.title = body.title;
   if (typeof body.prompt === "string" && body.prompt) out.prompt = body.prompt;
-  if (Array.isArray(body.images)) out.images = body.images;
+  if (body.images != null) {
+    checkImages(body.images);
+    if (Array.isArray(body.images) && body.images.length) out.images = body.images;
+  }
   if (project.environment_id) out.environment_id = project.environment_id;
   if (project.vault_id) out.vault_id = project.vault_id;
   if (typeof body.sandbox_id === "string" && body.sandbox_id) {
@@ -205,8 +226,11 @@ async function showSandbox({ project, client }: Scope, id: string): Promise<Resp
  * stream should not hold a Fountain connection); a mutation does not — a
  * terminate that Fountain is half-way through must finish whether or not
  * the tab that asked for it is still waiting.
+ *
+ * `sendBody` replaces the request's own, for a route that had to read it to
+ * check it (a prompt's images) and so cannot hand the stream on.
  */
-async function forward(client: FountainClient, req: Request, path: string, search: string): Promise<Response> {
+async function forward(client: FountainClient, req: Request, path: string, search: string, sendBody?: string): Promise<Response> {
   const headers: Record<string, string> = {};
   for (const h of ["accept", "content-type", "last-event-id"]) {
     const v = req.headers.get(h);
@@ -214,7 +238,8 @@ async function forward(client: FountainClient, req: Request, path: string, searc
   }
   const method = req.method.toUpperCase();
   const read = method === "GET" || method === "HEAD";
-  const body = read ? undefined : await req.arrayBuffer();
+  if (sendBody !== undefined) headers["content-type"] = "application/json";
+  const body = sendBody !== undefined ? sendBody : read ? undefined : await req.arrayBuffer();
   const res = await client.fetch(`${path}${search}`, { method, headers, body, signal: read ? req.signal : undefined });
   const out = new Headers();
   for (const h of ["content-type", "cache-control", "content-disposition"]) {

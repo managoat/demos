@@ -31,6 +31,8 @@ const KEYS: Record<string, { id: string; email: string }> = {
 
 const convs: Record<string, FakeConv[]> = { "key-alice": [], "key-bob": [], "key-carol": [], "key-dave": [] };
 const posted: { key: string; body: Record<string, unknown> }[] = [];
+/** Prompt bodies this fake was sent, in order. */
+const prompted: { prompt?: string; images?: unknown[] }[] = [];
 /** Conversations this fake was asked to terminate; one whose id starts with `stuck` refuses. */
 const terminated: string[] = [];
 let streamEvents: { conversation_id: string; id: number }[] = [];
@@ -72,8 +74,13 @@ const fountain = Bun.serve({
       const c = convs[key]!.find((x) => x.id === one[1]);
       if (!c) return Response.json({ error: "not_found" }, { status: 404 });
       if (!one[2]) return Response.json({ data: c });
-      if (one[2] === "/turns") return Response.json({ data: [{ id: "t1", prompt: "hi" }] });
-      if (one[2] === "/prompts") return Response.json({ data: { ok: true, prompt: (await req.json()).prompt } }, { status: 202 });
+      if (one[2] === "/turns") return Response.json({ data: [{ id: "t1", prompt: "hi", image_count: 1 }] });
+      if (one[2] === "/prompts") {
+        const body = (await req.json()) as { prompt?: string; images?: unknown[] };
+        prompted.push(body);
+        return Response.json({ data: { ok: true, prompt: body.prompt, images: body.images?.length ?? 0 } }, { status: 202 });
+      }
+      if (/^\/turns\/[^/]+\/images\/\d+$/.test(one[2])) return new Response("PNG-BYTES", { headers: { "content-type": "image/png" } });
       if (one[2] === "/terminate") {
         if (c.id.startsWith("stuck")) return Response.json({ error: "boom" }, { status: 500 });
         terminated.push(c.id);
@@ -343,6 +350,63 @@ describe("the project-scoped proxy", () => {
     const res = await call("bob", "POST", `/f/${projectId}/api/conversations/c1/prompts`, { prompt: "more" });
     expect(res.status).toBe(202);
     expect((await res.json()).data.prompt).toBe("more");
+  });
+
+  test("a prompt carries its images through, and they must be ones Fountain would store", async () => {
+    const png = { data: Buffer.alloc(64, 1).toString("base64"), media_type: "image/png" };
+    const res = await call("bob", "POST", `/f/${projectId}/api/conversations/c1/prompts`, { prompt: "here is what it looks like", images: [png] });
+    expect(res.status).toBe(202);
+    expect((await res.json()).data.images).toBe(1);
+    const sent = prompted[prompted.length - 1]!;
+    expect(sent.prompt).toBe("here is what it looks like");
+    expect(sent.images).toEqual([png]);
+
+    const before = prompted.length;
+    const bad = await call("bob", "POST", `/f/${projectId}/api/conversations/c1/prompts`, { prompt: "x", images: [{ ...png, media_type: "image/bmp" }] });
+    expect(bad.status).toBe(422);
+    expect((await bad.json()).error).toBe("bad_images");
+    const huge = await call("bob", "POST", `/f/${projectId}/api/conversations/c1/prompts`, {
+      prompt: "x",
+      images: [{ data: "A".repeat(4 * Math.ceil((10 * 1024 * 1024 + 1) / 3)), media_type: "image/png" }],
+    });
+    expect(huge.status).toBe(422);
+    const mangled = await call("bob", "POST", `/f/${projectId}/api/conversations/c1/prompts`, { prompt: "x", images: [{ data: "data:image/png;base64,aGk=", media_type: "image/png" }] });
+    expect(mangled.status).toBe(422);
+    // None of the three reached Fountain on the owner's key.
+    expect(prompted).toHaveLength(before);
+  });
+
+  test("starting a conversation takes images too, under the same rules", async () => {
+    const png = { data: Buffer.alloc(32, 2).toString("base64"), media_type: "image/png" };
+    const res = await call("bob", "POST", `/f/${projectId}/api/conversations`, {
+      agent_id: "a1",
+      channel_id: `workbench:${projectId}/${itemId}`,
+      prompt: "fix this layout",
+      images: [png],
+    });
+    expect(res.status).toBe(201);
+    expect(posted[posted.length - 1]!.body.images).toEqual([png]);
+
+    const before = posted.length;
+    const bad = await call("bob", "POST", `/f/${projectId}/api/conversations`, {
+      agent_id: "a1",
+      channel_id: `workbench:${projectId}/${itemId}`,
+      prompt: "fix this layout",
+      images: [{ data: "not base64", media_type: "image/png" }],
+    });
+    expect(bad.status).toBe(422);
+    expect((await bad.json()).error).toBe("bad_images");
+    expect(posted).toHaveLength(before);
+  });
+
+  test("a turn's image bytes come back through the project, and only for the project's conversations", async () => {
+    const ok = await call("bob", "GET", `/f/${projectId}/api/conversations/c1/turns/t1/images/0`);
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("content-type")).toBe("image/png");
+    expect(await ok.text()).toBe("PNG-BYTES");
+    // Not one of this project's conversations, and not a route we invented.
+    expect((await call("bob", "GET", `/f/${projectId}/api/conversations/c9/turns/t1/images/0`)).status).toBe(404);
+    expect((await call("bob", "GET", `/f/${projectId}/api/conversations/c1/turns/t1/images/all`)).status).toBe(404);
   });
 
   test("a computer is the project's if a conversation of the project is on it", async () => {

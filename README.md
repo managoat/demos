@@ -17,6 +17,15 @@ the thread. On an item that already exists, the whole team is a row of chips
 under its teammates: click one and write the prompt. ("+" on a chip only
 earmarks them, for an item you are staffing before there is anything to say.)
 
+**A screenshot is a prompt.** Paste one into a composer or drop it on the
+thread and it goes with the words — "here is what it looks like, fix it"
+beats describing a layout in prose. Thumbnails sit above what you are typing
+until you send, each with an × ; the transcript shows the images back on the
+turn they went with. The rules are Fountain's own (`shared/images.ts`): PNG,
+JPEG, GIF or WebP, 10 MB an image, and a file that breaks them is refused in
+the composer, by name, rather than as a failed POST. The start-a-conversation
+forms take them too, on that first prompt.
+
 **Sharing.** A project has an owner and members. Everyone signs in with
 Fountain; the owner shares a project by email, and it appears for that person
 the next time they sign in. Members see the same work items and the same
@@ -197,6 +206,7 @@ server/
   crypto.ts          keys at rest, session token hashing
 shared/
   channel.ts         workbench:<project>/<item> — read and written by both sides
+  images.ts          an image on a prompt: the four media types, the 10 MB ceiling
 src/
   App.tsx            sign-in gate, OAuth callback, route switch
   store.tsx          WorkbenchProvider (me, projects) and ProjectProvider (one project's Fountain view + stream)
@@ -204,12 +214,13 @@ src/
   lib/api.ts         the server's API
   lib/workbench.ts   the model; the legacy-state import
   lib/start.ts       starting a conversation on an item — the request that also assigns the teammate
+  lib/images.ts      a pasted or dropped file, read into the payload a prompt takes
   lib/turns.ts       fold a log feed into turns for the chat view
   lib/blocks.ts      arrange server-parsed blocks (from fountain-conversations)
   lib/markdown.tsx   allow-list markdown → React nodes, no innerHTML
   lib/theme.ts       the palette list; the blocks themselves are in styles.css
   pages/             Projects, Project (items, people), WorkItem, Team
-  components/        Thread, StartDialog, EnvVaultFields, Blocks, SignIn, Layout
+  components/        Thread, StartDialog, Attachments, EnvVaultFields, Blocks, SignIn, Layout
 ```
 
 ## Licence

@@ -38,6 +38,17 @@ describe("startBody", () => {
   test("an empty prompt is left out, not sent empty", () => {
     expect(startBody("p1", { item: { ...item, notes: "" }, agent, prompt: "", includeNotes: true })).not.toHaveProperty("prompt");
   });
+  test("images ride on the first prompt", () => {
+    const images = [{ data: "aGk=", media_type: "image/png" as const }];
+    expect(startBody("p1", { item, agent, prompt: "look at this", includeNotes: false, images }).images).toEqual(images);
+    // The item's notes are a prompt too, so a screenshot goes with them.
+    expect(startBody("p1", { item, agent, prompt: "", includeNotes: true, images }).images).toEqual(images);
+  });
+  test("with nothing said there is no turn to attach them to, so they are left out", () => {
+    const body = startBody("p1", { item: { ...item, notes: "" }, agent, prompt: "", includeNotes: true, images: [{ data: "aGk=", media_type: "image/png" }] });
+    expect(body).not.toHaveProperty("images");
+    expect(body).not.toHaveProperty("prompt");
+  });
   test("joining a computer names it; the server checks it is the same teammate's, on this item", () => {
     const body = startBody("p1", { item, agent, prompt: "go", includeNotes: false, join: { sandboxId: "sb1", label: "sprite-sb1", agentId: "a1" } });
     expect(body.sandbox_id).toBe("sb1");

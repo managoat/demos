@@ -109,3 +109,12 @@ export const api = {
 export function projectFountainBase(projectId: string): string {
   return `${window.location.origin}/f/${projectId}`;
 }
+
+/**
+ * One image attached to a turn, by its position in the turn's `image_count`.
+ * An `<img src>` of it: same origin, so the session cookie goes with it and
+ * the proxy fetches the bytes on the owner's key.
+ */
+export function turnImageUrl(projectId: string, conversationId: string, turnId: string, position: number): string {
+  return `${projectFountainBase(projectId)}/api/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/images/${position}`;
+}
