@@ -164,3 +164,32 @@ export function hueOf(id: string): number {
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
   return h % 360;
 }
+
+// ── the explorer's width, dragged and remembered ──────────────────────
+
+export const SIDEBAR_MIN = 200;
+export const SIDEBAR_MAX = 560;
+export const SIDEBAR_DEFAULT = 272;
+const WIDTH_KEY = "fountain-workbench.sidebarWidth";
+
+export function clampWidth(px: number): number {
+  if (!Number.isFinite(px)) return SIDEBAR_DEFAULT;
+  return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(px)));
+}
+
+export function loadSidebarWidth(): number {
+  try {
+    const raw = localStorage.getItem(WIDTH_KEY);
+    return raw ? clampWidth(Number(raw)) : SIDEBAR_DEFAULT;
+  } catch {
+    return SIDEBAR_DEFAULT;
+  }
+}
+
+export function saveSidebarWidth(px: number): void {
+  try {
+    localStorage.setItem(WIDTH_KEY, String(clampWidth(px)));
+  } catch {
+    // no storage: the width lives for the page
+  }
+}

@@ -6,10 +6,10 @@
  * same teammate there, on that item. Items with a live computer first,
  * done items folded away.
  */
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useProject } from "../store";
 import { href, useRoute } from "../router";
-import { attachable, computerLabel, groupByItem, hueOf, relativeTime, type Computer, type ItemGroup } from "../lib/sidebar";
+import { attachable, clampWidth, computerLabel, groupByItem, hueOf, loadSidebarWidth, relativeTime, saveSidebarWidth, type Computer, type ItemGroup } from "../lib/sidebar";
 import type { WorkItem } from "../lib/workbench";
 import { AgentAvatar, initials } from "./AgentAvatar";
 import { StartDialog, type JoinTarget } from "./StartDialog";
@@ -22,6 +22,24 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
   const [showDone, setShowDone] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [tick, setTick] = useState(0);
+  const [width, setWidth] = useState(() => loadSidebarWidth());
+  const aside = useRef<HTMLElement>(null);
+
+  // Drag the right edge: these titles are longer than any default width.
+  const startResize = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const left = aside.current?.getBoundingClientRect().left ?? 0;
+    const move = (ev: PointerEvent) => setWidth(clampWidth(ev.clientX - left));
+    const up = (ev: PointerEvent) => {
+      saveSidebarWidth(clampWidth(ev.clientX - left));
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.classList.remove("resizing-col");
+    };
+    document.body.classList.add("resizing-col");
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }, []);
 
   // "3m ago" goes stale on its own; re-render once a minute so it doesn't.
   useEffect(() => {
@@ -62,24 +80,21 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
         open={!collapsed.has(comp.key)}
         onToggle={(e) => toggle(comp.key, (e.target as HTMLDetailsElement).open)}
       >
-        <summary className={`computer-head ${comp.live ? "live" : "gone"}`}>
+        <summary
+          className={`computer-head ${comp.live ? "live" : "gone"}`}
+          title={`${agent?.name ?? newest?.runtime ?? "agent"} on ${computerLabel(comp)}${comp.sandbox ? ` (${comp.sandbox.status})` : ""} — ${comp.conversations.length} conversation${comp.conversations.length === 1 ? "" : "s"}`}
+        >
           {agent ? (
-            <AgentAvatar agent={agent} size={22} />
+            <AgentAvatar agent={agent} size={18} />
           ) : (
-            <span className="avatar" style={{ width: 22, height: 22, fontSize: 9 }}>
+            <span className="avatar" style={{ width: 18, height: 18, fontSize: 8 }}>
               {initials(newest?.runtime ?? "?") || "?"}
             </span>
           )}
-          <span className="min0 grow">
-            <span className="computer-name ellipsis">
-              {comp.busy && <span className="live-dot" />}
-              {agent?.name ?? newest?.runtime ?? "agent"}
-            </span>
-            <span className="muted small ellipsis computer-sub">
-              <span className="swatch" /> {computerLabel(comp)}
-              {comp.sandbox ? ` · ${comp.sandbox.status}` : comp.live ? " · up" : " · gone"}
-              {comp.busy ? " · working" : ""}
-            </span>
+          <span className="computer-name ellipsis">{agent?.name ?? newest?.runtime ?? "agent"}</span>
+          <span className="computer-state">
+            {comp.busy ? <span className="live-dot" /> : null}
+            {comp.sandbox?.status ?? (comp.live ? "up" : "gone")}
           </span>
           {canJoin && (
             <button
@@ -128,7 +143,7 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
   );
 
   return (
-    <aside className={`sidebar ${open ? "open" : ""}`}>
+    <aside className={`sidebar ${open ? "open" : ""}`} ref={aside} style={{ width }}>
       <div className="sidebar-top explorer-head">
         <span className="explorer-title">explorer</span>
         <span className="muted small">
@@ -162,6 +177,7 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
         )}
       </div>
       {dialog && <StartDialog itemId={dialog.itemId} join={dialog.join} initialAgentId={dialog.agentId} onClose={() => setDialog(null)} />}
+      <div className="sidebar-resize" onPointerDown={startResize} role="separator" aria-orientation="vertical" aria-label="Resize the explorer" />
     </aside>
   );
 }
@@ -170,18 +186,21 @@ function ConvLink({ c, current, onNavigate }: { c: Conversation; current: boolea
   const { project } = useProject();
   const title = c.title ?? (c.first_prompt ? c.first_prompt.replace(/\s+/g, " ").slice(0, 60) : null);
   return (
-    <a href={href.conversation(project.id, c.id)} className={`conv-link ${current ? "current" : ""} ${c.unread ? "unread" : ""}`} onClick={onNavigate} title={c.first_prompt ?? undefined}>
-      <div className="conv-link-title">{title ?? <em className="muted">(no prompt yet)</em>}</div>
-      <div className="conv-link-sub">
-        {c.unread && <span className="unread-dot" />}
-        <span className="muted ellipsis">{relativeTime(c.last_active_at ?? c.updated_at ?? c.inserted_at)}</span>
-        {c.status === "running" || c.status === "pending" ? <span className="count running">{c.status}</span> : c.status === "terminated" || c.status === "failed" ? <span className="count">{c.status}</span> : null}
-        {(c.turn_count ?? 0) > 0 && (
-          <span className="count" title={`${c.turn_count} turns`}>
-            {c.turn_count}
-          </span>
-        )}
-      </div>
+    <a
+      href={href.conversation(project.id, c.id)}
+      className={`conv-link ${current ? "current" : ""} ${c.unread ? "unread" : ""} ${c.status === "terminated" ? "retired" : ""}`}
+      onClick={onNavigate}
+      title={`${title ?? "(no prompt yet)"}\n${c.turn_count ?? 0} turn${c.turn_count === 1 ? "" : "s"} · ${c.status}`}
+    >
+      <span className="conv-link-title ellipsis">{title ?? <em className="muted">(no prompt yet)</em>}</span>
+      {c.status === "running" || c.status === "pending" ? (
+        <span className="live-dot" title={c.status} />
+      ) : c.status === "failed" ? (
+        <span className="conv-flag failed" title="failed">
+          ✕
+        </span>
+      ) : null}
+      <span className="conv-link-when">{relativeTime(c.last_active_at ?? c.updated_at ?? c.inserted_at)}</span>
     </a>
   );
 }

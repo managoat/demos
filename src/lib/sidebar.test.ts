@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Conversation, SandboxRecord } from "../types";
-import { attachable, computerLabel, computersOf, groupByItem, hueOf, itemIdOf, relativeTime } from "./sidebar";
+import { attachable, clampWidth, computerLabel, computersOf, groupByItem, hueOf, itemIdOf, relativeTime, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from "./sidebar";
 
 function conv(over: Partial<Conversation>): Conversation {
   return { id: "c", status: "idle", runtime: "claude", inserted_at: "2026-08-24T00:00:00Z", ...over } as Conversation;
@@ -92,4 +92,12 @@ test("hueOf is stable and in range", () => {
     expect(hueOf(id)).toBeGreaterThanOrEqual(0);
     expect(hueOf(id)).toBeLessThan(360);
   }
+});
+
+test("clampWidth keeps the explorer usable", () => {
+  expect(clampWidth(300)).toBe(300);
+  expect(clampWidth(10)).toBe(SIDEBAR_MIN);
+  expect(clampWidth(9000)).toBe(SIDEBAR_MAX);
+  expect(clampWidth(Number.NaN)).toBe(SIDEBAR_DEFAULT);
+  expect(clampWidth(300.6)).toBe(301);
 });

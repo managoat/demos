@@ -492,3 +492,43 @@ button.icon.small-icon:disabled { opacity: 0.4; }
 .app.ide .conv-link.unread .conv-link-title::before { color: var(--brand); }
 .app.ide button.icon.small-icon { width: 20px; height: 20px; font-size: 13px; border-radius: 4px; }
 .app.ide .sidebar-group { font-family: var(--mono); }
+
+/* ── explorer, readable: the computer is a band, everything else is a line ── */
+.app.ide .sidebar { position: relative; }
+.sidebar-resize { position: absolute; top: 0; right: -2px; bottom: 0; width: 5px; cursor: col-resize; z-index: 5; }
+.sidebar-resize:hover, body.resizing-col .sidebar-resize { background: color-mix(in srgb, var(--brand) 45%, transparent); }
+body.resizing-col { cursor: col-resize; user-select: none; }
+
+/* the computer: one dense line, its own colour as a band — the thing you scan for */
+.app.ide .sidebar-item details.computer-card { margin: 0 0 0 10px; border: 0; border-radius: 0; background: transparent; padding: 0; }
+.app.ide .sidebar summary.computer-head {
+  display: flex; align-items: center; gap: 6px;
+  margin: 3px 0 1px; padding: 3px 6px 3px 5px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+}
+.app.ide .sidebar summary.computer-head:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.app.ide .sidebar summary.computer-head.gone { opacity: 1; background: transparent; border-left-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.app.ide .sidebar summary.computer-head.gone .computer-name { color: var(--text-2); font-weight: 500; }
+.app.ide .sidebar summary.computer-head::before { content: "▸"; color: var(--muted); font-size: 9px; width: 7px; flex-shrink: 0; }
+.app.ide .sidebar details[open] > summary.computer-head::before { content: "▾"; }
+.app.ide .computer-name { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: var(--text); letter-spacing: -0.01em; }
+.computer-state { flex-shrink: 0; font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+.app.ide summary.computer-head .icon.small-icon { width: 18px; height: 18px; font-size: 12px; flex-shrink: 0; }
+
+/* conversations: one line each, subordinate, the clock in its own column */
+.app.ide .sidebar .computer-card .conv-link {
+  display: flex; align-items: center; gap: 6px;
+  margin: 0 0 0 13px; padding: 2px 6px 2px 7px;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 0;
+}
+.app.ide .sidebar .computer-card .conv-link:hover { background: var(--bg-2); }
+.app.ide .sidebar .conv-link.current { background: color-mix(in srgb, var(--brand) 15%, transparent); border-left-color: var(--accent); }
+.app.ide .conv-link-title { flex: 1; min-width: 0; font-size: 12px; color: var(--text-2); }
+.app.ide .conv-link.current .conv-link-title { color: var(--text); }
+.app.ide .conv-link.unread .conv-link-title { color: var(--text); font-weight: 600; }
+.app.ide .conv-link.retired .conv-link-title { color: var(--muted); }
+.conv-link-when { flex-shrink: 0; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.conv-flag.failed { flex-shrink: 0; font-size: 10px; color: var(--danger); }
