@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useStore } from "../store";
+import { useProject } from "../store";
 import type { Agent } from "../types";
 
 const cache = new Map<string, string>();
@@ -16,7 +16,7 @@ export function initials(name: string): string {
 
 /** The agent's avatar, fetched with the bearer key (an <img src> cannot send one). */
 export function AgentAvatar({ agent, size = 40 }: { agent: Agent; size?: number }) {
-  const { fountain } = useStore();
+  const { fountain } = useProject();
   const [url, setUrl] = useState<string | null>(cache.get(agent.id) ?? null);
 
   useEffect(() => {

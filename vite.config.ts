@@ -1,29 +1,23 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// The app is static: it talks to whatever Fountain the user points it at
-// (settings screen). In dev the browser calls that origin directly, which
-// needs API_CORS_ORIGINS on the server to include http://localhost:5173.
-//
-// Against a Fountain whose CORS list you do not control (production), set
-// FOUNTAIN_PROXY=https://fountain.example.com and point the app at
-// http://localhost:5173 instead: Vite forwards /api and /oauth there.
+// The browser talks only to the workbench server (server/), same origin: its
+// own API under /api and Fountain-through-a-project under /f. In dev, Vite
+// serves the SPA and forwards both to the server (`bun run server`, :8080).
 //
 // `VITE_BASE` is the path the build is served under; unset means the root,
 // which is where workbench.inevitable.fyi serves it.
-const proxyTarget = process.env.FOUNTAIN_PROXY;
+const server = process.env.WORKBENCH_SERVER ?? "http://localhost:8080";
 
 export default defineConfig({
   base: process.env.VITE_BASE ?? "/",
   plugins: [react()],
   server: {
     port: 5173,
-    proxy: proxyTarget
-      ? {
-          "/api": { target: proxyTarget, changeOrigin: true, secure: true },
-          "/oauth": { target: proxyTarget, changeOrigin: true, secure: true },
-        }
-      : undefined,
+    proxy: {
+      "/api": { target: server, changeOrigin: false },
+      "/f": { target: server, changeOrigin: false },
+    },
   },
   build: { outDir: "dist", sourcemap: true },
 });

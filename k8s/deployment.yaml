@@ -6,7 +6,11 @@ metadata:
   labels:
     app: workbench
 spec:
-  replicas: 2
+  # One replica: the state is a SQLite file on a ReadWriteOnce volume, and
+  # project event fan-out is in-process.
+  replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: workbench
@@ -21,6 +25,23 @@ spec:
           image: ghcr.io/jhgaylor/fountain-workbench:sha-f69f33b914e611a2928832e35f30be7a278e2d08
           ports:
             - containerPort: 8080
+          env:
+            - name: FOUNTAIN_URL
+              value: https://fountain.inevitable.fyi
+            - name: DATA_DIR
+              value: /data
+            - name: STATIC_DIR
+              value: /app/dist
+          envFrom:
+            # WORKBENCH_SECRET, if provided: encrypts the stored Fountain keys.
+            # Without it the server generates one into /data/secret — it works,
+            # but the secret then lives beside the data it protects.
+            - secretRef:
+                name: workbench-secrets
+                optional: true
+          volumeMounts:
+            - name: data
+              mountPath: /data
           readinessProbe:
             httpGet: { path: /healthz, port: 8080 }
             initialDelaySeconds: 2
@@ -32,3 +53,7 @@ spec:
           resources:
             requests: { cpu: 20m, memory: 96Mi }
             limits: { memory: 256Mi }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: workbench-data

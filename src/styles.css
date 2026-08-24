@@ -316,3 +316,5 @@ li.editing { padding: 0; }
   .item-layout.with-thread .item-side { display: none; }
   .crumbs { display: none; }
 }
+.notice { margin-bottom: 16px; }
+.notice p { margin: 0; }

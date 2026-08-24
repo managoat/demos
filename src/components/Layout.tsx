@@ -1,13 +1,14 @@
 import type { ReactNode } from "react";
-import { useStore } from "../store";
+import { useProjectMaybe, useWorkbench } from "../store";
 import { href, useRoute } from "../router";
 
-export function Layout({ email, startupError, onSettings, onSignOut, children }: { email: string | null; startupError?: string | null; onSettings: () => void; onSignOut: () => void; children: ReactNode }) {
-  const { settings, connected, error, state } = useStore();
+export function Layout({ children }: { children: ReactNode }) {
+  const { me, signOut } = useWorkbench();
+  const store = useProjectMaybe();
   const route = useRoute();
-  const host = settings.baseUrl.replace(/^https?:\/\//, "");
-  const project = route.page === "project" || route.page === "item" ? state.projects.find((p) => p.id === route.projectId) : null;
-  const item = route.page === "item" ? state.items.find((w) => w.id === route.itemId) : null;
+  const host = me.fountainUrl.replace(/^https?:\/\//, "");
+  const project = store?.project ?? null;
+  const item = store && route.page === "item" ? store.items.find((w) => w.id === route.itemId) ?? null : null;
 
   return (
     <div className="app">
@@ -37,23 +38,20 @@ export function Layout({ email, startupError, onSettings, onSignOut, children }:
           )}
         </nav>
         <span className="spacer" />
-        <a className={`navlink ${route.page === "team" ? "on" : ""}`} href={href.team()}>
-          Team
-        </a>
-        <span className={`link-dot ${connected ? "" : "off"}`} title={connected ? "Live" : "Reconnecting…"} />
-        <span className="muted small host" title={email ?? undefined}>
-          {email ? `${email} · ` : ""}
-          {host}
+        {project && (
+          <a className={`navlink ${route.page === "team" ? "on" : ""}`} href={href.team(project.id)}>
+            Team
+          </a>
+        )}
+        {store && <span className={`link-dot ${store.connected ? "" : "off"}`} title={store.connected ? "Live" : "Reconnecting…"} />}
+        <span className="muted small host" title={`${me.email} on ${host}`}>
+          {me.email} · {host}
         </span>
-        <button className="secondary small" onClick={onSettings}>
-          Settings
-        </button>
-        <button className="secondary small" onClick={onSignOut}>
+        <button className="secondary small" onClick={signOut}>
           Sign out
         </button>
       </header>
-      {startupError && <div className="banner error">{startupError}</div>}
-      {error && <div className="banner error">{error}</div>}
+      {store?.error && <div className="banner error">{store.error}</div>}
       <main className="main">{children}</main>
     </div>
   );

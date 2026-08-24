@@ -1,40 +1,46 @@
 /**
- * The team is Fountain's agent list. Nothing to define here — a teammate is
- * pulled onto a work item by picking one of these.
+ * The team is the project owner's agent list on Fountain. Nothing to define
+ * here — a teammate is pulled onto a work item by picking one of these.
  */
-import { useStore } from "../store";
-import { parseChannel } from "../lib/workbench";
+import { useProject, useWorkbench } from "../store";
+import { channelPrefix } from "../lib/workbench";
 import { AgentAvatar } from "../components/AgentAvatar";
 import { href } from "../router";
 
 export function Team() {
-  const { state, agents, environments, resourcesLoaded, settings, conversations } = useStore();
+  const { me } = useWorkbench();
+  const { project, items, isOwner, agents, environments, resourcesLoaded, conversations } = useProject();
   const team = [...agents.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const prefix = channelPrefix(project.id);
 
   return (
     <div className="page narrow">
       <div className="page-header">
         <div>
           <h1>Team</h1>
-          <div className="muted small">Your agents on this Fountain. Pull one onto a work item to talk to it there; the project supplies the environment and vault.</div>
+          <div className="muted small">
+            {isOwner ? "Your" : `${project.ownerEmail}'s`} agents on Fountain. Pull one onto a work item to talk to it there; the project supplies the environment and vault.
+          </div>
         </div>
-        <a className="button secondary small" href={`${settings.baseUrl}/agents`} target="_blank" rel="noreferrer">
-          Manage agents ↗
-        </a>
+        {isOwner && (
+          <a className="button secondary small" href={`${me.fountainUrl}/agents`} target="_blank" rel="noreferrer">
+            Manage agents ↗
+          </a>
+        )}
       </div>
 
       {!resourcesLoaded && <p className="muted">Loading agents…</p>}
       {resourcesLoaded && team.length === 0 && (
         <div className="empty card">
           <p className="strong">No agents yet.</p>
-          <p className="muted">Create one in the Fountain console; it shows up here.</p>
+          <p className="muted">{isOwner ? "Create one in the Fountain console; it shows up here." : `${project.ownerEmail} has not created any agents on Fountain yet.`}</p>
         </div>
       )}
 
       <ul className="conv-list">
         {team.map((a) => {
-          const items = state.items.filter((w) => w.agentIds.includes(a.id) && w.status === "open");
-          const live = conversations.filter((c) => c.agent_id === a.id && parseChannel(c.channel_id) && (c.status === "running" || c.status === "pending")).length;
+          const on = items.filter((w) => w.agentIds.includes(a.id) && w.status === "open");
+          const live = conversations.filter((c) => c.agent_id === a.id && c.channel_id?.startsWith(prefix) && (c.status === "running" || c.status === "pending")).length;
           return (
             <li key={a.id}>
               <div className="conv-row">
@@ -49,10 +55,10 @@ export function Team() {
                     {a.environment_id ? ` · own env ${environments.get(a.environment_id)?.name ?? ""}` : ""}
                     {a.description ? ` · ${a.description}` : ""}
                   </div>
-                  {items.length > 0 && (
+                  {on.length > 0 && (
                     <div className="conv-sub muted small">
                       On:{" "}
-                      {items.map((w, i) => (
+                      {on.map((w, i) => (
                         <span key={w.id}>
                           {i > 0 ? ", " : ""}
                           <a href={href.item(w.projectId, w.id)}>{w.title}</a>

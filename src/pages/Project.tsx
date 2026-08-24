@@ -1,50 +1,46 @@
 import { useState, type FormEvent } from "react";
-import { useStore } from "../store";
-import { addItem, channelFor, removeItem, updateItem, updateProject } from "../lib/workbench";
+import { useProject, useWorkbench } from "../store";
+import { channelFor } from "../lib/workbench";
 import { href, navigate } from "../router";
 import { TwoStep } from "../components/Thread";
 import { AgentAvatar } from "../components/AgentAvatar";
 import { formatTime } from "../lib/format";
 import { EnvVaultFields } from "../components/EnvVaultFields";
 
-export function Project({ projectId }: { projectId: string }) {
-  const { state, update, conversations, agents, environments, vaults } = useStore();
-  const project = state.projects.find((p) => p.id === projectId);
+export function Project() {
+  const { me } = useWorkbench();
+  const { project, items, isOwner, conversations, agents, environments, vaults, resourcesLoaded, updateProject, addMember, removeMember, createItem, updateItem, removeItem } = useProject();
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [showDone, setShowDone] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [invite, setInvite] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  if (!project) {
-    return (
-      <div className="page narrow">
-        <div className="empty card">
-          <p className="strong">No such project.</p>
-          <a className="button secondary" href={href.projects()}>
-            Back to projects
-          </a>
-        </div>
-      </div>
-    );
-  }
-
-  function create(e: FormEvent) {
+  async function create(e: FormEvent) {
     e.preventDefault();
-    if (!title.trim() || !project) return;
-    let created = "";
-    update((s) => {
-      const [next, w] = addItem(s, project.id, title, notes);
-      created = w.id;
-      return next;
-    });
+    if (!title.trim() || busy) return;
+    setBusy(true);
+    const w = await createItem(title, notes);
+    setBusy(false);
+    if (!w) return;
     setTitle("");
     setNotes("");
-    if (created) navigate(href.item(project.id, created));
+    navigate(href.item(project.id, w.id));
   }
 
-  const items = state.items.filter((w) => w.projectId === project.id);
+  async function share(e: FormEvent) {
+    e.preventDefault();
+    const email = invite.trim();
+    if (!email) return;
+    await addMember(email);
+    setInvite("");
+  }
+
   const open = items.filter((w) => w.status === "open");
   const done = items.filter((w) => w.status === "done");
+  const envName = project.environmentId ? environments.get(project.environmentId)?.name ?? "?" : "each agent's own";
+  const vaultName = project.vaultId ? vaults.get(project.vaultId)?.name ?? "?" : "none";
 
   const row = (w: (typeof items)[number]) => {
     const convs = conversations.filter((c) => c.channel_id === channelFor(project.id, w.id));
@@ -75,10 +71,10 @@ export function Project({ projectId }: { projectId: string }) {
             <span className="time muted">{formatTime(latest || w.createdAt)}</span>
           </div>
         </a>
-        <button className="secondary small self-center" onClick={() => update((s) => updateItem(s, w.id, { status: w.status === "done" ? "open" : "done" }))}>
+        <button className="secondary small self-center" onClick={() => void updateItem(w.id, { status: w.status === "done" ? "open" : "done" })}>
           {w.status === "done" ? "Reopen" : "Done"}
         </button>
-        <TwoStep label="Delete" onConfirm={() => update((s) => removeItem(s, w.id))} className="danger small self-center" />
+        <TwoStep label="Delete" onConfirm={() => void removeItem(w.id)} className="danger small self-center" />
       </li>
     );
   };
@@ -94,13 +90,16 @@ export function Project({ projectId }: { projectId: string }) {
               setEditing(false);
             }}
           >
-            <input value={project.name} onChange={(e) => update((s) => updateProject(s, project.id, { name: e.target.value }))} />
-            <input value={project.notes} onChange={(e) => update((s) => updateProject(s, project.id, { notes: e.target.value }))} placeholder="Notes" />
+            <input value={project.name} onChange={(e) => void updateProject({ name: e.target.value })} />
+            <input value={project.notes} onChange={(e) => void updateProject({ notes: e.target.value })} placeholder="Notes" />
             <EnvVaultFields
+              environments={environments.values()}
+              vaults={vaults.values()}
+              loaded={resourcesLoaded}
               environmentId={project.environmentId ?? ""}
               vaultId={project.vaultId ?? ""}
-              onEnvironment={(id) => update((s) => updateProject(s, project.id, { environmentId: id || null }))}
-              onVault={(id) => update((s) => updateProject(s, project.id, { vaultId: id || null }))}
+              onEnvironment={(id) => void updateProject({ environmentId: id || null })}
+              onVault={(id) => void updateProject({ vaultId: id || null })}
             />
             <p className="muted small">Changing these affects conversations started from now on; running ones keep their computer.</p>
             <div className="row end">
@@ -114,13 +113,16 @@ export function Project({ projectId }: { projectId: string }) {
             <div>
               <h1>{project.name}</h1>
               <div className="muted small">
-                env {project.environmentId ? environments.get(project.environmentId)?.name ?? "?" : "each agent's own"} · vault {project.vaultId ? vaults.get(project.vaultId)?.name ?? "?" : "none"}
+                env {envName} · vault {vaultName}
+                {isOwner ? "" : ` · ${project.ownerEmail}'s project`}
                 {project.notes ? ` · ${project.notes}` : ""}
               </div>
             </div>
-            <button className="secondary small" onClick={() => setEditing(true)}>
-              Edit
-            </button>
+            {isOwner && (
+              <button className="secondary small" onClick={() => setEditing(true)}>
+                Edit
+              </button>
+            )}
           </>
         )}
       </div>
@@ -136,8 +138,8 @@ export function Project({ projectId }: { projectId: string }) {
           <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Foo 500s when… Repro: …" />
         </label>
         <div className="row end">
-          <button type="submit" disabled={!title.trim()}>
-            Create
+          <button type="submit" disabled={!title.trim() || busy}>
+            {busy ? "Creating…" : "Create"}
           </button>
         </div>
       </form>
@@ -154,6 +156,58 @@ export function Project({ projectId }: { projectId: string }) {
           {showDone && <ul className="conv-list">{done.map(row)}</ul>}
         </>
       )}
+
+      <h2 className="h2 section">People</h2>
+      <div className="card stack tight">
+        <p className="muted small">
+          Everyone here sees the same work items and conversations. Conversations run on <strong>{isOwner ? "your" : `${project.ownerEmail}'s`}</strong> Fountain account — its agents, its computers, its bill.
+        </p>
+        <ul className="member-list">
+          <li className="member-row">
+            <span className="avatar" style={{ width: 28, height: 28, fontSize: 11 }}>
+              {initial(project.ownerEmail)}
+            </span>
+            <div className="min0 grow">
+              <div className="strong ellipsis">{project.ownerEmail}</div>
+              <div className="muted small">owner{project.ownerEmail === me.email ? " · you" : ""}</div>
+            </div>
+          </li>
+          {project.members.map((m) => (
+            <li key={m.email} className="member-row">
+              <span className="avatar" style={{ width: 28, height: 28, fontSize: 11 }}>
+                {initial(m.email)}
+              </span>
+              <div className="min0 grow">
+                <div className="strong ellipsis">{m.email}</div>
+                <div className="muted small">member{m.email === me.email ? " · you" : ""}</div>
+              </div>
+              {(isOwner || m.email === me.email) && (
+                <TwoStep
+                  label={m.email === me.email ? "Leave" : "Remove"}
+                  className="danger small"
+                  onConfirm={() => {
+                    void removeMember(m.email);
+                    if (m.email === me.email) navigate(href.projects());
+                  }}
+                />
+              )}
+            </li>
+          ))}
+        </ul>
+        {isOwner && (
+          <form className="row" onSubmit={share}>
+            <input type="email" value={invite} onChange={(e) => setInvite(e.target.value)} placeholder="someone@example.com" className="grow" />
+            <button type="submit" className="small" disabled={!invite.trim()}>
+              Share
+            </button>
+          </form>
+        )}
+        {isOwner && <p className="muted small">They sign in with Fountain using that email, and the project is there.</p>}
+      </div>
     </div>
   );
+}
+
+function initial(email: string): string {
+  return (email[0] ?? "?").toUpperCase();
 }

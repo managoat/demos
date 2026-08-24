@@ -1,5 +1,6 @@
 node_modules
 .git
 src
-mock
+data
 *.md
+**/*.test.ts

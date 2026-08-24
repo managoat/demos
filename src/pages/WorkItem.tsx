@@ -3,9 +3,9 @@
  * the computer they run on), and the open thread.
  */
 import { useMemo, useState } from "react";
-import { useStore } from "../store";
+import { useProject } from "../store";
 import type { Agent, Conversation } from "../types";
-import { addTeammate, agentFits, channelFor, removeTeammate, updateItem } from "../lib/workbench";
+import { agentFits, channelFor } from "../lib/workbench";
 import { href, navigate } from "../router";
 import { Thread, TwoStep } from "../components/Thread";
 import { StartDialog, type JoinTarget } from "../components/StartDialog";
@@ -20,10 +20,9 @@ interface Computer {
   agent: Agent | null;
 }
 
-export function WorkItem({ projectId, itemId, conversationId }: { projectId: string; itemId: string; conversationId: string | null }) {
-  const { state, update, conversations, agents, environments, vaults, fountain, toast, refresh } = useStore();
-  const project = state.projects.find((p) => p.id === projectId);
-  const item = state.items.find((w) => w.id === itemId && w.projectId === projectId);
+export function WorkItem({ itemId, conversationId }: { itemId: string; conversationId: string | null }) {
+  const { project, items, conversations, agents, environments, vaults, fountain, toast, refresh, updateItem, addTeammate, removeTeammate } = useProject();
+  const item = items.find((w) => w.id === itemId);
   const [dialog, setDialog] = useState<{ join: JoinTarget | null; agentId: string | null } | null>(null);
   const [editing, setEditing] = useState(false);
   const [pick, setPick] = useState("");
@@ -31,9 +30,9 @@ export function WorkItem({ projectId, itemId, conversationId }: { projectId: str
   const convs = useMemo(
     () =>
       conversations
-        .filter((c) => c.channel_id === channelFor(projectId, itemId))
+        .filter((c) => c.channel_id === channelFor(project.id, itemId))
         .sort((a, b) => (a.inserted_at ?? "").localeCompare(b.inserted_at ?? "")),
-    [conversations, projectId, itemId],
+    [conversations, project.id, itemId],
   );
 
   const computers = useMemo<Computer[]>(() => {
@@ -57,12 +56,12 @@ export function WorkItem({ projectId, itemId, conversationId }: { projectId: str
     });
   }, [convs, agents]);
 
-  if (!project || !item) {
+  if (!item) {
     return (
       <div className="page narrow">
         <div className="empty card">
           <p className="strong">No such work item.</p>
-          <a className="button secondary" href={project ? href.project(project.id) : href.projects()}>
+          <a className="button secondary" href={href.project(project.id)}>
             Back
           </a>
         </div>
@@ -88,8 +87,8 @@ export function WorkItem({ projectId, itemId, conversationId }: { projectId: str
                 setEditing(false);
               }}
             >
-              <input value={item.title} onChange={(e) => update((s) => updateItem(s, item.id, { title: e.target.value }))} />
-              <textarea rows={4} value={item.notes} onChange={(e) => update((s) => updateItem(s, item.id, { notes: e.target.value }))} placeholder="Notes" />
+              <input value={item.title} onChange={(e) => void updateItem(item.id, { title: e.target.value })} />
+              <textarea rows={4} value={item.notes} onChange={(e) => void updateItem(item.id, { notes: e.target.value })} placeholder="Notes" />
               <div className="row end">
                 <button type="submit" className="secondary small">
                   Done
@@ -107,7 +106,7 @@ export function WorkItem({ projectId, itemId, conversationId }: { projectId: str
               {item.notes && <p className="muted small pre">{item.notes}</p>}
               <div className="row wrap">
                 <span className={`pill ${item.status === "done" ? "terminated" : "running"}`}>{item.status}</span>
-                <button className="secondary small" onClick={() => update((s) => updateItem(s, item.id, { status: item.status === "done" ? "open" : "done" }))}>
+                <button className="secondary small" onClick={() => void updateItem(item.id, { status: item.status === "done" ? "open" : "done" })}>
                   {item.status === "done" ? "Reopen" : "Mark done"}
                 </button>
               </div>
@@ -128,7 +127,7 @@ export function WorkItem({ projectId, itemId, conversationId }: { projectId: str
                 onChange={(e) => {
                   const id = e.target.value;
                   setPick("");
-                  if (id) update((s) => addTeammate(s, item.id, id));
+                  if (id) void addTeammate(item.id, id);
                 }}
               >
                 <option value="">+ Add…</option>
@@ -146,7 +145,7 @@ export function WorkItem({ projectId, itemId, conversationId }: { projectId: str
           </div>
           {team.length === 0 && (
             <p className="muted small">
-              No agents on this Fountain yet. <a href={href.team()}>See the team</a>.
+              No agents on {project.ownerEmail}'s Fountain yet. <a href={href.team(project.id)}>See the team</a>.
             </p>
           )}
           <ul className="member-list">
@@ -167,7 +166,7 @@ export function WorkItem({ projectId, itemId, conversationId }: { projectId: str
                   <button className="small" onClick={() => setDialog({ join: null, agentId: a.id })} disabled={!fit.ok} title={fit.ok ? "New conversation on a new computer" : fit.reason}>
                     Talk
                   </button>
-                  <button className="icon" title="Remove from this item" onClick={() => update((s) => removeTeammate(s, item.id, a.id))}>
+                  <button className="icon" title="Remove from this item" onClick={() => void removeTeammate(item.id, a.id)}>
                     ×
                   </button>
                 </li>
@@ -262,7 +261,7 @@ export function WorkItem({ projectId, itemId, conversationId }: { projectId: str
         )}
       </div>
 
-      {dialog && <StartDialog project={project} item={item} join={dialog.join} initialAgentId={dialog.agentId} onClose={() => setDialog(null)} />}
+      {dialog && <StartDialog item={item} join={dialog.join} initialAgentId={dialog.agentId} onClose={() => setDialog(null)} />}
     </div>
   );
 }

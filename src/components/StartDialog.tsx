@@ -1,14 +1,14 @@
 /**
  * Start a conversation on a work item: pick a teammate (an agent), write the
- * first prompt. The project supplies the environment and vault. Optionally
- * join a computer another conversation of the same agent already has
- * (`sandbox_id`, ADR 0023 — a Fountain that predates it starts a new one and
- * this dialog says so).
+ * first prompt. The project supplies the environment and vault (the server
+ * enforces that whatever this sends). Optionally join a computer another
+ * conversation of the same agent already has (`sandbox_id`, ADR 0023 — a
+ * Fountain that predates it starts a new one and this dialog says so).
  */
 import { useMemo, useState, type FormEvent } from "react";
-import { useStore } from "../store";
+import { useProject } from "../store";
 import type { Agent, Conversation } from "../types";
-import { addTeammate, agentFits, channelFor, conversationTitle, type Project, type WorkItem } from "../lib/workbench";
+import { agentFits, channelFor, conversationTitle, type WorkItem } from "../lib/workbench";
 import { describeError } from "../lib/errors";
 import { href, navigate } from "../router";
 import { AgentAvatar } from "./AgentAvatar";
@@ -20,8 +20,8 @@ export interface JoinTarget {
   agentId: string;
 }
 
-export function StartDialog({ project, item, join, initialAgentId, onClose }: { project: Project; item: WorkItem; join?: JoinTarget | null; initialAgentId?: string | null; onClose: () => void }) {
-  const { fountain, update, agents, environments, vaults, toast, refresh } = useStore();
+export function StartDialog({ item, join, initialAgentId, onClose }: { item: WorkItem; join?: JoinTarget | null; initialAgentId?: string | null; onClose: () => void }) {
+  const { project, fountain, agents, environments, vaults, toast, refresh, reload } = useProject();
   const all = [...agents.values()].sort((a, b) => a.name.localeCompare(b.name));
   const onItem = all.filter((a) => item.agentIds.includes(a.id));
   const others = all.filter((a) => !item.agentIds.includes(a.id));
@@ -48,17 +48,15 @@ export function StartDialog({ project, item, join, initialAgentId, onClose }: { 
       fresh: true,
       title: conversationTitle(agent.name, item.title),
     };
-    if (project.environmentId) body.environment_id = project.environmentId;
-    if (project.vaultId) body.vault_id = project.vaultId;
     if (preview) body.prompt = preview;
     if (join) body.sandbox_id = join.sandboxId;
     try {
       const conversation = await fountain.api.data<Conversation>("POST", "/api/conversations", { body });
-      update((s) => addTeammate(s, item.id, agent.id));
       if (join && conversation.sandbox_id !== join.sandboxId) {
         toast("This Fountain does not share a computer between conversations yet — started on a new one.", "error");
       }
       void refresh();
+      void reload(); // the server put the teammate on the item
       navigate(href.conversation(item.projectId, item.id, conversation.id));
       onClose();
     } catch (err) {
@@ -84,7 +82,7 @@ export function StartDialog({ project, item, join, initialAgentId, onClose }: { 
         <p className="muted small">
           {join
             ? "Same teammate, same computer: the checkout and everything on disk are shared, the transcript is its own."
-            : `On "${item.title}". The conversation is bound to this work item and runs with ${project.name}'s environment and vault.`}
+            : `On "${item.title}". The conversation is bound to this work item and runs with ${project.name}'s environment and vault, on ${project.ownerEmail}'s account.`}
         </p>
 
         {join ? (

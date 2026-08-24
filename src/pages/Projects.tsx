@@ -1,73 +1,171 @@
-import { useState, type FormEvent } from "react";
-import { useStore } from "../store";
-import { addProject, parseChannel, removeProject } from "../lib/workbench";
+import { useEffect, useState, type FormEvent } from "react";
+import { useWorkbench } from "../store";
+import { api } from "../lib/api";
+import { clearLegacyState, loadLegacyState, type LegacyState } from "../lib/workbench";
+import { describeError } from "../lib/errors";
 import { href } from "../router";
 import { TwoStep } from "../components/Thread";
 import { formatTime } from "../lib/format";
 import { EnvVaultFields } from "../components/EnvVaultFields";
+import type { Environment, Vault } from "../types";
 
 export function Projects() {
-  const { state, update, conversations, environments, vaults } = useStore();
+  const { me, projects, projectsLoaded, activity, refreshProjects, refreshActivity, toast } = useWorkbench();
   const [name, setName] = useState("");
   const [notes, setNotes] = useState("");
   const [environmentId, setEnvironmentId] = useState("");
   const [vaultId, setVaultId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [resources, setResources] = useState<{ environments: Environment[]; vaults: Vault[] } | null>(null);
+  const [legacy, setLegacy] = useState<LegacyState | null>(() => loadLegacyState());
 
-  function create(e: FormEvent) {
+  // The new-project form needs your own environments and vaults — the computer the project will be.
+  useEffect(() => {
+    api
+      .myResources()
+      .then(setResources)
+      .catch((err) => toast(describeError(err), "error"));
+  }, [toast]);
+
+  async function create(e: FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
-    update((s) => addProject(s, { name, notes, environmentId: environmentId || null, vaultId: vaultId || null })[0]);
-    setName("");
-    setNotes("");
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    try {
+      await api.createProject({ name, notes, environmentId: environmentId || null, vaultId: vaultId || null });
+      setName("");
+      setNotes("");
+      await refreshProjects();
+    } catch (err) {
+      toast(describeError(err), "error");
+    } finally {
+      setBusy(false);
+    }
   }
 
-  const live = new Map<string, number>();
-  const latest = new Map<string, string>();
-  for (const c of conversations) {
-    const ref = parseChannel(c.channel_id);
-    if (!ref) continue;
-    if (c.status === "running" || c.status === "pending") live.set(ref.projectId, (live.get(ref.projectId) ?? 0) + 1);
-    const at = c.last_active_at ?? c.updated_at ?? "";
-    if (at > (latest.get(ref.projectId) ?? "")) latest.set(ref.projectId, at);
+  async function importLegacy() {
+    if (!legacy) return;
+    try {
+      const r = await api.importState(legacy);
+      clearLegacyState();
+      setLegacy(null);
+      toast(`Imported ${r.projects} project${r.projects === 1 ? "" : "s"} and ${r.items} work item${r.items === 1 ? "" : "s"}.`);
+      await refreshProjects();
+      void refreshActivity();
+    } catch (err) {
+      toast(describeError(err), "error");
+    }
   }
+
+  async function recover() {
+    try {
+      const r = await api.recover();
+      toast(r.projects || r.items ? `Recovered ${r.projects} project${r.projects === 1 ? "" : "s"} and ${r.items} work item${r.items === 1 ? "" : "s"} from your conversations.` : "Nothing to recover: every workbench conversation on your account is already in a project.");
+      await refreshProjects();
+      void refreshActivity();
+    } catch (err) {
+      toast(describeError(err), "error");
+    }
+  }
+
+  const mine = projects.filter((p) => p.role === "owner");
+  const shared = projects.filter((p) => p.role !== "owner");
+
+  const row = (p: (typeof projects)[number]) => {
+    const a = activity[p.id];
+    return (
+      <li key={p.id}>
+        <a className="conv-row" href={href.project(p.id)}>
+          <div className="conv-main">
+            <div className="conv-title">
+              <span className="strong">{p.name}</span>
+              {(a?.live ?? 0) > 0 && <span className="pill running">{a!.live} working</span>}
+              {p.members.length > 0 && p.role === "owner" && <span className="pill">shared with {p.members.length}</span>}
+            </div>
+            <div className="conv-sub muted">
+              {p.counts.open} open · {p.counts.done} done
+              {p.role === "member" ? ` · ${p.ownerEmail}'s` : ""}
+              {p.notes ? ` · ${p.notes}` : ""}
+            </div>
+          </div>
+          <div className="conv-side">
+            <span className="time muted">{formatTime(a?.latest ?? p.createdAt)}</span>
+          </div>
+        </a>
+        {p.role === "owner" ? (
+          <TwoStep
+            label="Delete"
+            onConfirm={() =>
+              api
+                .deleteProject(p.id)
+                .then(() => refreshProjects())
+                .catch((err) => toast(describeError(err), "error"))
+            }
+            className="danger small self-center"
+          />
+        ) : (
+          <TwoStep
+            label="Leave"
+            onConfirm={() =>
+              api
+                .removeMember(p.id, me.email)
+                .then(() => refreshProjects())
+                .catch((err) => toast(describeError(err), "error"))
+            }
+            className="danger small self-center"
+          />
+        )}
+      </li>
+    );
+  };
 
   return (
     <div className="page narrow">
       <div className="page-header">
         <h1>Projects</h1>
+        <button className="secondary small" onClick={recover} title="Rebuild projects from the workbench conversations on your Fountain account">
+          Recover from Fountain
+        </button>
       </div>
-      {state.projects.length === 0 ? (
+
+      {legacy && (
+        <div className="card stack tight notice">
+          <p className="strong">This browser has {legacy.projects.length} project{legacy.projects.length === 1 ? "" : "s"} from before the workbench had accounts.</p>
+          <p className="muted small">Import them to your account here — their conversations on Fountain will line up, since the ids are kept. The local copy is cleared afterwards.</p>
+          <div className="row">
+            <button className="small" onClick={importLegacy}>
+              Import {legacy.projects.length} project{legacy.projects.length === 1 ? "" : "s"}
+            </button>
+            <button
+              className="secondary small"
+              onClick={() => {
+                clearLegacyState();
+                setLegacy(null);
+              }}
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!projectsLoaded ? (
+        <p className="muted">Loading…</p>
+      ) : projects.length === 0 ? (
         <div className="empty card">
           <p className="strong">No projects yet.</p>
-          <p className="muted">A project is an environment and a vault — the computer its work gets — and holds work items, where you pull in teammates.</p>
+          <p className="muted">A project is an environment and a vault — the computer its work gets — and holds work items, where you pull in teammates. Share it, and its conversations run on your account for everyone in it.</p>
         </div>
       ) : (
-        <ul className="conv-list">
-          {state.projects.map((p) => {
-            const items = state.items.filter((w) => w.projectId === p.id);
-            const open = items.filter((w) => w.status === "open").length;
-            return (
-              <li key={p.id}>
-                <a className="conv-row" href={href.project(p.id)}>
-                  <div className="conv-main">
-                    <div className="conv-title">
-                      <span className="strong">{p.name}</span>
-                      {(live.get(p.id) ?? 0) > 0 && <span className="pill running">{live.get(p.id)} working</span>}
-                    </div>
-                    <div className="conv-sub muted">
-                      {open} open · {items.length - open} done · env {p.environmentId ? environments.get(p.environmentId)?.name ?? "?" : "agent's own"} · vault{" "}
-                      {p.vaultId ? vaults.get(p.vaultId)?.name ?? "?" : "none"}
-                    </div>
-                  </div>
-                  <div className="conv-side">
-                    <span className="time muted">{formatTime(latest.get(p.id))}</span>
-                  </div>
-                </a>
-                <TwoStep label="Delete" onConfirm={() => update((s) => removeProject(s, p.id))} className="danger small self-center" />
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          {mine.length > 0 && <ul className="conv-list">{mine.map(row)}</ul>}
+          {shared.length > 0 && (
+            <>
+              <h2 className="h2 section">Shared with you</h2>
+              <ul className="conv-list">{shared.map(row)}</ul>
+            </>
+          )}
+        </>
       )}
 
       <form className="card stack new-form" onSubmit={create}>
@@ -76,14 +174,22 @@ export function Projects() {
           Name
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Fountain" required />
         </label>
-        <EnvVaultFields environmentId={environmentId} vaultId={vaultId} onEnvironment={setEnvironmentId} onVault={setVaultId} />
+        <EnvVaultFields
+          environments={resources?.environments ?? []}
+          vaults={resources?.vaults ?? []}
+          loaded={!!resources}
+          environmentId={environmentId}
+          vaultId={vaultId}
+          onEnvironment={setEnvironmentId}
+          onVault={setVaultId}
+        />
         <label>
-          Notes <span className="hint">Where the code is, what it is. Shown to you, not sent to agents.</span>
+          Notes <span className="hint">Where the code is, what it is. Shown to members, not sent to agents.</span>
           <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="github.com/BinaryBourbon/fountain" />
         </label>
         <div className="row end">
-          <button type="submit" disabled={!name.trim()}>
-            Create
+          <button type="submit" disabled={!name.trim() || busy}>
+            {busy ? "Creating…" : "Create"}
           </button>
         </div>
       </form>

@@ -1,15 +1,18 @@
 /**
  * "Sign in with Fountain": OAuth 2.0 authorization code + PKCE (S256), public
- * client. The token we get back is a Fountain API key, so the rest of the app
- * is unchanged — it just did not have to be pasted.
+ * client. The token we get back is a Fountain API key; the app hands it to
+ * the workbench server (`POST /api/session`), which is the only place it is
+ * kept.
  *
  * Fountain registers this client by id and by exact redirect URI
  * (OAUTH_CLIENTS on the server), so the client_id and redirect must match
  * what is registered there. The redirect is this app's own page.
  */
-import { normalizeBaseUrl } from "./settings";
-
 const CLIENT_ID = "fountain-workbench";
+
+function normalizeBaseUrl(url: string): string {
+  return url.trim().replace(/\/+$/, "");
+}
 const STASH = "fountain-workbench.oauth";
 
 function base64url(bytes: ArrayBuffer): string {

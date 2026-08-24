@@ -4,7 +4,7 @@
  * agent's blocks on the left.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { useStore } from "../store";
+import { useProject } from "../store";
 import type { Stream } from "@agentshit/fountain-sdk";
 import type { Conversation, LogEvent, Turn, UserEvent } from "../types";
 import { arrange } from "../lib/blocks";
@@ -18,7 +18,7 @@ import { AgentAvatar } from "./AgentAvatar";
 const HISTORY_STREAMS: Stream[] = ["acp", "stdout", "stage"];
 
 export function Thread({ conversationId, onClose }: { conversationId: string; onClose?: () => void }) {
-  const { fountain, conversations, agents, subscribe, toast, refresh } = useStore();
+  const { fountain, conversations, agents, subscribe, toast, refresh } = useProject();
   const listed = conversations.find((c) => c.id === conversationId) ?? null;
   const [fetched, setFetched] = useState<Conversation | null>(null);
   const conversation = listed ?? fetched;

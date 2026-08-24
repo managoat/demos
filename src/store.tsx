@@ -1,24 +1,126 @@
 /**
- * The live store: one Fountain SDK client, the conversation list, the
- * agent/environment/vault catalogs, one SSE connection
- * (`GET /api/events/stream`) every open thread reads from, and the workbench
- * tree (projects, items, members) persisted in this browser.
+ * Two stores.
+ *
+ * `WorkbenchProvider` is the signed-in user's: who they are, their projects
+ * (owned and shared with them), and toasts. It talks to the workbench
+ * server (src/lib/api.ts).
+ *
+ * `ProjectProvider` is one project's: the project record and its items
+ * (from the server), and Fountain as seen from inside the project — an SDK
+ * client whose base URL is `/f/<project>`, where the server forwards to
+ * Fountain on the owner's key and admits only this project's conversations.
+ * Plus the conversation list, the agent/environment/vault catalogs, and one
+ * SSE stream every open thread reads from; the server mixes `workbench`
+ * events into that stream when another member changes something.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Fountain, type FetchLike } from "@agentshit/fountain-sdk";
 import type { Agent, Conversation, Environment, UserEvent, Vault } from "./types";
-import type { Settings } from "./lib/settings";
+import { api, ApiError, projectFountainBase, type Activity, type ItemDto, type Me, type ProjectDto } from "./lib/api";
 import { readSse } from "./lib/sse";
 import { describeError } from "./lib/errors";
-import { loadState, reconcile, saveState, type WorkbenchState } from "./lib/workbench";
 
 export type EventHandler = (ev: UserEvent) => void;
 
 const THREAD_STREAMS = ["acp", "stdout", "stage"];
 
-export interface Store {
+// ── the user's store ───────────────────────────────────────────────────────
+
+export interface Workbench {
+  me: Me;
+  projects: ProjectDto[];
+  projectsLoaded: boolean;
+  activity: Record<string, Activity>;
+  refreshProjects: () => Promise<ProjectDto[] | null>;
+  refreshActivity: () => Promise<void>;
+  toast: (text: string, kind?: "info" | "error") => void;
+  signOut: () => void;
+}
+
+const WorkbenchCtx = createContext<Workbench | null>(null);
+
+export function useWorkbench(): Workbench {
+  const w = useContext(WorkbenchCtx);
+  if (!w) throw new Error("useWorkbench outside WorkbenchProvider");
+  return w;
+}
+
+interface Toast {
+  id: number;
+  text: string;
+  kind: "info" | "error";
+}
+
+export function WorkbenchProvider({ me, onSignOut, children }: { me: Me; onSignOut: () => void; children: ReactNode }) {
+  const [projects, setProjects] = useState<ProjectDto[]>([]);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
+  const [activity, setActivity] = useState<Record<string, Activity>>({});
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const toast = useCallback((text: string, kind: Toast["kind"] = "info") => {
+    const id = Date.now() + Math.random();
+    setToasts((ts) => [...ts, { id, text, kind }]);
+    setTimeout(() => setToasts((ts) => ts.filter((t) => t.id !== id)), 5000);
+  }, []);
+
+  const refreshProjects = useCallback(async () => {
+    try {
+      const list = await api.projects();
+      setProjects(list);
+      setProjectsLoaded(true);
+      return list;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) onSignOut();
+      else toast(describeError(err), "error");
+      return null;
+    }
+  }, [onSignOut, toast]);
+
+  const refreshActivity = useCallback(async () => {
+    try {
+      setActivity(await api.activity());
+    } catch {
+      // decoration only
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshProjects();
+    void refreshActivity();
+  }, [refreshProjects, refreshActivity]);
+
+  const signOut = useCallback(() => {
+    void api.signOut().catch(() => undefined);
+    onSignOut();
+  }, [onSignOut]);
+
+  const value = useMemo<Workbench>(
+    () => ({ me, projects, projectsLoaded, activity, refreshProjects, refreshActivity, toast, signOut }),
+    [me, projects, projectsLoaded, activity, refreshProjects, refreshActivity, toast, signOut],
+  );
+
+  return (
+    <WorkbenchCtx.Provider value={value}>
+      {children}
+      <div className="toasts">
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast ${t.kind}`}>
+            {t.text}
+          </div>
+        ))}
+      </div>
+    </WorkbenchCtx.Provider>
+  );
+}
+
+// ── one project's store ────────────────────────────────────────────────────
+
+export interface ProjectStore {
+  project: ProjectDto;
+  items: ItemDto[];
+  isOwner: boolean;
+  /** Fountain from inside this project: the owner's key, this project's conversations. */
   fountain: Fountain;
-  settings: Settings;
   conversations: Conversation[];
   agents: Map<string, Agent>;
   environments: Map<string, Environment>;
@@ -28,34 +130,39 @@ export interface Store {
   error: string | null;
   refresh: () => Promise<Conversation[] | null>;
   refreshResources: () => Promise<void>;
+  reload: () => Promise<void>;
   /** Events for one conversation, live. Returns the unsubscribe. */
   subscribe: (conversationId: string, handler: EventHandler) => () => void;
-  toast: (text: string, kind?: "info" | "error") => void;
-  /** The workbench tree. `update` persists. */
-  state: WorkbenchState;
-  update: (fn: (s: WorkbenchState) => WorkbenchState) => void;
+  toast: Workbench["toast"];
+  // Mutations go to the server; the stream (or the returned record) brings the change back.
+  updateProject: (patch: Partial<Pick<ProjectDto, "name" | "notes" | "environmentId" | "vaultId">>) => Promise<void>;
+  addMember: (email: string) => Promise<void>;
+  removeMember: (email: string) => Promise<void>;
+  createItem: (title: string, notes?: string) => Promise<ItemDto | null>;
+  updateItem: (id: string, patch: Partial<Pick<ItemDto, "title" | "notes" | "status" | "agentIds">>) => Promise<void>;
+  removeItem: (id: string) => Promise<void>;
+  addTeammate: (itemId: string, agentId: string) => Promise<void>;
+  removeTeammate: (itemId: string, agentId: string) => Promise<void>;
 }
 
-const Ctx = createContext<Store | null>(null);
+const ProjectCtx = createContext<ProjectStore | null>(null);
 
-export function useStore(): Store {
-  const s = useContext(Ctx);
-  if (!s) throw new Error("useStore outside StoreProvider");
+export function useProject(): ProjectStore {
+  const s = useContext(ProjectCtx);
+  if (!s) throw new Error("useProject outside ProjectProvider");
   return s;
 }
 
-interface Toast {
-  id: number;
-  text: string;
-  kind: "info" | "error";
+/** The project store when inside one; null on the projects list. */
+export function useProjectMaybe(): ProjectStore | null {
+  return useContext(ProjectCtx);
 }
 
 /**
  * The SDK stamps a `User-Agent` on every request. Chrome drops it (a
  * forbidden header), but Firefox sends it, which turns every call into a
- * CORS preflight asking for `user-agent` — and Fountain's allow-list does not
- * include it, so the request dies with "CORS Missing Allow Header". A browser
- * has a user agent already; strip the SDK's.
+ * CORS preflight — harmless same-origin, but the browser has a user agent
+ * already; strip the SDK's.
  */
 const browserFetch: FetchLike = (input, init) => {
   if (init?.headers) {
@@ -66,13 +173,17 @@ const browserFetch: FetchLike = (input, init) => {
   return fetch(input, init);
 };
 
-export function makeClient(settings: Settings): Fountain {
-  // `appUrl: ""` — this app is where a human watches the conversation.
-  return new Fountain({ baseUrl: settings.baseUrl, apiKey: settings.apiKey, appUrl: "", fetch: browserFetch });
+export function makeProjectClient(projectId: string): Fountain {
+  // The bearer is a placeholder: the server authenticates the session cookie and swaps in the owner's key.
+  return new Fountain({ baseUrl: projectFountainBase(projectId), apiKey: "session", appUrl: "", fetch: browserFetch });
 }
 
-export function StoreProvider({ settings, children }: { settings: Settings; children: ReactNode }) {
-  const fountain = useMemo(() => makeClient(settings), [settings]);
+export function ProjectProvider({ projectId, children, fallback }: { projectId: string; children: ReactNode; fallback: (state: "loading" | "missing") => ReactNode }) {
+  const { toast, refreshProjects, signOut } = useWorkbench();
+  const fountain = useMemo(() => makeProjectClient(projectId), [projectId]);
+  const [project, setProject] = useState<ProjectDto | null>(null);
+  const [items, setItems] = useState<ItemDto[]>([]);
+  const [missing, setMissing] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [agents, setAgents] = useState<Map<string, Agent>>(new Map());
   const [environments, setEnvironments] = useState<Map<string, Environment>>(new Map());
@@ -80,37 +191,32 @@ export function StoreProvider({ settings, children }: { settings: Settings; chil
   const [resourcesLoaded, setResourcesLoaded] = useState(false);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const [state, setState] = useState<WorkbenchState>(() => loadState());
   const handlers = useRef(new Map<string, Set<EventHandler>>());
 
-  const update = useCallback((fn: (s: WorkbenchState) => WorkbenchState) => {
-    setState((prev) => {
-      const next = fn(prev);
-      if (next !== prev) saveState(next);
-      return next;
-    });
-  }, []);
-
-  const toast = useCallback((text: string, kind: Toast["kind"] = "info") => {
-    const id = Date.now() + Math.random();
-    setToasts((ts) => [...ts, { id, text, kind }]);
-    setTimeout(() => setToasts((ts) => ts.filter((t) => t.id !== id)), 5000);
-  }, []);
+  const reload = useCallback(async () => {
+    try {
+      const { project, items } = await api.project(projectId);
+      setProject(project);
+      setItems(items);
+      setMissing(false);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) setMissing(true);
+      else if (err instanceof ApiError && err.status === 401) signOut();
+      else toast(describeError(err), "error");
+    }
+  }, [projectId, toast, signOut]);
 
   const refresh = useCallback(async () => {
     try {
       const list = await fountain.conversations();
       setConversations(list);
       setError(null);
-      // Anything the server knows about that this browser does not becomes a placeholder.
-      update((s) => reconcile(s, list));
       return list;
     } catch (err) {
       setError(describeError(err));
       return null;
     }
-  }, [fountain, update]);
+  }, [fountain]);
 
   const refreshResources = useCallback(async () => {
     try {
@@ -125,19 +231,28 @@ export function StoreProvider({ settings, children }: { settings: Settings; chil
   }, [fountain]);
 
   useEffect(() => {
+    void reload();
     void refresh();
     void refreshResources();
-  }, [refresh, refreshResources]);
+  }, [reload, refresh, refreshResources]);
 
-  // Debounced refresh for stage events, which arrive in bursts.
-  const timer = useRef<number | null>(null);
+  // Debounced refreshes: stage events arrive in bursts, and so do workbench notices.
+  const timers = useRef<{ list: number | null; tree: number | null }>({ list: null, tree: null });
   const scheduleRefresh = useCallback(() => {
-    if (timer.current !== null) return;
-    timer.current = window.setTimeout(() => {
-      timer.current = null;
+    if (timers.current.list !== null) return;
+    timers.current.list = window.setTimeout(() => {
+      timers.current.list = null;
       void refresh();
     }, 300);
   }, [refresh]);
+  const scheduleReload = useCallback(() => {
+    if (timers.current.tree !== null) return;
+    timers.current.tree = window.setTimeout(() => {
+      timers.current.tree = null;
+      void reload();
+      void refreshProjects();
+    }, 300);
+  }, [reload, refreshProjects]);
 
   const subscribe = useCallback((conversationId: string, handler: EventHandler) => {
     let set = handlers.current.get(conversationId);
@@ -160,8 +275,7 @@ export function StoreProvider({ settings, children }: { settings: Settings; chil
     const connect = () => {
       if (stopped) return;
       const qs = new URLSearchParams({ streams: THREAD_STREAMS.join(","), blocks: "true" });
-      void readSse(`${settings.baseUrl}/api/events/stream?${qs}`, {
-        headers: { authorization: `Bearer ${settings.apiKey}` },
+      void readSse(`${projectFountainBase(projectId)}/api/events/stream?${qs}`, {
         lastEventId,
         signal: ctrl.signal,
         onOpen: () => {
@@ -173,6 +287,10 @@ export function StoreProvider({ settings, children }: { settings: Settings; chil
           if (msg.id) lastEventId = msg.id;
           if (msg.event === "conversations") {
             scheduleRefresh();
+            return;
+          }
+          if (msg.event === "workbench") {
+            scheduleReload();
             return;
           }
           let ev: UserEvent;
@@ -207,12 +325,114 @@ export function StoreProvider({ settings, children }: { settings: Settings; chil
       stopped = true;
       ctrl.abort();
     };
-  }, [settings, refresh, scheduleRefresh]);
+  }, [projectId, refresh, scheduleRefresh, scheduleReload]);
 
-  const value = useMemo<Store>(
-    () => ({
+  // ── mutations ──────────────────────────────────────────────────────────
+
+  const run = useCallback(
+    async (fn: () => Promise<unknown>) => {
+      try {
+        await fn();
+        await reload();
+      } catch (err) {
+        toast(describeError(err), "error");
+      }
+    },
+    [reload, toast],
+  );
+
+  const updateProject = useCallback<ProjectStore["updateProject"]>(
+    async (patch) => {
+      // Edit-as-you-type: show it now, save it, let the reload settle it.
+      setProject((p) => (p ? { ...p, ...patch } : p));
+      await run(() => api.patchProject(projectId, patch));
+      void refreshProjects();
+    },
+    [projectId, run, refreshProjects],
+  );
+  const addMember = useCallback<ProjectStore["addMember"]>((email) => run(() => api.addMember(projectId, email)), [projectId, run]);
+  const removeMember = useCallback<ProjectStore["removeMember"]>((email) => run(() => api.removeMember(projectId, email)), [projectId, run]);
+  const createItem = useCallback<ProjectStore["createItem"]>(
+    async (title, notes = "") => {
+      try {
+        const w = await api.createItem(projectId, { title, notes });
+        setItems((ws) => (ws.some((x) => x.id === w.id) ? ws : [...ws, w]));
+        void refreshProjects();
+        return w;
+      } catch (err) {
+        toast(describeError(err), "error");
+        return null;
+      }
+    },
+    [projectId, toast, refreshProjects],
+  );
+  const updateItem = useCallback<ProjectStore["updateItem"]>(
+    async (id, patch) => {
+      setItems((ws) => ws.map((w) => (w.id === id ? { ...w, ...patch } : w)));
+      await run(() => api.patchItem(projectId, id, patch));
+      void refreshProjects();
+    },
+    [projectId, run, refreshProjects],
+  );
+  const removeItem = useCallback<ProjectStore["removeItem"]>(
+    async (id) => {
+      setItems((ws) => ws.filter((w) => w.id !== id));
+      await run(() => api.deleteItem(projectId, id));
+      void refreshProjects();
+    },
+    [projectId, run, refreshProjects],
+  );
+  const addTeammate = useCallback<ProjectStore["addTeammate"]>(
+    async (itemId, agentId) => {
+      const w = items.find((x) => x.id === itemId);
+      if (!w || w.agentIds.includes(agentId)) return;
+      await updateItem(itemId, { agentIds: [...w.agentIds, agentId] });
+    },
+    [items, updateItem],
+  );
+  const removeTeammate = useCallback<ProjectStore["removeTeammate"]>(
+    async (itemId, agentId) => {
+      const w = items.find((x) => x.id === itemId);
+      if (!w) return;
+      await updateItem(itemId, { agentIds: w.agentIds.filter((x) => x !== agentId) });
+    },
+    [items, updateItem],
+  );
+
+  const value = useMemo<ProjectStore | null>(
+    () =>
+      project
+        ? {
+            project,
+            items,
+            isOwner: project.role === "owner",
+            fountain,
+            conversations,
+            agents,
+            environments,
+            vaults,
+            resourcesLoaded,
+            connected,
+            error,
+            refresh,
+            refreshResources,
+            reload,
+            subscribe,
+            toast,
+            updateProject,
+            addMember,
+            removeMember,
+            createItem,
+            updateItem,
+            removeItem,
+            addTeammate,
+            removeTeammate,
+          }
+        : null,
+    [
+      project,
+      items,
       fountain,
-      settings,
       conversations,
       agents,
       environments,
@@ -222,26 +442,23 @@ export function StoreProvider({ settings, children }: { settings: Settings; chil
       error,
       refresh,
       refreshResources,
+      reload,
       subscribe,
       toast,
-      state,
-      update,
-    }),
-    [fountain, settings, conversations, agents, environments, vaults, resourcesLoaded, connected, error, refresh, refreshResources, subscribe, toast, state, update],
+      updateProject,
+      addMember,
+      removeMember,
+      createItem,
+      updateItem,
+      removeItem,
+      addTeammate,
+      removeTeammate,
+    ],
   );
 
-  return (
-    <Ctx.Provider value={value}>
-      {children}
-      <div className="toasts">
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.kind}`}>
-            {t.text}
-          </div>
-        ))}
-      </div>
-    </Ctx.Provider>
-  );
+  if (missing) return <>{fallback("missing")}</>;
+  if (!value) return <>{fallback("loading")}</>;
+  return <ProjectCtx.Provider value={value}>{children}</ProjectCtx.Provider>;
 }
 
 /** Whether the conversation is the one open on screen (its unread state is being cleared). */

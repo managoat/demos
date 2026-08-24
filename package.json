@@ -3,9 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A dev workstation on the Fountain API: projects, work items, and the agents you pull into them.",
+  "description": "A dev workstation on the Fountain API: projects shared between people, work items, and the agents you pull into them.",
   "scripts": {
     "dev": "vite",
+    "server": "STATIC_DIR= DATA_DIR=./data bun --watch server/index.ts",
+    "start": "bun server/index.ts",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "bun test",

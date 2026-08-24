@@ -2,27 +2,27 @@
  * Hash routes, so the app works from any static host with no rewrite rules:
  *
  *   #/                     projects
- *   #/team                 members (agent + environment + vault presets)
  *   #/p/:project           one project's work items
- *   #/p/:project/w/:item   one work item: members, conversations
+ *   #/p/:project/team      the project's team: the owner's agents
+ *   #/p/:project/w/:item   one work item: teammates, conversations
  *   #/p/:project/w/:item/c/:conversation   …with a conversation open
  */
 import { useEffect, useState } from "react";
 
 export type Route =
   | { page: "projects" }
-  | { page: "team" }
   | { page: "project"; projectId: string }
+  | { page: "team"; projectId: string }
   | { page: "item"; projectId: string; itemId: string; conversationId: string | null };
 
 export function parseRoute(hash: string): Route {
   const path = hash.replace(/^#/, "").replace(/^\/+/, "").split("?")[0] ?? "";
   const parts = path.split("/").filter(Boolean);
-  if (parts[0] === "team") return { page: "team" };
   if (parts[0] === "p" && parts[1]) {
     if (parts[2] === "w" && parts[3]) {
       return { page: "item", projectId: parts[1], itemId: parts[3], conversationId: parts[4] === "c" && parts[5] ? parts[5] : null };
     }
+    if (parts[2] === "team") return { page: "team", projectId: parts[1] };
     return { page: "project", projectId: parts[1] };
   }
   return { page: "projects" };
@@ -30,8 +30,8 @@ export function parseRoute(hash: string): Route {
 
 export const href = {
   projects: () => "#/",
-  team: () => "#/team",
   project: (projectId: string) => `#/p/${projectId}`,
+  team: (projectId: string) => `#/p/${projectId}/team`,
   item: (projectId: string, itemId: string) => `#/p/${projectId}/w/${itemId}`,
   conversation: (projectId: string, itemId: string, conversationId: string) => `#/p/${projectId}/w/${itemId}/c/${conversationId}`,
 };

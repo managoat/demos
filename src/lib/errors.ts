@@ -19,18 +19,18 @@ export function describeError(err: unknown): string {
       case "vault_not_allowed":
         return "That agent does not allow the chosen vault.";
       case "unauthorized":
-        return "Fountain rejected the key. Sign in again.";
+        return "Your session has ended, or the project owner's Fountain key no longer works. Sign in again.";
       case "rate_limited":
         return "Slow down — Fountain rate-limited that request.";
     }
-    if (err.status === 0) return "Could not reach Fountain. Is the URL right, and is this origin in API_CORS_ORIGINS?";
+    if (err.status === 0) return "Could not reach the workbench server.";
     const fields = Object.entries(err.fieldErrors)
       .map(([k, v]) => `${k} ${v.join(", ")}`)
       .join("; ");
     return `${fields || err.message || "Request failed"} (HTTP ${err.status}${err.code ? `, ${err.code}` : ""})`;
   }
   if (err instanceof TypeError && /fetch/i.test(err.message)) {
-    return "Could not reach Fountain. Is the URL right, and is this origin in API_CORS_ORIGINS?";
+    return "Could not reach the workbench server.";
   }
   return err instanceof Error ? `${err.name}: ${err.message}` : String(err);
 }

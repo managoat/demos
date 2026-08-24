@@ -1,6 +1,13 @@
-# Static SPA. The bundle is built by CI (bun run build) before docker build,
-# so this image is just nginx + dist/ and multi-arch comes for free.
-FROM nginx:alpine
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY dist/ /usr/share/nginx/html/
+# The workbench server (Bun) with the built SPA. The bundle is built by CI
+# (bun run build) before docker build, so this image is bun + server/ + dist/
+# and multi-arch comes for free. The server has no dependencies beyond Bun
+# itself (bun:sqlite is built in), so there is no install step.
+FROM oven/bun:1-alpine
+WORKDIR /app
+COPY server/ server/
+COPY shared/ shared/
+COPY dist/ dist/
+ENV PORT=8080 DATA_DIR=/data STATIC_DIR=/app/dist
 EXPOSE 8080
+VOLUME ["/data"]
+CMD ["bun", "server/index.ts"]
