@@ -51,7 +51,8 @@ export function Thread({ conversationId, onClose }: { conversationId: string; on
         if (cancelled) return;
         if (record) setFetched(record);
         setTurns(ts);
-        setEvents(history);
+        // Live events may have landed while the history was in flight; keep them.
+        setEvents((prev) => mergeById(history, prev));
         void handle.markRead().then(() => refresh());
       } catch (err) {
         if (!cancelled) toast(describeError(err), "error");
@@ -80,13 +81,24 @@ export function Thread({ conversationId, onClose }: { conversationId: string; on
     });
   }, [conversationId, subscribe, fountain]);
 
-  // A turn we did not see start (sent from elsewhere) still needs its row.
+  // The conversation changed under us (a status flip, a turn sent from
+  // elsewhere): re-read the turns, and the feed from where we have read to.
+  // The user-wide stream only follows unfinished conversations, so one that
+  // fails or finishes quickly can leave a gap the stream never fills.
   useEffect(() => {
-    if (!conversation) return;
+    if (!conversation || loading) return;
+    const handle = fountain.resume(conversationId);
     if ((conversation.turn_count ?? 0) > turns.length) {
-      void fountain.resume(conversationId).turns().then(setTurns).catch(() => undefined);
+      void handle.turns().then(setTurns).catch(() => undefined);
     }
-  }, [conversation?.turn_count, conversation?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+    const after = events.reduce((m, e) => Math.max(m, e.id), 0);
+    void handle
+      .history({ streams: HISTORY_STREAMS, after })
+      .then((more) => {
+        if (more.length) setEvents((prev) => mergeById(prev, more));
+      })
+      .catch(() => undefined);
+  }, [conversation?.turn_count, conversation?.status, conversation?.sandbox?.status, loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const folded = useMemo(() => fold(events, turns), [events, turns]);
   const visible = useMemo(() => new Set(showStdout ? ["acp", "stdout"] : ["acp"]), [showStdout]);
@@ -211,12 +223,22 @@ export function Thread({ conversationId, onClose }: { conversationId: string; on
   );
 }
 
+/** `base` first, then whatever in `extra` it does not already hold, in id order. */
+function mergeById(base: LogEvent[], extra: LogEvent[]): LogEvent[] {
+  if (extra.length === 0) return base;
+  const seen = new Set(base.map((e) => e.id));
+  const out = [...base];
+  for (const e of extra) if (!seen.has(e.id)) out.push(e);
+  return out.sort((a, b) => a.id - b.id);
+}
+
 function SetupLine({ events, done }: { events: LogEvent[]; done: boolean }) {
   const line = stageLine(events);
-  const failed = events.some((e) => e.kind === "stage" && e.state === "failed");
+  const failure = [...events].reverse().find((e) => e.kind === "stage" && e.state === "failed");
+  const reason = failure ? failReason(failure) : null;
   return (
-    <details className={`block init ${failed ? "error" : ""}`}>
-      <summary>{failed ? "✕ setup failed" : done ? "✓ sandbox ready" : `⏳ ${line ?? "setting up"}`}</summary>
+    <details className={`block init ${failure ? "error" : ""}`}>
+      <summary>{failure ? `✕ setup failed${reason ? ` — ${reason}` : ""}` : done ? "✓ sandbox ready" : `⏳ ${line ?? "setting up"}`}</summary>
       <pre>
         {events
           .filter((e) => e.kind === "stage")
@@ -225,6 +247,16 @@ function SetupLine({ events, done }: { events: LogEvent[]; done: boolean }) {
       </pre>
     </details>
   );
+}
+
+function failReason(ev: LogEvent): string | null {
+  if (!ev.data) return null;
+  try {
+    const r = (JSON.parse(ev.data) as { reason?: unknown }).reason;
+    return typeof r === "string" ? r : null;
+  } catch {
+    return null;
+  }
 }
 
 /** A destructive button that asks once, inline — never a browser dialog. */

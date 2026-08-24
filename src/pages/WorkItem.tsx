@@ -152,7 +152,7 @@ export function WorkItem({ projectId, itemId, conversationId }: { projectId: str
           <ul className="member-list">
             {onItem.map((a) => {
               const fit = agentFits(a, project);
-              const live = convs.filter((c) => c.agent_id === a.id && c.status !== "terminated").length;
+              const live = convs.filter((c) => c.agent_id === a.id && (c.status === "running" || c.status === "pending" || c.status === "idle")).length;
               return (
                 <li key={a.id} className="member-row">
                   <AgentAvatar agent={a} size={28} />
