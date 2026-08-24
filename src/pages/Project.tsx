@@ -1,29 +1,57 @@
-/** The project's work: its items, open then done, and a form for the next one. */
-import { useState, type FormEvent } from "react";
+/**
+ * The project's work: its items, open then done, and a form for the next one
+ * — which can put a teammate on it and prompt them in the same submit, since
+ * starting a conversation is what assigns one.
+ */
+import { useMemo, useState, type FormEvent } from "react";
 import { useProject } from "../store";
-import { channelIsItem } from "../lib/workbench";
+import { agentFits, channelIsItem } from "../lib/workbench";
+import { describeError } from "../lib/errors";
 import { href, navigate } from "../router";
 import { TwoStep } from "../components/Thread";
 import { AgentAvatar } from "../components/AgentAvatar";
 import { formatTime } from "../lib/format";
 
 export function Project() {
-  const { project, items, isOwner, conversations, agents, environments, vaults, createItem, updateItem, removeItem } = useProject();
+  const { project, items, isOwner, conversations, agents, environments, vaults, createItem, updateItem, removeItem, startConversation, toast } = useProject();
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
+  const [agentId, setAgentId] = useState("");
+  const [prompt, setPrompt] = useState("");
   const [showDone, setShowDone] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const team = useMemo(() => [...agents.values()].sort((a, b) => a.name.localeCompare(b.name)), [agents]);
+  const picked = agentId ? agents.get(agentId) ?? null : null;
 
   async function create(e: FormEvent) {
     e.preventDefault();
     if (!title.trim() || busy) return;
     setBusy(true);
     const w = await createItem(title, notes);
-    setBusy(false);
-    if (!w) return;
+    if (!w) {
+      setBusy(false);
+      return;
+    }
     setTitle("");
     setNotes("");
-    navigate(href.item(project.id, w.id));
+    if (!picked) {
+      setBusy(false);
+      navigate(href.item(project.id, w.id));
+      return;
+    }
+    try {
+      const conversation = await startConversation({ item: w, agent: picked, prompt, includeNotes: true });
+      setPrompt("");
+      setAgentId("");
+      navigate(href.conversation(project.id, conversation.id));
+    } catch (err) {
+      // The item is made; only the conversation failed. Land on it and say why.
+      toast(describeError(err), "error");
+      navigate(href.item(project.id, w.id));
+    } finally {
+      setBusy(false);
+    }
   }
 
   const open = items.filter((w) => w.status === "open");
@@ -91,12 +119,33 @@ export function Project() {
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="fix foo" required />
         </label>
         <label>
-          Notes <span className="hint">Context for the work. Can be prepended to the first prompt of every conversation on it.</span>
+          Notes <span className="hint">Context for the work. Prepended to the first prompt of every conversation you start on it.</span>
           <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Foo 500s when… Repro: …" />
         </label>
+        <label>
+          Teammate <span className="hint">Optional. Picking one puts them on the item and starts them off — that is all assigning is.</span>
+          <select value={agentId} onChange={(e) => setAgentId(e.target.value)} disabled={team.length === 0}>
+            <option value="">{team.length === 0 ? `No agents on ${project.ownerEmail}'s Fountain` : "Nobody yet"}</option>
+            {team.map((a) => {
+              const fit = agentFits(a, project);
+              return (
+                <option key={a.id} value={a.id} disabled={!fit.ok}>
+                  {a.name} ({a.runtime})
+                  {fit.ok ? "" : ` — ${fit.reason}`}
+                </option>
+              );
+            })}
+          </select>
+        </label>
+        {picked && (
+          <label>
+            First prompt <span className="hint">What {picked.name} should do on it. Leave it empty to just bring their computer up.</span>
+            <textarea rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Start with the repro, then…" />
+          </label>
+        )}
         <div className="row end">
           <button type="submit" disabled={!title.trim() || busy}>
-            {busy ? "Creating…" : "Create"}
+            {busy ? (picked ? "Starting…" : "Creating…") : picked ? `Create & talk to ${picked.name}` : "Create"}
           </button>
         </div>
       </form>

@@ -300,6 +300,20 @@ describe("the project-scoped proxy", () => {
     expect(shown.items[0].agentIds).toEqual(["a1", "a2"]);
   });
 
+  test("a new item can be started on in the same breath, and the teammate lands on it", async () => {
+    // What the new-work-item form does in one submit: create, then start on it.
+    const fresh = (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title: "ship bar", notes: "bar is slow" })).json()).data.id;
+    const res = await call("bob", "POST", `/f/${projectId}/api/conversations`, {
+      agent_id: "a7",
+      channel_id: `workbench:${projectId}/${fresh}`,
+      prompt: "Work item: ship bar\n\nbar is slow",
+    });
+    expect(res.status).toBe(201);
+    const shown = (await (await call("bob", "GET", `/api/projects/${projectId}`)).json()).data;
+    expect(shown.items.find((w: { id: string }) => w.id === fresh).agentIds).toEqual(["a7"]);
+    expect(posted[posted.length - 1]!.body.prompt).toBe("Work item: ship bar\n\nbar is slow");
+  });
+
   test("joining a computer: only one of the project's, with the same teammate, from the same work item", async () => {
     const otherItem = (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title: "elsewhere" })).json()).data.id;
     const crossItem = await call("bob", "POST", `/f/${projectId}/api/conversations`, { agent_id: "a1", channel_id: `workbench:${projectId}/${otherItem}`, sandbox_id: "sb1" });

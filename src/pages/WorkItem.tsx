@@ -1,6 +1,8 @@
 /**
- * One work item: its notes and status, the teammates on it, and the
- * conversations it has — each on its computer — linking into the thread.
+ * One work item: its notes and status, the teammates on it and the rest of
+ * the team a click away, and the conversations it has — each on its computer
+ * — linking into the thread. Prompting an agent from here is what puts them
+ * on the item; "+" on one only earmarks them.
  */
 import { useMemo, useState } from "react";
 import { useProject } from "../store";
@@ -19,7 +21,6 @@ export function WorkItem({ itemId }: { itemId: string }) {
   const item = items.find((w) => w.id === itemId);
   const [dialog, setDialog] = useState<{ agentId: string | null } | null>(null);
   const [editing, setEditing] = useState(false);
-  const [pick, setPick] = useState("");
 
   const convs = useMemo(() => conversations.filter((c) => channelIsItem(c.channel_id, project.id, itemId)), [conversations, project.id, itemId]);
   const computers = useMemo(() => computersOf(convs, sandboxes), [convs, sandboxes]);
@@ -86,31 +87,7 @@ export function WorkItem({ itemId }: { itemId: string }) {
       </div>
 
       <section className="card stack tight">
-        <div className="row">
-          <h2 className="h2 grow">Teammates</h2>
-          {available.length > 0 && (
-            <select
-              className="compact"
-              value={pick}
-              onChange={(e) => {
-                const id = e.target.value;
-                setPick("");
-                if (id) void addTeammate(item.id, id);
-              }}
-            >
-              <option value="">+ Add…</option>
-              {available.map((a) => {
-                const f = agentFits(a, project);
-                return (
-                  <option key={a.id} value={a.id} disabled={!f.ok}>
-                    {a.name}
-                    {f.ok ? "" : ` — ${f.reason}`}
-                  </option>
-                );
-              })}
-            </select>
-          )}
-        </div>
+        <h2 className="h2">Teammates</h2>
         {team.length === 0 && (
           <p className="muted small">
             No agents on {project.ownerEmail}'s Fountain yet. <a href={href.team(project.id)}>See the team</a>.
@@ -141,15 +118,36 @@ export function WorkItem({ itemId }: { itemId: string }) {
             );
           })}
         </ul>
-        <div>
-          <button className="secondary small" onClick={() => setDialog({ agentId: null })} disabled={team.length === 0}>
-            + Start a conversation
-          </button>
-        </div>
+        {available.length > 0 && (
+          <>
+            <div className="muted small">{onItem.length > 0 ? "Rest of the team" : "The team"} — pick one to put them on this item and prompt them.</div>
+            <div className="row wrap">
+              {available.map((a) => {
+                const fit = agentFits(a, project);
+                return (
+                  <span className="agent-chip" key={a.id}>
+                    <button
+                      className="chip-talk"
+                      disabled={!fit.ok}
+                      title={fit.ok ? `Put ${a.name} on this work item and prompt them` : fit.reason}
+                      onClick={() => setDialog({ agentId: a.id })}
+                    >
+                      <AgentAvatar agent={a} size={20} />
+                      <span className="ellipsis">{a.name}</span>
+                    </button>
+                    <button className="chip-add" title={`Put ${a.name} on this work item without starting anything`} onClick={() => void addTeammate(item.id, a.id)}>
+                      +
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          </>
+        )}
       </section>
 
       <h2 className="h2 section">Conversations</h2>
-      {convs.length === 0 && <p className="muted">None yet. Talk to a teammate above; a second conversation on a computer that is up starts from the sidebar's +.</p>}
+      {convs.length === 0 && <p className="muted">None yet. Pick a teammate above and prompt them; a second conversation on a computer that is up starts from the sidebar's +.</p>}
       {computers.map((comp) => {
         const agent = comp.agentId ? agents.get(comp.agentId) ?? null : null;
         return (

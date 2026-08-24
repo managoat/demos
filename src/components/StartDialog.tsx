@@ -1,27 +1,22 @@
 /**
  * Start a conversation: pick the work item (fixed when opened from one),
- * pick a teammate (an agent), write the first prompt. The project supplies
- * the environment and vault (the server enforces that whatever this sends).
- * Optionally join a computer another conversation of the same agent already
- * has (`sandbox_id`, ADR 0023).
+ * pick a teammate (an agent), write the first prompt. Starting is also what
+ * puts the teammate on the item, so this dialog is the whole of assigning
+ * one. The project supplies the environment and vault (the server enforces
+ * that whatever this sends). Optionally join a computer another conversation
+ * of the same agent already has (`sandbox_id`, ADR 0023).
  */
-import { useMemo, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useProject } from "../store";
-import type { Agent, Conversation } from "../types";
-import { agentFits, channelFor, conversationTitle, type WorkItem } from "../lib/workbench";
+import type { Agent } from "../types";
+import { agentFits, type WorkItem } from "../lib/workbench";
+import type { JoinTarget } from "../lib/start";
 import { describeError } from "../lib/errors";
 import { href, navigate } from "../router";
 import { AgentAvatar } from "./AgentAvatar";
 
-export interface JoinTarget {
-  sandboxId: string;
-  label: string;
-  /** The agent the computer belongs to; a home is never shared across identities. */
-  agentId: string;
-}
-
 export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?: string | null; join?: JoinTarget | null; initialAgentId?: string | null; onClose: () => void }) {
-  const { project, items, fountain, agents, environments, vaults, toast, refresh, reload } = useProject();
+  const { project, items, agents, environments, vaults, startConversation } = useProject();
   const open = items.filter((w) => w.status === "open");
   const fixed = itemId ? items.find((w) => w.id === itemId) ?? null : null;
   const [pickedItem, setPickedItem] = useState<string>(fixed?.id ?? open[0]?.id ?? items[0]?.id ?? "");
@@ -37,7 +32,6 @@ export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?
 
   const agent = agents.get(agentId) ?? null;
   const fit = agent ? agentFits(agent, project) : { ok: false as const, reason: "no agent" };
-  const preview = useMemo(() => (item ? buildPrompt(item, prompt, includeNotes) : prompt.trim()), [item, prompt, includeNotes]);
   const envName = project.environmentId ? environments.get(project.environmentId)?.name ?? "?" : agent?.environment_id ? `${environments.get(agent.environment_id)?.name ?? "?"} (agent's own)` : "none";
   const vaultName = project.vaultId ? vaults.get(project.vaultId)?.name ?? "?" : "none";
 
@@ -46,21 +40,8 @@ export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?
     if (!agent || !item || busy || !fit.ok) return;
     setBusy(true);
     setError(null);
-    const body: Record<string, unknown> = {
-      agent_id: agent.id,
-      channel_id: channelFor(project.id, item.id),
-      fresh: true,
-      title: conversationTitle(agent.name, item.title),
-    };
-    if (preview) body.prompt = preview;
-    if (join) body.sandbox_id = join.sandboxId;
     try {
-      const conversation = await fountain.api.data<Conversation>("POST", "/api/conversations", { body });
-      if (join && conversation.sandbox_id !== join.sandboxId) {
-        toast("This Fountain does not share a computer between conversations yet — started on a new one.", "error");
-      }
-      void refresh();
-      void reload(); // the server put the teammate on the item
+      const conversation = await startConversation({ item, agent, prompt, includeNotes, join });
       navigate(href.conversation(project.id, conversation.id));
       onClose();
     } catch (err) {
@@ -129,7 +110,7 @@ export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?
           </div>
         ) : (
           <label>
-            Teammate
+            Teammate <span className="hint">Whoever you pick joins the work item when the conversation starts.</span>
             <select value={agentId} onChange={(e) => setAgentId(e.target.value)} required>
               {all.length === 0 && <option value="">No agents on this Fountain</option>}
               {onItem.length > 0 && <optgroup label="On this work item">{onItem.map(option)}</optgroup>}
@@ -166,13 +147,4 @@ export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?
       </form>
     </div>
   );
-}
-
-export function buildPrompt(item: WorkItem, prompt: string, includeNotes: boolean): string {
-  const body = prompt.trim();
-  const notes = includeNotes ? item.notes.trim() : "";
-  if (!body && !notes) return "";
-  if (!notes) return body;
-  const head = `Work item: ${item.title}\n\n${notes}`;
-  return body ? `${head}\n\n---\n\n${body}` : head;
 }

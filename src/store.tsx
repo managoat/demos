@@ -18,6 +18,7 @@ import { Fountain } from "@agentshit/fountain-sdk";
 import type { Agent, Conversation, Environment, SandboxRecord, UserEvent, Vault } from "./types";
 import { computersOf } from "./lib/sidebar";
 import { api, ApiError, projectFountainBase, type Activity, type ItemDto, type Me, type ProjectDto } from "./lib/api";
+import { startBody, type StartInput } from "./lib/start";
 import { readSse } from "./lib/sse";
 import { describeError } from "./lib/errors";
 
@@ -156,6 +157,12 @@ export interface ProjectStore {
   removeItem: (id: string) => Promise<void>;
   addTeammate: (itemId: string, agentId: string) => Promise<void>;
   removeTeammate: (itemId: string, agentId: string) => Promise<void>;
+  /**
+   * Start a conversation on a work item — which is also how a teammate gets
+   * onto one: the server puts them there. Throws on failure, so the caller
+   * can say so where it asked.
+   */
+  startConversation: (input: StartInput) => Promise<Conversation>;
 }
 
 const ProjectCtx = createContext<ProjectStore | null>(null);
@@ -428,6 +435,18 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
     },
     [items, updateItem],
   );
+  const startConversation = useCallback<ProjectStore["startConversation"]>(
+    async (input) => {
+      const conversation = await fountain.api.data<Conversation>("POST", "/api/conversations", { body: startBody(projectId, input) });
+      if (input.join && conversation.sandbox_id !== input.join.sandboxId) {
+        toast("This Fountain does not share a computer between conversations yet — started on a new one.", "error");
+      }
+      void refresh();
+      void reload(); // the server put the teammate on the item
+      return conversation;
+    },
+    [fountain, projectId, toast, refresh, reload],
+  );
 
   const value = useMemo<ProjectStore | null>(
     () =>
@@ -458,6 +477,7 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
             removeItem,
             addTeammate,
             removeTeammate,
+            startConversation,
           }
         : null,
     [
@@ -485,6 +505,7 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
       removeItem,
       addTeammate,
       removeTeammate,
+      startConversation,
     ],
   );
 

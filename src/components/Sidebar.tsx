@@ -11,7 +11,8 @@ import { useProject } from "../store";
 import { href, useRoute } from "../router";
 import { attachable, clampWidth, computerLabel, groupByItem, hueOf, loadSidebarWidth, relativeTime, saveSidebarWidth, type Computer, type ItemGroup } from "../lib/sidebar";
 import type { WorkItem } from "../lib/workbench";
-import { StartDialog, type JoinTarget } from "./StartDialog";
+import type { JoinTarget } from "../lib/start";
+import { StartDialog } from "./StartDialog";
 import type { Conversation } from "../types";
 
 export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }) {

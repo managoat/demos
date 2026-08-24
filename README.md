@@ -9,6 +9,14 @@ pull teammates into it, and talk to each one. The team is simply the project
 owner's Fountain agents; adding a teammate to a work item is picking an agent,
 and then you prompt.
 
+**Assigning is one step, not four.** Starting a conversation is what puts a
+teammate on a work item — the server does it (`server/proxy.ts`) — so nothing
+has to be added first. The new-work-item form takes a teammate and a first
+prompt, so "fix foo, Coder, here is the repro" is one submit and lands you in
+the thread. On an item that already exists, the whole team is a row of chips
+under its teammates: click one and write the prompt. ("+" on a chip only
+earmarks them, for an item you are staffing before there is anything to say.)
+
 **Sharing.** A project has an owner and members. Everyone signs in with
 Fountain; the owner shares a project by email, and it appears for that person
 the next time they sign in. Members see the same work items and the same
@@ -140,6 +148,7 @@ src/
   router.ts          hash routes
   lib/api.ts         the server's API
   lib/workbench.ts   the model; the legacy-state import
+  lib/start.ts       starting a conversation on an item — the request that also assigns the teammate
   lib/turns.ts       fold a log feed into turns for the chat view
   lib/blocks.ts      arrange server-parsed blocks (from fountain-conversations)
   lib/markdown.tsx   allow-list markdown → React nodes, no innerHTML
