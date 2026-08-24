@@ -721,6 +721,34 @@ describe("search across the project's conversations", () => {
     const body = (await (await call("bob", "GET", `/f/${projectId}/api/search?q=spectral`)).json()) as { data: FakeHit[] };
     expect(body.data.map((h) => h.turn_id)).toEqual(["t-real"]);
   });
+
+  test("a scoped query is windowed by Fountain, and its has_more comes back — what ⌘F counts by", async () => {
+    // The thread's find asks for one window of a conversation's hits and walks
+    // them; "1 of 5+" is only honest if the paging is Fountain's own, and the
+    // window we may ask for is the one the proxy will actually send.
+    hits["key-alice"] = Array.from({ length: 12 }, (_, i) => ({
+      kind: "reply" as const,
+      conversation_id: "s1",
+      agent_id: "a1",
+      turn_id: `t-walk-${i}`,
+      turn_number: i,
+      snippet: `walk ${i}`,
+      ts: "2026-08-23T01:00:00Z",
+    }));
+    searched.length = 0;
+    const body = (await (await call("bob", "GET", `/f/${projectId}/api/search?q=walk&conversation_id=s1&limit=5`)).json()) as {
+      data: FakeHit[];
+      meta: { has_more: boolean };
+    };
+    expect(body.data.map((h) => h.turn_id)).toEqual(["t-walk-0", "t-walk-1", "t-walk-2", "t-walk-3", "t-walk-4"]);
+    expect(body.meta.has_more).toBe(true);
+    // One request, for one conversation: no paging through the owner's account here.
+    expect(searched).toHaveLength(1);
+    expect(searched[0]!.limit).toBe("5");
+    // A window wider than Fountain's page is cut down here rather than asked for.
+    await call("bob", "GET", `/f/${projectId}/api/search?q=walk&conversation_id=s1&limit=500`);
+    expect(searched[1]!.limit).toBe("100");
+  });
 });
 
 describe("closing an item retires its computers", () => {

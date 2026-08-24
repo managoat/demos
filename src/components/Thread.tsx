@@ -2,6 +2,11 @@
  * One conversation: its transcript so far (SDK history), live events from the
  * store's stream, and a composer. Chat layout: your prompts on the right, the
  * agent's blocks on the left.
+ *
+ * Two things land a reader on a turn rather than at the bottom: a ⌘K hit,
+ * which arrives as `focusTurnId` off the route, and ⌘F over this conversation
+ * (`ThreadFind`), which walks its own hits without leaving the page. Both end
+ * at the same place — the turn scrolled to and marked in the margin.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { useProject } from "../store";
@@ -15,6 +20,7 @@ import { BlockView } from "./Blocks";
 import { StatusPill } from "./StatusPill";
 import { AgentAvatar } from "./AgentAvatar";
 import { AttachButton, AttachmentStrip, useAttachments } from "./Attachments";
+import { FindBar, useThreadFind } from "./ThreadFind";
 import { turnImageUrl } from "../lib/api";
 
 const HISTORY_STREAMS: Stream[] = ["acp", "stdout", "stage"];
@@ -34,9 +40,13 @@ export function Thread({ conversationId, onClose, context, focusTurnId }: { conv
   const [sending, setSending] = useState(false);
   const attachments = useAttachments(useCallback((message: string) => toast(message, "error"), [toast]));
   const scroller = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLElement>(null);
   // Arriving on a turn (a search hit) means reading there, not at the bottom.
   const stickToBottom = useRef(!focusTurnId);
   const landed = useRef<string | null>(null);
+  const find = useThreadFind({ conversationId, root });
+  // ⌘F wins over the turn the route named: it is where the reader is looking now.
+  const focus = find.at ?? focusTurnId ?? null;
 
   const agent = conversation?.agent_id ? agents.get(conversation.agent_id) ?? null : null;
   const who = agent?.name ?? conversation?.runtime ?? "agent";
@@ -116,14 +126,25 @@ export function Thread({ conversationId, onClose, context, focusTurnId }: { conv
   }, [events, turns, loading]);
 
   // A search hit names a turn: scroll to it once it is on screen — once, so
-  // that output arriving afterwards does not keep yanking the view back.
+  // that output arriving afterwards does not keep yanking the view back. Each
+  // landing is keyed, ⌘F's by which hit it is, so stepping between two hits on
+  // one turn (its prompt and its reply both matched) still counts as a move.
+  const routeLanding = focusTurnId ? `route:${focusTurnId}` : null;
+  const landing = find.at ? `find:${find.at}#${find.index}` : routeLanding;
   useEffect(() => {
-    if (!focusTurnId || landed.current === focusTurnId) return;
-    const el = scroller.current?.querySelector<HTMLElement>(`[data-turn="${CSS.escape(focusTurnId)}"]`);
+    if (!focus || !landing || landed.current === landing) return;
+    const el = scroller.current?.querySelector<HTMLElement>(`[data-turn="${CSS.escape(focus)}"]`);
     if (!el) return;
-    landed.current = focusTurnId;
+    landed.current = landing;
     el.scrollIntoView({ block: "center" });
-  }, [focusTurnId, turns, events]);
+  }, [focus, landing, turns, events]);
+
+  // ⌘F moved the reader, so the turn the route named is no longer where they
+  // are: closing the box must leave them at the hit, not throw them back. A
+  // *new* turn on the route is a new landing and still scrolls.
+  useEffect(() => {
+    if (find.at && routeLanding) landed.current = routeLanding;
+  }, [find.at, routeLanding]);
 
   const onScroll = useCallback(() => {
     const el = scroller.current;
@@ -176,7 +197,7 @@ export function Thread({ conversationId, onClose, context, focusTurnId }: { conv
   const retired = conversation?.status === "terminated";
 
   return (
-    <section className={`thread${attachments.dragging && !retired ? " dropping" : ""}`} {...(retired ? {} : attachments.dropzone)}>
+    <section ref={root} className={`thread${attachments.dragging && !retired ? " dropping" : ""}`} {...(retired ? {} : attachments.dropzone)}>
       <header className="thread-head">
         {onClose && (
           <button className="icon" onClick={onClose} title="Close">
@@ -193,6 +214,9 @@ export function Thread({ conversationId, onClose, context, focusTurnId }: { conv
           </div>
         </div>
         {conversation && <StatusPill status={conversation.status} sandbox={sandbox?.status} />}
+        <button className={`icon${find.open ? " on" : ""}`} onClick={find.toggle} title="Find in this conversation (⌘F)" aria-label="Find in this conversation">
+          ⌕
+        </button>
         <label className="check small">
           <input type="checkbox" checked={showStdout} onChange={(e) => setShowStdout(e.target.checked)} /> stdout
         </label>
@@ -209,11 +233,32 @@ export function Thread({ conversationId, onClose, context, focusTurnId }: { conv
         )}
       </header>
 
+      {find.open && (
+        <FindBar
+          q={find.q}
+          onQ={find.setQ}
+          onKeyDown={find.onKeyDown}
+          input={find.input}
+          count={find.hits.length}
+          index={find.index}
+          onStep={find.step}
+          onClose={find.close}
+          searching={find.searching}
+          error={find.error}
+          hasMore={find.hasMore}
+          pending={waiting}
+        />
+      )}
+
       <div className="transcript term" ref={scroller} onScroll={onScroll}>
         {loading && <div className="term-line muted"># loading…</div>}
         {folded.setup.length > 0 && <SetupLine events={folded.setup} done={folded.turns.length > 0} />}
         {folded.turns.map(({ turn, events: evs }) => (
-          <div className={`turn ${turn.status} ${turn.id === focusTurnId ? "found" : ""}`} key={turn.id} data-turn={turn.id}>
+          <div
+            className={`turn ${turn.status}${turn.id === focus ? " found" : find.marked.has(turn.id) ? " hit" : ""}`}
+            key={turn.id}
+            data-turn={turn.id}
+          >
             <div className="term-prompt">
               <span className="ps1" aria-hidden="true">
                 ❯

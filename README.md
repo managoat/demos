@@ -201,6 +201,20 @@ holds, and Fountain's full text over titles, prompts and replies arrives a
 beat behind. Enter opens the hit — a reply or a prompt lands on the turn it
 matched, marked in the margin, not at the bottom of the thread.
 
+**⌘F finds it in the thread you are reading.** The other half, and the one a
+long transcript needs: a strip under the conversation's head searches that
+conversation alone, and walking the hits — ↵/⇧↵, n/N, ↑↓ — moves the transcript
+to the turn that matched and marks it, rather than navigating anywhere. The
+rest of the hits keep a fainter mark in the margin, so you can see what is left
+to walk. It is `GET /api/search` with `conversation_id`, the tight path: the
+proxy checks the id is this project's and lets Fountain scope the query, so a
+keystroke fetches nothing outside the conversation. Two things it says out
+loud, because neither is guessable — a reply is only searchable once its turn
+*ends*, so the turn still running will not match; and matching is whole words
+with `websearch` syntax (`"a quoted phrase"`, `-excluded`, `or`), which is
+sharp for an identifier and blunt for prose. ⌘F is the browser's whenever the
+reader is not in the thread, and always while the palette is up.
+
 Search is the sharpest edge of running on the owner's key: `GET /api/search`
 answers for the owner's *whole account* — their other projects, and personal
 conversations that are nobody else's business. So the proxy narrows it, and
@@ -355,7 +369,7 @@ src/
   lib/workbench.ts   the model; the legacy-state import
   lib/start.ts       starting a conversation on an item — the request that also assigns the teammate
   lib/images.ts      a pasted or dropped file, read into the payload a prompt takes
-  lib/search.ts      what ⌘K searches: names locally, messages through the proxy
+  lib/search.ts      what ⌘K and ⌘F search: names locally, messages through the proxy
   lib/turns.ts       fold a log feed into turns for the chat view
   lib/digest.ts      a work item's stage stream → what happened since you last looked
   lib/blocks.ts      arrange server-parsed blocks (from fountain-conversations)
@@ -363,7 +377,7 @@ src/
   lib/draft.ts       a field's draft and the debounced save behind it
   lib/theme.ts       the palette list; the blocks themselves are in styles.css
   pages/             Projects, Project (items, people), WorkItem, Team, Cost
-  components/        Thread, ItemDigest, Palette (⌘K), StartDialog, Attachments, EnvVaultFields, Blocks, ItemStatus, SignIn, Layout
+  components/        Thread, ThreadFind (⌘F), ItemDigest, Palette (⌘K), StartDialog, Attachments, EnvVaultFields, Blocks, ItemStatus, SignIn, Layout
 ```
 
 ## Licence

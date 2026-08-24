@@ -574,6 +574,16 @@ button.attach:hover:not(:disabled) { background: var(--bg-2); }
 .thread-head { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--bg-1); flex-wrap: wrap; }
 .thread-title { flex: 1; min-width: 160px; }
 .thread-title .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60ch; }
+.thread-head button.icon.on { color: var(--brand); }
+
+/* ⌘F: a strip under the thread's head, the way an editor's find is — never a panel of results. */
+.find-bar { display: flex; align-items: center; gap: 8px; padding: 5px 16px; border-bottom: 1px solid var(--border); background: var(--bg-1); font-family: var(--mono); font-size: 12px; flex-wrap: wrap; }
+.find-input { flex: 1; min-width: 140px; font-family: var(--mono); font-size: 12.5px; padding: 3px 8px; }
+.find-count { flex: none; min-width: 8ch; text-align: right; white-space: nowrap; }
+.find-bar button.icon { flex: none; }
+.find-bar button.icon:disabled { opacity: 0.4; cursor: default; }
+.find-note { flex: none; margin-left: auto; }
+.find-note .error { background: none; padding: 0; }
 
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
 .modal { width: 100%; max-width: 560px; background: var(--bg-0); border: 1px solid var(--border); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 12px; max-height: 90dvh; overflow-y: auto; }
@@ -679,6 +689,8 @@ button.icon.small-icon:disabled { opacity: 0.4; }
 .turn.failed .term-meta, .turn.failed .ps1 { color: var(--danger); }
 /* the turn a search hit landed on: marked in the margin, so the eye finds it after the scroll */
 .turn.found { box-shadow: inset 3px 0 0 var(--brand); border-radius: 0 6px 6px 0; padding-left: 8px; margin-left: -11px; background: color-mix(in srgb, var(--brand) 5%, transparent); }
+/* ⌘F's other hits: the same mark, faint, so the rest of them are visible while you walk */
+.turn.hit { box-shadow: inset 3px 0 0 color-mix(in srgb, var(--brand) 32%, transparent); border-radius: 0 6px 6px 0; padding-left: 8px; margin-left: -11px; }
 .term-out { display: flex; flex-direction: column; gap: 4px; padding-left: 18px; border-left: 2px solid color-mix(in srgb, var(--border) 70%, transparent); margin-left: 4px; }
 .transcript.term .block.text { font-family: var(--mono); font-size: 12.5px; line-height: 1.55; padding: 2px 0; }
 .transcript.term .md p { margin: 0 0 6px; }

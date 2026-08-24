@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
+import type { Fountain } from "@agentshit/fountain-sdk";
 import type { Agent, Conversation, SearchHit } from "../types";
 import type { ItemDto } from "./api";
-import { describeHits, matchConversations, type Context } from "./search";
+import { describeHits, findIsOurs, matchConversations, searchMessages, threadHits, type Context } from "./search";
 
 const conv = (id: string, title: string, itemId: string, status = "idle", lastActive = "2026-08-23T00:00:00Z") =>
   ({ id, title, channel_id: `workbench:p1/${itemId}/aaaaaaaaaaaa`, agent_id: "a1", status, last_active_at: lastActive }) as unknown as Conversation;
@@ -53,4 +54,52 @@ test("a hit in a conversation the list has not caught up with is still shown", (
   const rows = describeHits([{ kind: "prompt", conversation_id: "c9", agent_id: null, turn_id: "t1", turn_number: 1, snippet: "brand new", ts: "2026-08-24T00:00:00Z" }], ctx);
   expect(rows[0]!.href).toBe("#/p/p1/c/c9/t/t1");
   expect(rows[0]!.secondary).toBe("this project · turn 1");
+});
+
+// ── ⌘F: one conversation ─────────────────────────────────────────────────
+
+const hit = (kind: SearchHit["kind"], turn: string | null, n: number | null, snippet = "x"): SearchHit =>
+  ({ kind, conversation_id: "c1", agent_id: "a1", turn_id: turn, turn_number: n, snippet, ts: "2026-08-23T00:00:00Z" }) as SearchHit;
+
+test("a thread's hits are put back into reading order, prompt before the reply it got", () => {
+  // As Fountain ranks them: best first, in no particular place in the thread.
+  const rows = threadHits([hit("reply", "t9", 9, "ninth"), hit("reply", "t2", 2, "second"), hit("prompt", "t9", 9, "asked"), hit("prompt", "t2", 2, "asking")]);
+  expect(rows.map((r) => r.snippet)).toEqual(["asking", "second", "asked", "ninth"]);
+  expect(rows.map((r) => r.turnNumber)).toEqual([2, 2, 9, 9]);
+});
+
+test("a title hit is not a place in the transcript, so ⌘F does not count it", () => {
+  const rows = threadHits([hit("title", null, null, "Coder: fix the gate"), hit("reply", "t1", 1, "in the gate")]);
+  expect(rows.map((r) => r.snippet)).toEqual(["in the gate"]);
+  // Two hits on one turn are two stops, not one — the prompt and the reply both matched.
+  expect(new Set(threadHits([hit("prompt", "t1", 1), hit("reply", "t1", 1)]).map((r) => r.key)).size).toBe(2);
+});
+
+test("⌘F is the browser's unless the reader is in the thread", () => {
+  // Reading it: focus inside the thread, or nowhere — where clicking the transcript leaves you.
+  expect(findIsOurs({ inThread: true, focusedElsewhere: false, modal: false })).toBe(true);
+  expect(findIsOurs({ inThread: false, focusedElsewhere: false, modal: false })).toBe(true);
+  // Focused on something else on the page: they meant the browser's find.
+  expect(findIsOurs({ inThread: false, focusedElsewhere: true, modal: false })).toBe(false);
+  // The palette is up: it is a box over the whole app, and ⌘F over it is not ours.
+  expect(findIsOurs({ inThread: true, focusedElsewhere: false, modal: true })).toBe(false);
+});
+
+test("searching one conversation names it, which is what puts the proxy on its tight path", async () => {
+  const asked: Record<string, string | number>[] = [];
+  const fake = {
+    request: (_m: string, _p: string, opts: { query: Record<string, string | number> }) => {
+      asked.push(opts.query);
+      return Promise.resolve({ data: [hit("reply", "t1", 1)], meta: { has_more: true } });
+    },
+  } as unknown as Fountain;
+
+  const found = await searchMessages(fake, "gate", { conversationId: "c1", limit: 100 });
+  expect(asked[0]).toEqual({ q: "gate", limit: 100, conversation_id: "c1" });
+  expect(found.hits).toHaveLength(1);
+  expect(found.hasMore).toBe(true);
+
+  // The palette's call is the same one without an id: the whole project.
+  await searchMessages(fake, "gate");
+  expect(asked[1]).toEqual({ q: "gate", limit: 20 });
 });
