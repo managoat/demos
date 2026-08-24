@@ -77,10 +77,12 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
     const joinable = canJoin && attachable(comp);
     const newest = comp.conversations[0];
     const accent = `hsl(${hueOf(comp.sandboxId ?? comp.key)} 60% 55%)`;
+    // Collapse hides the conversation you are in; the row it is under says so.
+    const hasCurrent = comp.conversations.some((c) => c.id === currentId);
     return (
       <details
         key={comp.key}
-        className={`computer-card ${comp.live ? "live" : "gone"}`}
+        className={`computer-card ${comp.live ? "live" : "gone"}${hasCurrent ? " has-current" : ""}`}
         style={{ "--accent": accent } as CSSProperties}
         open={!collapsed.has(comp.key)}
         onToggle={(e) => toggle(comp.key, (e.target as HTMLDetailsElement).open)}
