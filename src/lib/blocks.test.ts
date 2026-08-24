@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { arrange, assistantText, timeline, sectionState, isSection } from "./blocks";
+import { arrange, assistantText, timeline, sectionState, isSection, type ShownBlock } from "./blocks";
 import type { LogEvent, Turn } from "../types";
 
 let id = 0;
@@ -36,6 +36,49 @@ describe("arrange", () => {
       ev({ blocks: [{ kind: "tool_result", tool_id: "zz", body: "late" }] }),
     ];
     expect(arrange(events, new Set(["acp"]))).toEqual([{ kind: "tool_result", tool_id: "zz", body: "late" }]);
+  });
+});
+
+describe("permission requests", () => {
+  const ask = { kind: "permission_request" as const, request_id: "r1", name: "Bash", summary: "rm -rf build/", options: [{ optionId: "o-yes", name: "Allow once", kind: "allow_once" }] };
+  const started = (over: Record<string, unknown> = {}) =>
+    ev({ kind: "stage", stream: undefined, stage: "request", state: "started", data: JSON.stringify({ request_id: "r1", tool: "Bash", options: ask.options, ...over }) });
+
+  test("an ask nobody has answered carries Fountain's own deadline", () => {
+    const [block] = arrange([ev({ blocks: [ask] })]) as [Extract<ShownBlock, { kind: "permission_request" }>];
+    expect(block.permission).toEqual({ outcome: null, optionId: null, expiresAt: "2026-08-18T00:05:00.000Z" });
+    // The options are the runtime's, untouched: nothing is invented for the card.
+    expect(block.options).toEqual(ask.options);
+  });
+
+  test("the open stage event's own timeout wins over the five-minute default", () => {
+    const [block] = arrange([started({ timeout_ms: 60_000 }), ev({ blocks: [ask] })]) as [Extract<ShownBlock, { kind: "permission_request" }>];
+    expect(block.permission.expiresAt).toBe("2026-08-18T00:01:00.000Z");
+  });
+
+  test("`request · done` closes the block, whoever answered it", () => {
+    const answered = arrange([
+      started(),
+      ev({ blocks: [ask] }),
+      ev({ kind: "stage", stream: undefined, stage: "request", state: "done", data: JSON.stringify({ request_id: "r1", outcome: "answered", option_id: "o-yes" }) }),
+    ]) as [Extract<ShownBlock, { kind: "permission_request" }>];
+    expect(answered[0]!.permission).toMatchObject({ outcome: "answered", optionId: "o-yes" });
+
+    const timedOut = arrange([
+      started(),
+      ev({ blocks: [ask] }),
+      ev({ kind: "stage", stream: undefined, stage: "request", state: "done", data: JSON.stringify({ request_id: "r1", outcome: "timeout", option_id: null }) }),
+    ]) as [Extract<ShownBlock, { kind: "permission_request" }>];
+    expect(timedOut[0]!.permission).toMatchObject({ outcome: "timeout", optionId: null });
+  });
+
+  test("a close for another request leaves this one held", () => {
+    const [block] = arrange([
+      started(),
+      ev({ blocks: [ask] }),
+      ev({ kind: "stage", stream: undefined, stage: "request", state: "done", data: JSON.stringify({ request_id: "r2", outcome: "answered", option_id: "o-yes" }) }),
+    ]) as [Extract<ShownBlock, { kind: "permission_request" }>];
+    expect(block.permission.outcome).toBeNull();
   });
 });
 

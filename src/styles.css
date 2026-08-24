@@ -415,6 +415,18 @@ details.thinking .body { white-space: pre-wrap; margin: 6px 0 2px; }
 details.raw { color: var(--muted); }
 details.init summary { color: var(--text-2); }
 
+/* a permission request: the one block a person has to answer, so it is never folded */
+.block.permission { display: flex; flex-direction: column; gap: 6px; padding: 6px 10px; border-radius: 10px; font-size: 12.5px; border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--border)); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.block.permission.closed { border-color: var(--border); background: transparent; color: var(--text-2); }
+.permission-head { display: flex; gap: 8px; align-items: baseline; }
+.permission-head .tool-summary { flex: 1; min-width: 0; }
+.permission-head .pill { margin-left: auto; }
+.permission-mark { color: var(--warn); }
+.block.permission.closed .permission-mark { color: var(--muted); }
+.permission-ask { color: var(--text-2); }
+.permission-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.permission-problem { color: var(--danger); }
+
 /* timeline */
 .stage { border-left: 2px solid var(--border); margin-left: 6px; padding: 4px 0 8px 14px; position: relative; }
 .stage-head { display: flex; align-items: baseline; gap: 10px; font-size: 13px; }
@@ -687,6 +699,7 @@ button.icon.small-icon:disabled { opacity: 0.4; }
 .transcript.term details pre { background: var(--bg-1); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; font-size: 11.5px; margin: 4px 0 2px; }
 .transcript.term details.thinking .body { color: var(--muted); font-style: italic; }
 .transcript.term .block.error { color: var(--danger); }
+.transcript.term .block.permission { font-family: var(--mono); font-size: 12px; }
 .term-line.working { padding: 2px 0 0 22px; }
 .cursor { display: inline-block; color: var(--text); animation: blink 1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }

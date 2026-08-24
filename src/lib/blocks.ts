@@ -2,16 +2,44 @@
  * Arranging server-parsed blocks for display. The server does the parsing
  * (`?blocks=true`); the client only pairs and groups.
  */
+import { ASK_TIMEOUT_MS, dataOf } from "./digest";
 import type { Block, LogEvent, Turn } from "../types";
 
-/** A tool_use with its tool_result tucked in, or any other block as is. */
+/**
+ * What became of a permission request, folded onto the block that asks it.
+ *
+ * Fountain puts the ask on the conversation as a `permission_request` block
+ * and its resolution on the same stream, as a `request` stage event carrying
+ * the same `request_id` — the pairing this module already does for a
+ * `tool_result` and its `tool_use`. So a card closes itself the moment
+ * somebody else answers, and asks nothing to find out.
+ */
+export interface Permission {
+  /** How it ended — `answered`, `timeout`, `turn_ended` — or null while it is still held. */
+  outcome: string | null;
+  /** The option that answered it, when one did. */
+  optionId: string | null;
+  /**
+   * When Fountain refuses it on its own (docs/concepts/permissions.md: five
+   * minutes). The close that says so can be missed — a tab that was shut when
+   * it happened has no event for it — so the deadline is kept here too. A card
+   * still offering buttons for a request Fountain refused long ago is a lie.
+   */
+  expiresAt: string;
+}
+
+/** A tool_use with its tool_result tucked in, a permission request with its fate, or any other block as is. */
 export type ShownBlock =
   | (Block & { kind: "tool_use"; result?: { body: string; error: boolean } })
+  | (Block & { kind: "permission_request"; permission: Permission })
   | Block;
 
 /** Concatenate adjacent text/thinking blocks and pair tool results onto their calls. */
 export function arrange(events: LogEvent[], visibleStreams?: Set<string>): ShownBlock[] {
-  const raw: Block[] = [];
+  // Read before the blocks, because a request's resolution can arrive on the
+  // same page of events as the ask itself.
+  const held = requestStates(events);
+  const raw: ShownBlock[] = [];
   for (const ev of events) {
     if (ev.kind !== "output" || !ev.blocks) continue;
     if (visibleStreams && ev.stream && !visibleStreams.has(ev.stream)) continue;
@@ -19,12 +47,14 @@ export function arrange(events: LogEvent[], visibleStreams?: Set<string>): Shown
       const last = raw[raw.length - 1];
       if ((b.kind === "text" || b.kind === "thinking") && last && last.kind === b.kind) {
         last.body = (last.body ?? "") + (b.body ?? "");
+      } else if (b.kind === "permission_request") {
+        raw.push({ ...b, kind: "permission_request", permission: permissionOf(b, ev.ts, held) });
       } else {
         raw.push({ ...b });
       }
     }
   }
-  const results = new Map<string, Block>();
+  const results = new Map<string, ShownBlock>();
   for (const b of raw) if (b.kind === "tool_result" && b.tool_id) results.set(b.tool_id, b);
   const consumed = new Set<string>();
   const out: ShownBlock[] = [];
@@ -40,6 +70,50 @@ export function arrange(events: LogEvent[], visibleStreams?: Set<string>): Shown
     }
   }
   return out;
+}
+
+/** As much of a `request` stage pair as we have read; `expiresAt` null until the open arrives. */
+type RequestState = { outcome: string | null; optionId: string | null; expiresAt: string | null };
+
+/**
+ * The `request` stage events of a feed, keyed by request id.
+ *
+ * `request · started` carries `tool`, `options` and `timeout_ms`; `request ·
+ * done` carries `outcome` (`answered`, `timeout`, `turn_ended`) and
+ * `option_id`. Both are stage events, so neither is filtered by the stream
+ * toggle above — a request is answered on the same feed whether or not you
+ * are watching stdout.
+ */
+function requestStates(events: LogEvent[]): Map<string, RequestState> {
+  const out = new Map<string, RequestState>();
+  for (const ev of events) {
+    if (ev.kind !== "stage" || ev.stage !== "request") continue;
+    const d = dataOf(ev);
+    const id = typeof d.request_id === "string" ? d.request_id : null;
+    if (!id) continue;
+    const state = out.get(id) ?? { outcome: null, optionId: null, expiresAt: null };
+    if (ev.state === "started") {
+      const ms = typeof d.timeout_ms === "number" && d.timeout_ms > 0 ? d.timeout_ms : ASK_TIMEOUT_MS;
+      const asked = Date.parse(ev.ts);
+      if (!Number.isNaN(asked)) state.expiresAt = new Date(asked + ms).toISOString();
+    } else {
+      state.outcome = typeof d.outcome === "string" ? d.outcome : ev.state ?? "done";
+      state.optionId = typeof d.option_id === "string" ? d.option_id : null;
+    }
+    out.set(id, state);
+  }
+  return out;
+}
+
+/** The block's own fate. Falls back to the deadline the ask itself implies. */
+function permissionOf(block: Block, askedAt: string, held: Map<string, RequestState>): Permission {
+  const state = typeof block.request_id === "string" ? held.get(block.request_id) : undefined;
+  const asked = Date.parse(askedAt);
+  return {
+    outcome: state?.outcome ?? null,
+    optionId: state?.optionId ?? null,
+    expiresAt: state?.expiresAt ?? new Date((Number.isNaN(asked) ? Date.now() : asked) + ASK_TIMEOUT_MS).toISOString(),
+  };
 }
 
 /** The assistant's text of a turn — chat bubbles and previews. */

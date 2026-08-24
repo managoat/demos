@@ -56,6 +56,8 @@ const posted: { key: string; body: Record<string, unknown> }[] = [];
 const prompted: { prompt?: string; images?: unknown[] }[] = [];
 /** Conversations this fake was asked to terminate; one whose id starts with `stuck` refuses. */
 const terminated: string[] = [];
+/** Permission answers this fake accepted. A second one for the same request is too late. */
+const answers: { conversation: string; request: string; option_id: unknown }[] = [];
 let streamEvents: { conversation_id: string; id: number }[] = [];
 /** An instance with billing switched off answers 404 there; flip this to be one. */
 let billingEnabled = true;
@@ -104,6 +106,17 @@ const fountain = Bun.serve({
         return Response.json({ data: { ok: true, prompt: body.prompt, images: body.images?.length ?? 0 } }, { status: 202 });
       }
       if (/^\/turns\/[^/]+\/images\/\d+$/.test(one[2])) return new Response("PNG-BYTES", { headers: { "content-type": "image/png" } });
+      const ask = /^\/requests\/([^/]+)$/.exec(one[2]);
+      if (ask && req.method === "POST") {
+        const request = ask[1]!;
+        const { option_id } = (await req.json()) as { option_id?: unknown };
+        // Fountain's own rules: the first answer wins, and an option the
+        // runtime did not offer is refused rather than forwarded.
+        if (answers.some((a) => a.request === request)) return Response.json({ error: "permission_request_resolved" }, { status: 409 });
+        if (option_id !== "o-once" && option_id !== "o-no") return Response.json({ error: "unknown_option", message: "option_id was not offered for this request" }, { status: 422 });
+        answers.push({ conversation: c.id, request, option_id });
+        return Response.json({ ok: true });
+      }
       if (one[2] === "/terminate") {
         if (c.id.startsWith("stuck")) return Response.json({ error: "boom" }, { status: 500 });
         terminated.push(c.id);
@@ -446,6 +459,35 @@ describe("the project-scoped proxy", () => {
     expect(bad.status).toBe(422);
     expect((await bad.json()).error).toBe("bad_images");
     expect(posted).toHaveLength(before);
+  });
+
+  test("a member can answer a permission request the agent is held on", async () => {
+    answers.length = 0;
+    const res = await call("bob", "POST", `/f/${projectId}/api/conversations/c1/requests/req-1`, { option_id: "o-once" });
+    expect(res.status).toBe(200);
+    expect((await res.json()).ok).toBe(true);
+    expect(answers).toEqual([{ conversation: "c1", request: "req-1", option_id: "o-once" }]);
+
+    // The first answer wins, and the loser is told so rather than retried.
+    const late = await call("alice", "POST", `/f/${projectId}/api/conversations/c1/requests/req-1`, { option_id: "o-no" });
+    expect(late.status).toBe(409);
+    expect((await late.json()).error).toBe("permission_request_resolved");
+    expect(answers).toHaveLength(1);
+
+    // An option Fountain says the runtime never offered comes back as itself.
+    const made_up = await call("bob", "POST", `/f/${projectId}/api/conversations/c1/requests/req-2`, { option_id: "allow" });
+    expect(made_up.status).toBe(422);
+    expect((await made_up.json()).error).toBe("unknown_option");
+  });
+
+  test("a request on a conversation outside the project is not answerable at all", async () => {
+    answers.length = 0;
+    expect((await call("bob", "POST", `/f/${projectId}/api/conversations/c2/requests/req-1`, { option_id: "o-once" })).status).toBe(404);
+    expect((await call("bob", "POST", `/f/${projectId}/api/conversations/c3/requests/req-1`, { option_id: "o-once" })).status).toBe(404);
+    expect((await call("carol", "POST", `/f/${projectId}/api/conversations/c1/requests/req-1`, { option_id: "o-once" })).status).toBe(404);
+    expect((await call(null, "POST", `/f/${projectId}/api/conversations/c1/requests/req-1`, { option_id: "o-once" })).status).toBe(401);
+    // Nothing reached Fountain on the owner's key.
+    expect(answers).toEqual([]);
   });
 
   test("a turn's image bytes come back through the project, and only for the project's conversations", async () => {

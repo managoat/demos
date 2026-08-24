@@ -151,6 +151,17 @@ export function Thread({ conversationId, onClose, context, focusTurnId }: { conv
     }
   }
 
+  // Answering an `ask` permission the agent is held on. The card owns what to
+  // say about a refusal or a lost race (a 409 — the first answer wins), and
+  // the resolution arrives on the stream as `request · done` for every client
+  // watching, this one included, so nothing here has to re-read anything.
+  const answer = useCallback(
+    async (requestId: string, optionId: string) => {
+      await fountain.request("POST", `/api/conversations/${conversationId}/requests/${encodeURIComponent(requestId)}`, { body: { option_id: optionId } });
+    },
+    [fountain, conversationId],
+  );
+
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -224,7 +235,7 @@ export function Thread({ conversationId, onClose, context, focusTurnId }: { conv
             )}
             <div className="term-out">
               {arrange(evs, visible).map((b, i) => (
-                <BlockView key={`${turn.id}-${i}`} block={b} />
+                <BlockView key={`${turn.id}-${i}`} block={b} onAnswer={answer} />
               ))}
             </div>
           </div>

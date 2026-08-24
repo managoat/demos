@@ -97,6 +97,25 @@ from when this browser last opened the item (kept per item, so a reload does
 not lose your place); a held request is not, because a glance at the page
 must not be what makes "3 agents are blocked waiting on you" disappear.
 
+**And you can unblock it where it asked.** An agent under an `ask` permission
+stops before the tool runs, and Fountain puts the ask on the conversation as a
+`permission_request` block. The transcript renders it as a card with buttons —
+**exactly the options that block carried, in the runtime's order**, because
+Fountain refuses an option id the runtime did not offer and the three runtimes
+disagree about theirs (gemini's are `proceed_once` and `cancel`). Clicking one
+is `POST /f/<project>/api/conversations/<id>/requests/<request_id>`, the same
+proxy every other conversation call crosses.
+
+The first answer wins. Another member, an editor over `fountain acp`, or the
+five-minute timeout may get there first, which is a 409 — the card says so and
+does not try again. It does not poll to find out, either: the resolution comes
+back down the stream the page already holds open, as `request · done`, and
+`src/lib/blocks.ts` folds it onto the block on `request_id` the way it already
+pairs a `tool_result` to its `tool_use`. So a card closes itself whoever
+answered, and one whose close was missed — a tab that was shut when it
+happened — closes on the deadline instead, rather than offering buttons for a
+request Fountain refused twenty minutes ago.
+
 **Done means done.** Marking a work item done retires every conversation
 still live on it, which is what takes its computers down — Fountain destroys
 a sprite with the last live conversation on it, so a machine something
