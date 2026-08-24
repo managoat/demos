@@ -1,14 +1,15 @@
 /**
- * Images on a prompt: paste one into a composer, or drop it on one.
+ * Images on a prompt: pick one with the button, paste one into a composer,
+ * or drop it on one.
  *
  * Every place that sends a prompt — the thread's composer, and the two forms
  * that start a conversation — uses `useAttachments`, so a screenshot goes in
  * the same way wherever you are. The hook holds the images and hands back
  * the props to spread: `paste` on the textarea, `dropzone` on whatever
- * region should take a drop.
+ * region should take a drop, and `add` for `AttachButton`.
  */
-import { useCallback, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
-import type { ImageInput } from "../../shared/images";
+import { useCallback, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent } from "react";
+import { IMAGE_MEDIA_TYPES, type ImageInput } from "../../shared/images";
 import { imageFiles, imageSrc, readImage, type Attachment } from "../lib/images";
 import { describeError } from "../lib/errors";
 
@@ -99,11 +100,46 @@ export function useAttachments(onError: (message: string) => void): Attachments 
   return { items, payload: items.length ? items.map((a) => a.image) : undefined, add, remove, clear, dragging: depth > 0, paste, dropzone };
 }
 
-/** The attached images, each with the button that takes it off again. */
-export function AttachmentStrip({ items, onRemove }: { items: Attachment[]; onRemove: (id: string) => void }) {
-  if (items.length === 0) return null;
+/**
+ * The third way in, and the only one some people have: paste wants a
+ * clipboard with an image on it, drop wants a pointer dragging a file, and a
+ * phone has neither — nor does anyone navigating by keyboard or reading the
+ * page through a screen reader, for whom the paste-or-drop placeholder was
+ * the only sign attaching was possible at all.
+ *
+ * A file input cannot be styled or labelled usefully, so the input is hidden
+ * and a real button stands in front of it — focusable, named, and disabled
+ * with the composer it belongs to.
+ */
+export function AttachButton({ add, disabled, label = "Attach images" }: { add: Attachments["add"]; disabled?: boolean; label?: string }) {
+  const input = useRef<HTMLInputElement>(null);
+
+  const chosen = (e: ChangeEvent<HTMLInputElement>) => {
+    void add(e.target.files);
+    // Picking the same file twice in a row is still a change worth having;
+    // `add` has already taken the files off the list by the time this runs.
+    e.target.value = "";
+  };
+
+  return (
+    <>
+      <button type="button" className="attach" onClick={() => input.current?.click()} disabled={disabled} title={label} aria-label={label}>
+        <span aria-hidden="true">🖼</span>
+      </button>
+      <input ref={input} type="file" hidden accept={IMAGE_MEDIA_TYPES.join(",")} multiple onChange={chosen} />
+    </>
+  );
+}
+
+/**
+ * The attached images, each with the button that takes it off again — and,
+ * where the composer has nowhere better to put it, the button that adds one.
+ */
+export function AttachmentStrip({ items, onRemove, add }: { items: Attachment[]; onRemove: (id: string) => void; add?: Attachments["add"] }) {
+  if (items.length === 0 && !add) return null;
   return (
     <div className="image-picker">
+      {add && <AttachButton add={add} />}
       {items.map((a) => (
         <span className="thumb" key={a.id}>
           <img src={imageSrc(a.image)} alt={a.name} title={a.name} />

@@ -164,11 +164,12 @@ export function Project() {
         </label>
         {picked && (
           <label>
-            First prompt <span className="hint">What {picked.name} should do on it. Leave it empty to just bring their computer up. Paste or drop a screenshot to send with it.</span>
+            First prompt <span className="hint">What {picked.name} should do on it. Leave it empty to just bring their computer up. Attach, paste or drop a screenshot to send with it.</span>
             <textarea rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} onPaste={attachments.paste} placeholder="Start with the repro, then…" />
           </label>
         )}
-        <AttachmentStrip items={attachments.items} onRemove={attachments.remove} />
+        {/* The button sits with the prompt it goes on; a drop still lands before a teammate is picked, and says so below. */}
+        <AttachmentStrip items={attachments.items} onRemove={attachments.remove} add={picked ? attachments.add : undefined} />
         {orphanImages && (
           <div className="error">
             {picked ? "Write the prompt the images go with — on their own there is no turn to attach them to." : "Pick a teammate for the images to go to."}

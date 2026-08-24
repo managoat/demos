@@ -130,7 +130,7 @@ export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?
         {agent && !fit.ok && <div className="error">{agent.name} {fit.reason}.</div>}
 
         <label>
-          First prompt <span className="hint">Paste or drop a screenshot to send it with the words.</span>
+          First prompt <span className="hint">Attach, paste or drop a screenshot to send it with the words.</span>
           <textarea
             rows={5}
             value={prompt}
@@ -140,7 +140,7 @@ export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?
             autoFocus
           />
         </label>
-        <AttachmentStrip items={attachments.items} onRemove={attachments.remove} />
+        <AttachmentStrip items={attachments.items} onRemove={attachments.remove} add={attachments.add} />
         {orphanImages && <div className="error">Write the prompt the images go with — on their own there is no turn to attach them to.</div>}
         {item?.notes.trim() && (
           <label className="check">

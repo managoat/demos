@@ -14,7 +14,7 @@ import { describeError } from "../lib/errors";
 import { BlockView } from "./Blocks";
 import { StatusPill } from "./StatusPill";
 import { AgentAvatar } from "./AgentAvatar";
-import { AttachmentStrip, useAttachments } from "./Attachments";
+import { AttachButton, AttachmentStrip, useAttachments } from "./Attachments";
 import { turnImageUrl } from "../lib/api";
 
 const HISTORY_STREAMS: Stream[] = ["acp", "stdout", "stage"];
@@ -249,11 +249,12 @@ export function Thread({ conversationId, onClose, context, focusTurnId }: { conv
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKey}
             onPaste={attachments.paste}
-            placeholder={retired ? "retired" : `${who} — Enter to send, Shift+Enter for a newline, paste or drop an image`}
+            placeholder={retired ? "retired" : `${who} — Enter to send, Shift+Enter for a newline, 🖼 or paste or drop an image`}
             disabled={retired}
             spellCheck={false}
           />
         </div>
+        <AttachButton add={attachments.add} disabled={retired} label="Attach an image to this prompt" />
         <button className="send" type="submit" disabled={sending || (!draft.trim() && !attachments.payload) || retired} title="Send (Enter)">
           ⏎
         </button>

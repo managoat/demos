@@ -26,14 +26,22 @@ into an item can become markup. Writing them stays a plain textarea, and the
 save follows a pause in the typing rather than every keystroke
 (`src/lib/draft.ts`).
 
-**A screenshot is a prompt.** Paste one into a composer or drop it on the
-thread and it goes with the words — "here is what it looks like, fix it"
-beats describing a layout in prose. Thumbnails sit above what you are typing
-until you send, each with an × ; the transcript shows the images back on the
-turn they went with. The rules are Fountain's own (`shared/images.ts`): PNG,
-JPEG, GIF or WebP, 10 MB an image, and a file that breaks them is refused in
-the composer, by name, rather than as a failed POST. The start-a-conversation
-forms take them too, on that first prompt.
+**A screenshot is a prompt.** Paste one into a composer, drop it on the
+thread, or press **🖼** and pick it, and it goes with the words — "here is
+what it looks like, fix it" beats describing a layout in prose. Thumbnails
+sit above what you are typing until you send, each with an × ; the transcript
+shows the images back on the turn they went with. The rules are Fountain's
+own (`shared/images.ts`): PNG, JPEG, GIF or WebP, 10 MB an image, and a file
+that breaks them is refused in the composer, by name, rather than as a failed
+POST. The start-a-conversation forms take them too, on that first prompt.
+
+The button is there because the other two ways leave people out: a touch
+device has no drag and usually nothing on the clipboard, a keyboard cannot
+drop a file, and a screen reader had nothing to find at all when the only
+sign attaching was possible was placeholder text. It is a plain focusable
+button in front of a hidden file input (`AttachButton` in
+`src/components/Attachments.tsx`), on all three composers, calling the same
+`useAttachments` `add` a paste and a drop call.
 
 **Sharing.** A project has an owner and members. Everyone signs in with
 Fountain; the owner shares a project by email, and it appears for that person

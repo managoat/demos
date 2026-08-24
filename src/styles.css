@@ -437,6 +437,11 @@ details.init summary { color: var(--text-2); }
 .thumb { position: relative; display: inline-block; }
 .thumb img { height: 48px; border-radius: 6px; display: block; }
 .thumb-x { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%; padding: 0; font-size: 12px; line-height: 1; background: var(--text); color: var(--bg-0); justify-content: center; }
+/* the way in for a device that cannot drop and a clipboard with nothing on it */
+button.attach { width: 36px; height: 36px; padding: 0; justify-content: center; flex-shrink: 0; border-radius: 8px; font-size: 16px; line-height: 1; background: transparent; color: var(--text-2); border-color: var(--border); }
+button.attach:hover:not(:disabled) { background: var(--bg-2); }
+.composer button.attach { border-radius: 50%; }
+.composer.term button.attach { width: 32px; height: 32px; border-radius: 6px; margin-top: 4px; }
 
 /* a screenshot on its way in: the region taking the drop, and what it says */
 .dropping { outline: 2px dashed var(--brand); outline-offset: -4px; }
