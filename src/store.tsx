@@ -5,7 +5,7 @@
  * tree (projects, items, members) persisted in this browser.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Fountain } from "@agentshit/fountain-sdk";
+import { Fountain, type FetchLike } from "@agentshit/fountain-sdk";
 import type { Agent, Conversation, Environment, UserEvent, Vault } from "./types";
 import type { Settings } from "./lib/settings";
 import { readSse } from "./lib/sse";
@@ -50,9 +50,25 @@ interface Toast {
   kind: "info" | "error";
 }
 
+/**
+ * The SDK stamps a `User-Agent` on every request. Chrome drops it (a
+ * forbidden header), but Firefox sends it, which turns every call into a
+ * CORS preflight asking for `user-agent` — and Fountain's allow-list does not
+ * include it, so the request dies with "CORS Missing Allow Header". A browser
+ * has a user agent already; strip the SDK's.
+ */
+const browserFetch: FetchLike = (input, init) => {
+  if (init?.headers) {
+    const headers = new Headers(init.headers);
+    headers.delete("user-agent");
+    init = { ...init, headers };
+  }
+  return fetch(input, init);
+};
+
 export function makeClient(settings: Settings): Fountain {
   // `appUrl: ""` — this app is where a human watches the conversation.
-  return new Fountain({ baseUrl: settings.baseUrl, apiKey: settings.apiKey, appUrl: "" });
+  return new Fountain({ baseUrl: settings.baseUrl, apiKey: settings.apiKey, appUrl: "", fetch: browserFetch });
 }
 
 export function StoreProvider({ settings, children }: { settings: Settings; children: ReactNode }) {
