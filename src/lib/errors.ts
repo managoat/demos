@@ -27,12 +27,12 @@ export function describeError(err: unknown): string {
     const fields = Object.entries(err.fieldErrors)
       .map(([k, v]) => `${k} ${v.join(", ")}`)
       .join("; ");
-    return fields || err.message || `Request failed (${err.status})`;
+    return `${fields || err.message || "Request failed"} (HTTP ${err.status}${err.code ? `, ${err.code}` : ""})`;
   }
   if (err instanceof TypeError && /fetch/i.test(err.message)) {
     return "Could not reach Fountain. Is the URL right, and is this origin in API_CORS_ORIGINS?";
   }
-  return err instanceof Error ? err.message : String(err);
+  return err instanceof Error ? `${err.name}: ${err.message}` : String(err);
 }
 
 /** The API's `error` code, when the failure carried one. */

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useStore } from "../store";
 import { href, useRoute } from "../router";
 
-export function Layout({ email, onSettings, onSignOut, children }: { email: string | null; onSettings: () => void; onSignOut: () => void; children: ReactNode }) {
+export function Layout({ email, startupError, onSettings, onSignOut, children }: { email: string | null; startupError?: string | null; onSettings: () => void; onSignOut: () => void; children: ReactNode }) {
   const { settings, connected, error, state } = useStore();
   const route = useRoute();
   const host = settings.baseUrl.replace(/^https?:\/\//, "");
@@ -52,6 +52,7 @@ export function Layout({ email, onSettings, onSignOut, children }: { email: stri
           Sign out
         </button>
       </header>
+      {startupError && <div className="banner error">{startupError}</div>}
       {error && <div className="banner error">{error}</div>}
       <main className="main">{children}</main>
     </div>
