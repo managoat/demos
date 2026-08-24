@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Conversation, SandboxRecord } from "../types";
-import { attachable, computerLabel, computersOf, groupByItem, itemIdOf, relativeTime } from "./sidebar";
+import { attachable, computerLabel, computersOf, groupByItem, hueOf, itemIdOf, relativeTime } from "./sidebar";
 
 function conv(over: Partial<Conversation>): Conversation {
   return { id: "c", status: "idle", runtime: "claude", inserted_at: "2026-08-24T00:00:00Z", ...over } as Conversation;
@@ -83,4 +83,13 @@ describe("groupByItem", () => {
     expect(g[2]!.computers).toEqual([]);
     expect(g[3]!.live).toBe(true); // done, but its computer is still up — shown last, not hidden
   });
+});
+
+test("hueOf is stable and in range", () => {
+  expect(hueOf("5e17b8d6")).toBe(hueOf("5e17b8d6"));
+  expect(hueOf("5e17b8d6")).not.toBe(hueOf("8e025aa4"));
+  for (const id of ["a", "5e17b8d6", "8e025aa4", "269172a5-7061-4119-80d7-75485d3f9872"]) {
+    expect(hueOf(id)).toBeGreaterThanOrEqual(0);
+    expect(hueOf(id)).toBeLessThan(360);
+  }
 });

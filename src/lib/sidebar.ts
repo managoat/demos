@@ -153,3 +153,14 @@ export function groupByItem<I extends { id: string; title: string; status: strin
     return (b.latest || b.item.createdAt).localeCompare(a.latest || a.item.createdAt);
   });
 }
+
+/**
+ * A stable hue for a sandbox, off its id — so two computers on one work
+ * item read as two things at a glance, and the same computer keeps its
+ * colour across reloads and screens.
+ */
+export function hueOf(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return h % 360;
+}

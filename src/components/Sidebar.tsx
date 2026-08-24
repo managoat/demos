@@ -6,10 +6,10 @@
  * same teammate there, on that item. Items with a live computer first,
  * done items folded away.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useProject } from "../store";
 import { href, useRoute } from "../router";
-import { attachable, computerLabel, groupByItem, relativeTime, type Computer, type ItemGroup } from "../lib/sidebar";
+import { attachable, computerLabel, groupByItem, hueOf, relativeTime, type Computer, type ItemGroup } from "../lib/sidebar";
 import type { WorkItem } from "../lib/workbench";
 import { AgentAvatar, initials } from "./AgentAvatar";
 import { StartDialog, type JoinTarget } from "./StartDialog";
@@ -53,8 +53,15 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
     const canJoin = comp.live && !!comp.sandboxId && !!agent;
     const joinable = canJoin && attachable(comp);
     const newest = comp.conversations[0];
+    const accent = `hsl(${hueOf(comp.sandboxId ?? comp.key)} 60% 55%)`;
     return (
-      <details key={comp.key} open={!collapsed.has(comp.key)} onToggle={(e) => toggle(comp.key, (e.target as HTMLDetailsElement).open)}>
+      <details
+        key={comp.key}
+        className={`computer-card ${comp.live ? "live" : "gone"}`}
+        style={{ "--accent": accent } as CSSProperties}
+        open={!collapsed.has(comp.key)}
+        onToggle={(e) => toggle(comp.key, (e.target as HTMLDetailsElement).open)}
+      >
         <summary className={`computer-head ${comp.live ? "live" : "gone"}`}>
           {agent ? (
             <AgentAvatar agent={agent} size={22} />
@@ -69,7 +76,7 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
               {agent?.name ?? newest?.runtime ?? "agent"}
             </span>
             <span className="muted small ellipsis computer-sub">
-              🖥 {computerLabel(comp)}
+              <span className="swatch" /> {computerLabel(comp)}
               {comp.sandbox ? ` · ${comp.sandbox.status}` : comp.live ? " · up" : " · gone"}
               {comp.busy ? " · working" : ""}
             </span>
