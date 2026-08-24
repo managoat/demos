@@ -31,6 +31,13 @@ the app says so. The sandbox identity `(owner, agent, environment, vault)`
 falls out of the tree — same project, same agent — which is what makes sharing
 a computer legal, whichever member opens the second conversation.
 
+**Themes.** The top bar's ☀/☾/◐ opens a colour-scheme menu the way an editor
+has one: follow the OS, or pick a palette — solarized, nord, dracula, gruvbox,
+tokyo night, one dark, catppuccin latte. Hovering a line previews it on the
+whole app; the choice is per browser. Every colour in the app comes from the
+tokens at the top of `src/styles.css`, so a new theme is one block of them
+there plus an entry in `src/lib/theme.ts`.
+
 Hosted at **https://workbench.inevitable.fyi/** against
 `https://fountain.inevitable.fyi` — sign in with your account there.
 
@@ -136,6 +143,7 @@ src/
   lib/turns.ts       fold a log feed into turns for the chat view
   lib/blocks.ts      arrange server-parsed blocks (from fountain-conversations)
   lib/markdown.tsx   allow-list markdown → React nodes, no innerHTML
+  lib/theme.ts       the palette list; the blocks themselves are in styles.css
   pages/             Projects, Project (items, people), WorkItem, Team
   components/        Thread, StartDialog, EnvVaultFields, Blocks, SignIn, Layout
 ```

@@ -11,22 +11,15 @@ import { href, navigate, useRoute } from "../router";
 import { Sidebar } from "./Sidebar";
 import { TabBar } from "./TabBar";
 import { StatusBar } from "./StatusBar";
-import { loadTheme, nextTheme, saveTheme, THEME_GLYPH } from "../lib/theme";
+import { ThemePicker } from "./ThemePicker";
 
 export function Shell({ children }: { children: ReactNode }) {
   const { me, projects, signOut } = useWorkbench();
   const store = useProjectMaybe();
   const route = useRoute();
-  const [theme, setTheme] = useState(() => loadTheme());
   const [drawer, setDrawer] = useState(false);
   const projectId = "projectId" in route ? route.projectId : "";
   const project = store?.project ?? projects.find((p) => p.id === projectId) ?? null;
-
-  const cycleTheme = () => {
-    const t = nextTheme(theme);
-    saveTheme(t);
-    setTheme(t);
-  };
 
   return (
     <div className="app ide">
@@ -77,9 +70,7 @@ export function Shell({ children }: { children: ReactNode }) {
             {me.email}
           </span>
         )}
-        <button type="button" className="icon" onClick={cycleTheme} title={`Theme: ${theme} (click to change)`} aria-label={`Theme: ${theme}`}>
-          {THEME_GLYPH[theme]}
-        </button>
+        <ThemePicker />
         <button className="secondary small" onClick={signOut}>
           sign out
         </button>

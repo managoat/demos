@@ -1,4 +1,15 @@
-:root {
+/* ── palettes ─────────────────────────────────────────────────────────
+ * Every colour in the app comes from these tokens, so a theme is one block
+ * of them, the way a terminal or an editor ships colour schemes. The theme
+ * on <html> is `data-theme="<id>"`, or absent to follow the OS.
+ *
+ * Each block is also written as `.pal-<id>`, which is how the theme menu
+ * paints a swatch in a theme's own colours without repeating them in
+ * TypeScript: the class sets the tokens on the swatch, its children read
+ * them. Adding a theme means a block here and an entry in src/lib/theme.ts
+ * — theme.test.ts fails if the two disagree.
+ */
+:root, .pal-light {
   --bg-0: #ffffff;
   --bg-1: #f6f6f8;
   --bg-2: #ececf1;
@@ -8,21 +19,25 @@
   --muted: #8a8a96;
   --brand: #2563eb;
   --brand-hover: #1d4ed8;
+  --on-brand: #ffffff;
   --you: #2563eb;
   --them: #e9e9ee;
   --them-text: #111114;
   --danger: #b91c1c;
   --danger-bg: #fef2f2;
+  --bad: #f43f5e;
   --ok: #10b981;
   --warn: #f59e0b;
-  --focus: rgba(37, 99, 235, 0.35);
+  --code-bg: #18181b;
+  --code-text: #f4f4f5;
+}
+:root {
+  --focus: color-mix(in srgb, var(--brand) 35%, transparent);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   color-scheme: light dark;
 }
-:root[data-theme="dark"] { color-scheme: dark; }
-:root[data-theme="light"] { color-scheme: light; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  :root:not([data-theme]) {
     --bg-0: #101014;
     --bg-1: #17171c;
     --bg-2: #202027;
@@ -35,7 +50,7 @@
     --danger-bg: #2a1616;
   }
 }
-:root[data-theme="dark"] {
+:root[data-theme="dark"], .pal-dark {
   --bg-0: #101014;
   --bg-1: #17171c;
   --bg-2: #202027;
@@ -47,6 +62,192 @@
   --them-text: #f2f2f6;
   --danger-bg: #2a1616;
 }
+:root[data-theme="solarized-light"], .pal-solarized-light {
+  --bg-0: #fdf6e3;
+  --bg-1: #f5efdc;
+  --bg-2: #eee8d5;
+  --border: #ded7bf;
+  --text: #002b36;
+  --text-2: #586e75;
+  --muted: #6f8384;
+  --brand: #1f6fa8;
+  --brand-hover: #268bd2;
+  --on-brand: #fdf6e3;
+  --you: #1f6fa8;
+  --them: #eee8d5;
+  --them-text: #073642;
+  --danger: #dc322f;
+  --danger-bg: #f7e3dd;
+  --bad: #d33682;
+  --ok: #859900;
+  --warn: #b58900;
+  --code-bg: #073642;
+  --code-text: #eee8d5;
+}
+:root[data-theme="solarized-dark"], .pal-solarized-dark {
+  --bg-0: #002b36;
+  --bg-1: #073642;
+  --bg-2: #0d4451;
+  --border: #14505d;
+  --text: #eee8d5;
+  --text-2: #93a1a1;
+  --muted: #7d9296;
+  --brand: #2f96dd;
+  --brand-hover: #3ba0e6;
+  --on-brand: #002b36;
+  --you: #2f96dd;
+  --them: #073642;
+  --them-text: #eee8d5;
+  --danger: #dc322f;
+  --danger-bg: #3a1f21;
+  --bad: #d33682;
+  --ok: #859900;
+  --warn: #b58900;
+  --code-bg: #001f27;
+  --code-text: #93a1a1;
+}
+:root[data-theme="nord"], .pal-nord {
+  --bg-0: #2e3440;
+  --bg-1: #333a47;
+  --bg-2: #3b4252;
+  --border: #434c5e;
+  --text: #eceff4;
+  --text-2: #d8dee9;
+  --muted: #8792a2;
+  --brand: #81a1c1;
+  --brand-hover: #88c0d0;
+  --on-brand: #2e3440;
+  --you: #81a1c1;
+  --them: #3b4252;
+  --them-text: #eceff4;
+  --danger: #bf616a;
+  --danger-bg: #3a2b30;
+  --bad: #d08770;
+  --ok: #a3be8c;
+  --warn: #ebcb8b;
+  --code-bg: #272c36;
+  --code-text: #d8dee9;
+}
+:root[data-theme="dracula"], .pal-dracula {
+  --bg-0: #282a36;
+  --bg-1: #2f313f;
+  --bg-2: #3a3d4d;
+  --border: #44475a;
+  --text: #f8f8f2;
+  --text-2: #cfd2e6;
+  --muted: #8b98cc;
+  --brand: #bd93f9;
+  --brand-hover: #cbabfb;
+  --on-brand: #282a36;
+  --you: #bd93f9;
+  --them: #44475a;
+  --them-text: #f8f8f2;
+  --danger: #ff5555;
+  --danger-bg: #3b2430;
+  --bad: #ff79c6;
+  --ok: #50fa7b;
+  --warn: #f1fa8c;
+  --code-bg: #21222c;
+  --code-text: #f8f8f2;
+}
+:root[data-theme="gruvbox-dark"], .pal-gruvbox-dark {
+  --bg-0: #282828;
+  --bg-1: #32302f;
+  --bg-2: #3c3836;
+  --border: #504945;
+  --text: #ebdbb2;
+  --text-2: #d5c4a1;
+  --muted: #928374;
+  --brand: #83a598;
+  --brand-hover: #8ec07c;
+  --on-brand: #1d2021;
+  --you: #83a598;
+  --them: #3c3836;
+  --them-text: #ebdbb2;
+  --danger: #fb4934;
+  --danger-bg: #3c2526;
+  --bad: #fe8019;
+  --ok: #b8bb26;
+  --warn: #fabd2f;
+  --code-bg: #1d2021;
+  --code-text: #ebdbb2;
+}
+:root[data-theme="tokyo-night"], .pal-tokyo-night {
+  --bg-0: #1a1b26;
+  --bg-1: #1f2030;
+  --bg-2: #292e42;
+  --border: #2f3549;
+  --text: #c0caf5;
+  --text-2: #a9b1d6;
+  --muted: #7a83ad;
+  --brand: #7aa2f7;
+  --brand-hover: #9ab4f8;
+  --on-brand: #1a1b26;
+  --you: #7aa2f7;
+  --them: #292e42;
+  --them-text: #c0caf5;
+  --danger: #f7768e;
+  --danger-bg: #33202b;
+  --bad: #ff9e64;
+  --ok: #9ece6a;
+  --warn: #e0af68;
+  --code-bg: #16161e;
+  --code-text: #c0caf5;
+}
+:root[data-theme="one-dark"], .pal-one-dark {
+  --bg-0: #282c34;
+  --bg-1: #2c313a;
+  --bg-2: #3a3f4b;
+  --border: #3e4451;
+  --text: #dcdfe4;
+  --text-2: #abb2bf;
+  --muted: #8b94a5;
+  --brand: #61afef;
+  --brand-hover: #7cc0f5;
+  --on-brand: #282c34;
+  --you: #61afef;
+  --them: #3a3f4b;
+  --them-text: #dcdfe4;
+  --danger: #e06c75;
+  --danger-bg: #35222a;
+  --bad: #d19a66;
+  --ok: #98c379;
+  --warn: #e5c07b;
+  --code-bg: #21252b;
+  --code-text: #abb2bf;
+}
+:root[data-theme="catppuccin-latte"], .pal-catppuccin-latte {
+  --bg-0: #eff1f5;
+  --bg-1: #e6e9ef;
+  --bg-2: #dce0e8;
+  --border: #ccd0da;
+  --text: #4c4f69;
+  --text-2: #5c5f77;
+  --muted: #7c7f93;
+  --brand: #1e66f5;
+  --brand-hover: #1552d8;
+  --on-brand: #ffffff;
+  --you: #1e66f5;
+  --them: #dce0e8;
+  --them-text: #4c4f69;
+  --danger: #d20f39;
+  --danger-bg: #f9e2e7;
+  --bad: #e64553;
+  --ok: #40a02b;
+  --warn: #df8e1d;
+  --code-bg: #4c4f69;
+  --code-text: #eff1f5;
+}
+:root[data-theme="light"],
+:root[data-theme="solarized-light"],
+:root[data-theme="catppuccin-latte"] { color-scheme: light; }
+:root[data-theme="dark"],
+:root[data-theme="solarized-dark"],
+:root[data-theme="nord"],
+:root[data-theme="dracula"],
+:root[data-theme="gruvbox-dark"],
+:root[data-theme="tokyo-night"],
+:root[data-theme="one-dark"] { color-scheme: dark; }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 body { background: var(--bg-0); color: var(--text); }
@@ -54,7 +255,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 .button, button {
   border: 1px solid transparent; border-radius: 8px; padding: 6px 12px;
-  background: var(--brand); color: #fff; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;
+  background: var(--brand); color: var(--on-brand); text-decoration: none; display: inline-flex; align-items: center; gap: 4px;
 }
 .button:hover, button:hover { background: var(--brand-hover); }
 button:disabled { opacity: 0.5; cursor: default; }
@@ -65,7 +266,7 @@ button.danger:hover { background: var(--danger-bg); }
 button.small, .button.small { font-size: 12px; padding: 4px 10px; }
 button.icon { width: 32px; height: 32px; padding: 0; border-radius: 50%; justify-content: center; background: transparent; color: var(--text-2); font-size: 18px; line-height: 1; }
 button.icon:hover { background: var(--bg-2); }
-button.icon.primary { background: var(--brand); color: #fff; }
+button.icon.primary { background: var(--brand); color: var(--on-brand); }
 button.icon.primary:hover { background: var(--brand-hover); }
 input, select, textarea {
   width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--bg-0);
@@ -130,7 +331,7 @@ code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background:
 .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--bg-2); color: var(--text-2); white-space: nowrap; }
 .pill.running { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
 .pill.pending { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
-.pill.failed { background: color-mix(in srgb, #f43f5e 18%, transparent); color: #f43f5e; }
+.pill.failed { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
 .pill.terminated { opacity: 0.7; }
 .pill.tiny { font-size: 10px; padding: 0 5px; }
 
@@ -144,7 +345,7 @@ code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background:
 .actions { flex-wrap: wrap; }
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .seg button { border-radius: 0; background: transparent; color: var(--text-2); font-size: 12px; padding: 4px 10px; border: 0; }
-.seg button.on { background: var(--brand); color: #fff; }
+.seg button.on { background: var(--brand); color: var(--on-brand); }
 button.secondary.on { background: var(--bg-2); }
 .stream-toggles { display: flex; gap: 14px; padding: 6px 16px; border-bottom: 1px solid var(--border); background: var(--bg-1); }
 .show-body { flex: 1; min-height: 0; display: flex; }
@@ -160,7 +361,7 @@ button.secondary.on { background: var(--bg-2); }
 .bubble { max-width: min(80ch, 82%); padding: 8px 12px; border-radius: 18px; word-wrap: break-word; line-height: 1.45; font-size: 14.5px; }
 .bubble .body { white-space: pre-wrap; }
 .bubble .body.md { white-space: normal; }
-.bubble.you { align-self: flex-end; background: var(--you); color: #fff; border-bottom-right-radius: 4px; }
+.bubble.you { align-self: flex-end; background: var(--you); color: var(--on-brand); border-bottom-right-radius: 4px; }
 .bubble.you .meta { font-size: 10px; opacity: 0.75; margin-top: 4px; text-align: right; }
 .bubble.them { align-self: flex-start; background: var(--them); color: var(--them-text); border-bottom-left-radius: 4px; }
 .them-label { align-self: flex-start; padding-left: 8px; }
@@ -178,8 +379,9 @@ button.secondary.on { background: var(--bg-2); }
 .md p:last-child { margin-bottom: 0; }
 .md ul, .md ol { margin: 4px 0 8px; padding-left: 22px; }
 .md h3, .md h4, .md h5, .md h6 { margin: 8px 0 4px; font-size: 1em; }
-.md pre.md-code { background: rgba(0,0,0,0.25); color: #f4f4f5; padding: 8px 10px; border-radius: 8px; overflow-x: auto; font-size: 12.5px; margin: 6px 0; }
-.bubble.them .md pre.md-code { background: #18181b; }
+.md pre.md-code { background: var(--code-bg); color: var(--code-text); padding: 8px 10px; border-radius: 8px; overflow-x: auto; font-size: 12.5px; margin: 6px 0; }
+/* inside a sent bubble the code block is a shade of the bubble, not a slab */
+.bubble.you .md pre.md-code { background: rgba(0,0,0,0.25); color: var(--on-brand); }
 .md code { background: rgba(127,127,127,0.18); }
 .md blockquote { margin: 4px 0; padding-left: 10px; border-left: 3px solid var(--border); color: var(--text-2); }
 .md a { color: inherit; text-decoration: underline; }
@@ -208,7 +410,7 @@ details.init summary { color: var(--text-2); }
 .stage-dot { position: absolute; left: -6px; top: 8px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
 .stage.running .stage-dot { background: var(--ok); animation: pulse 1.2s infinite; }
 .stage.done .stage-dot { background: var(--ok); }
-.stage.failed .stage-dot { background: #f43f5e; }
+.stage.failed .stage-dot { background: var(--bad); }
 .stage.interrupted .stage-dot { background: var(--warn); }
 .stage-name { font-weight: 600; }
 .stage-turn { font-size: 11px; background: var(--bg-2); padding: 1px 6px; border-radius: 999px; }
@@ -233,7 +435,7 @@ details.init summary { color: var(--text-2); }
 .log-table td { padding: 2px 8px; vertical-align: top; border-bottom: 1px solid var(--border); }
 .log-table td.data { white-space: pre-wrap; word-break: break-word; }
 .log-row.stage { background: color-mix(in srgb, var(--brand) 6%, transparent); }
-.log-row.stderr td.data { color: #f43f5e; }
+.log-row.stderr td.data { color: var(--bad); }
 
 /* toasts */
 .toasts { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 60; }
@@ -279,7 +481,7 @@ details.init summary { color: var(--text-2); }
 .avatar { border-radius: 50%; overflow: hidden; background: var(--bg-2); color: var(--text-2); display: flex; align-items: center; justify-content: center; font-weight: 600; flex-shrink: 0; }
 .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 /* oauth */
-.oauth-btn { background: var(--brand); color: #fff; font-weight: 600; padding: 10px; border-radius: 8px; }
+.oauth-btn { background: var(--brand); color: var(--on-brand); font-weight: 600; padding: 10px; border-radius: 8px; }
 .oauth-btn:hover { background: var(--brand-hover); }
 .linklike { background: transparent; color: var(--text-2); border: 0; padding: 2px; text-decoration: underline; align-self: center; font-size: 13px; }
 .linklike:hover { background: transparent; color: var(--text); }
@@ -557,3 +759,30 @@ body.resizing-col { cursor: col-resize; user-select: none; }
 .app.ide .sidebar-list :focus-visible.icon.small-icon { opacity: 1; }
 /* except the one on the item you have open — that is where you start a conversation */
 .app.ide .sidebar-item.open > .sidebar-item-head .tree-twisty { opacity: 1; }
+
+/* ── the theme menu ─────────────────────────────────────────────────────
+ * Each swatch carries its theme's `.pal-<id>` class, so its stripes are
+ * that theme's own tokens — no colours repeated in TypeScript.
+ */
+.theme-picker { position: relative; display: inline-flex; }
+.theme-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 80;
+  min-width: 212px; max-height: 70dvh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 4px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg-0); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  font-family: var(--mono); font-size: 12px;
+}
+.theme-menu-label { padding: 6px 8px 2px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.theme-option { width: 100%; gap: 8px; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; text-align: left; }
+.theme-option:hover, .theme-option:focus-visible { background: var(--bg-2); }
+.theme-option.on { background: color-mix(in srgb, var(--brand) 14%, transparent); font-weight: 600; }
+.theme-option-name { flex: 1; min-width: 0; }
+.theme-check { flex-shrink: 0; color: var(--brand); }
+.theme-swatch { display: inline-flex; width: 34px; height: 15px; flex-shrink: 0; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; background: var(--bg-0); }
+.theme-swatch i { flex: 1; }
+.theme-swatch .s-bg { background: var(--bg-0); }
+.theme-swatch .s-surface { background: var(--bg-2); }
+.theme-swatch .s-brand { background: var(--brand); }
+.theme-swatch .s-ok { background: var(--ok); }
+.theme-swatch.system { background: linear-gradient(90deg, #ffffff 0 50%, #101014 50% 100%); }
