@@ -11,6 +11,7 @@ on:
     branches: [main]
     paths-ignore:
       - "k8s/**"
+      - "fountain/**"
       - "README.md"
 
 concurrency:

@@ -1,0 +1,94 @@
+# The environment and agent for working on the workbench itself, on Fountain.
+#
+#   fountain apply -f fountain/manifest.yml
+#
+# In the workbench, make a project with environment `fountain-workbench` and
+# the `jhgaylor` vault (GitHub token + git identity), and pull the
+# `fountain-workbench` agent onto its work items. No vault is defined here:
+# the project supplies one, and the repo is public, so the clone needs none.
+apiVersion: fountain.dev/v1
+kind: Environment
+metadata:
+  name: fountain-workbench
+spec:
+  networking_type: unrestricted
+  packages:
+    apt:
+      - jq
+      - ripgrep
+      - unzip
+    node: "24"
+  env_vars:
+    LANG: C.UTF-8
+  repositories:
+    - url: https://github.com/jhgaylor/fountain-workbench
+      mount_path: /workspace/fountain-workbench
+      secret_key: GITHUB_TOKEN
+    # The API the workbench is built on: OpenAPI, ADRs, the SDK source.
+    - url: https://github.com/BinaryBourbon/fountain
+      mount_path: /workspace/fountain
+      secret_key: GITHUB_TOKEN
+  setup_script: |
+    set -euxo pipefail
+
+    # Bun is the toolchain (runtime, test runner, bundler via vite).
+    curl -fsSL https://bun.sh/install | bash
+    export PATH="$HOME/.bun/bin:$PATH"
+    echo 'export PATH="$HOME/.bun/bin:$PATH"' >> ~/.bashrc
+
+    # gh, for the pull request at the end of the job.
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+    echo "deb [signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      | sudo tee /etc/apt/sources.list.d/github-cli.list
+    sudo apt-get update -qq && sudo apt-get install -y -qq gh
+
+    cd /workspace/fountain-workbench
+    bun install --frozen-lockfile
+    bun run typecheck
+    echo 'fountain-workbench ready: bun test / bun run typecheck / bun run build / bun run server'
+---
+apiVersion: fountain.dev/v1
+kind: Agent
+metadata:
+  name: fountain-workbench
+spec:
+  runtime: claude
+  model: anthropic/claude-opus-5
+  environment: fountain-workbench
+  description: >
+    Works on jhgaylor/fountain-workbench — the shared dev workstation on the
+    Fountain API (Bun server + React SPA). Reads the README first, runs the
+    gate, opens one pull request.
+  system: |
+    You work on Fountain Workbench: a Bun server (server/) and a React SPA
+    (src/) on the Fountain API. The checkout is at /workspace/fountain-workbench;
+    Fountain itself (the API this is built on: apps/fountain, docs/, decisions/,
+    sdk/typescript) is at /workspace/fountain for reference.
+
+    Before you touch anything, in this order:
+      1. cd /workspace/fountain-workbench && git fetch origin && git checkout -B <branch> origin/main
+         The sandbox may have warm-started from a checkpoint, so the checkout
+         on disk can be days old. Fetch before you read it.
+      2. Read README.md — how sign-in, sharing, and the project-scoped proxy
+         (/f/<project>) work, and why every conversation runs on the project
+         owner's key. server/app.ts lists the routes; server/proxy.ts is the
+         boundary a member must not cross. Keep it that way.
+      3. For anything touching the Fountain API, read the OpenAPI document in
+         the SDK (node_modules/@agentshit/fountain-sdk/dist/generated/openapi.d.ts)
+         or /workspace/fountain/docs before guessing a shape.
+
+    The gate, in the foreground, before you push:
+      bun run typecheck && bun test && bun run build
+    Anything you background dies when your turn ends. Read the output, not
+    the exit code, and confirm "0 fail" from bun test. Server code is tested
+    against a fake Fountain in server/app.test.ts — add a case there for any
+    change to what the proxy admits.
+
+    Never push to main: a push to main deploys to workbench.inevitable.fyi.
+    Commit with a message that says what changed and why, push a branch, and
+    open one pull request with `gh pr create`, with the gate output you
+    actually saw. Never end a turn with work pending — the turn that did the
+    work is the turn that states the pushed commit sha.
+  permission_policy:
+    default: auto_allow
