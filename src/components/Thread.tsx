@@ -178,46 +178,51 @@ export function Thread({ conversationId, onClose, context }: { conversationId: s
         )}
       </header>
 
-      <div className="transcript chat" ref={scroller} onScroll={onScroll}>
-        {loading && <div className="muted small">Loading…</div>}
+      <div className="transcript term" ref={scroller} onScroll={onScroll}>
+        {loading && <div className="term-line muted"># loading…</div>}
         {folded.setup.length > 0 && <SetupLine events={folded.setup} done={folded.turns.length > 0} />}
         {folded.turns.map(({ turn, events: evs }) => (
-          <div className="turn" key={turn.id}>
-            <div className="bubble you">
-              <div className="body">{turn.prompt}</div>
-              <div className="meta">
-                #{turn.turn_number} · {formatTime(turn.started_at ?? turn.inserted_at)}
-                {turn.status === "failed" ? " · failed" : turn.status === "interrupted" ? " · interrupted" : ""}
-              </div>
+          <div className={`turn ${turn.status}`} key={turn.id}>
+            <div className="term-prompt">
+              <span className="ps1" aria-hidden="true">
+                ❯
+              </span>
+              <span className="cmd">{turn.prompt}</span>
+              <span className="term-meta">
+                #{turn.turn_number} {formatTime(turn.started_at ?? turn.inserted_at)}
+                {turn.status === "failed" ? " ✕ failed" : turn.status === "interrupted" ? " ⏹ interrupted" : ""}
+              </span>
             </div>
-            {arrange(evs, visible).map((b, i) => (
-              <BlockView key={`${turn.id}-${i}`} block={b} bubble />
-            ))}
+            <div className="term-out">
+              {arrange(evs, visible).map((b, i) => (
+                <BlockView key={`${turn.id}-${i}`} block={b} />
+              ))}
+            </div>
           </div>
         ))}
-        {folded.loose.length > 0 && <div className="muted small">{stageLine(folded.loose)}</div>}
+        {folded.loose.length > 0 && <div className="term-line muted"># {stageLine(folded.loose)}</div>}
         {waiting && (
-          <div className="bubble them typing" aria-label="working">
-            <span />
-            <span />
-            <span />
+          <div className="term-line working" aria-label="working">
+            <span className="cursor">▍</span>
           </div>
         )}
       </div>
 
-      <form className="composer" onSubmit={send}>
-        <div className="composer-main">
-          <textarea
-            rows={2}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={onKey}
-            placeholder={conversation?.status === "terminated" ? "This conversation is retired." : `Message ${who}… (Enter to send, Shift+Enter for a newline)`}
-            disabled={conversation?.status === "terminated"}
-          />
-        </div>
-        <button className="send" type="submit" disabled={sending || !draft.trim() || conversation?.status === "terminated"} title="Send">
-          ↑
+      <form className="composer term" onSubmit={send}>
+        <span className="ps1" aria-hidden="true">
+          ❯
+        </span>
+        <textarea
+          rows={2}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={onKey}
+          placeholder={conversation?.status === "terminated" ? "retired" : `${who} — Enter to send, Shift+Enter for a newline`}
+          disabled={conversation?.status === "terminated"}
+          spellCheck={false}
+        />
+        <button className="send" type="submit" disabled={sending || !draft.trim() || conversation?.status === "terminated"} title="Send (Enter)">
+          ⏎
         </button>
       </form>
     </section>
