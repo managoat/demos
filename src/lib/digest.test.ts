@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ASK_TIMEOUT_MS, digestLine, digestOf, timeLeft, type ConversationRef, type ItemEvent } from "./digest";
+import { ASK_TIMEOUT_MS, digestLine, digestOf, historyKey, staleRefs, timeLeft, type ConversationRef, type ItemEvent } from "./digest";
 
 const T0 = Date.parse("2026-08-24T10:00:00Z");
 const at = (mins: number) => new Date(T0 + mins * 60_000).toISOString();
@@ -171,6 +171,55 @@ describe("digest", () => {
     expect("2026-08-24T10:00:00Z" > "2026-08-24T10:00:00.500Z").toBe(true);
     const d = digestOf({ events, conversations: [conv("a")], since: "2026-08-24T10:00:00.500Z", now: T0 + 60_000 });
     expect(d.finished).toBe(0);
+  });
+});
+
+describe("staleRefs", () => {
+  /** What the panel's ref holds after every conversation in `refs` answered. */
+  const readAll = (refs: ConversationRef[]) => new Map(refs.map((c) => [c.id, historyKey(c)]));
+  const ids = (refs: ConversationRef[]) => refs.map((c) => c.id);
+
+  test("the first look reads every conversation on the item", () => {
+    const refs = [conv("a"), conv("b"), conv("c")];
+    expect(ids(staleRefs(refs, new Map()))).toEqual(["a", "b", "c"]);
+  });
+
+  test("nothing moved: nothing is asked", () => {
+    // The conversation list is replaced on every line of runtime output. That
+    // must not cost a request — this is the whole point of the comparison.
+    const refs = [conv("a"), conv("b"), conv("c")];
+    expect(staleRefs(refs, readAll(refs))).toEqual([]);
+  });
+
+  test("a turn boundary is one request, whatever else is on the item", () => {
+    const before = [conv("a", "sb-a", "idle"), conv("b"), conv("c")];
+    const read = readAll(before);
+    const running = [conv("a", "sb-a", "running"), conv("b"), conv("c")];
+    expect(ids(staleRefs(running, read))).toEqual(["a"]);
+    // And back again when the turn ends — the flip both ways is a cue.
+    read.set("a", historyKey(running[0]!));
+    expect(ids(staleRefs(before, read))).toEqual(["a"]);
+  });
+
+  test("a computer swapped under a conversation is a cue too", () => {
+    const before = [conv("a", "sb-1")];
+    expect(ids(staleRefs([conv("a", "sb-2")], readAll(before)))).toEqual(["a"]);
+    expect(ids(staleRefs([conv("a", null)], readAll(before)))).toEqual(["a"]);
+  });
+
+  test("a conversation new to the item is read from the start", () => {
+    const read = readAll([conv("a")]);
+    expect(ids(staleRefs([conv("a"), conv("b")], read))).toEqual(["b"]);
+  });
+
+  test("a conversation that did not answer stays stale", () => {
+    // The caller marks a conversation read only once it has the history in
+    // hand, so a Fountain hiccup is retried on the next move rather than
+    // leaving a hole in the digest for as long as the tab is open.
+    const refs = [conv("a", "sb-a", "idle"), conv("b")];
+    const read = new Map([["b", historyKey(refs[1]!)]]);
+    expect(ids(staleRefs(refs, read))).toEqual(["a"]);
+    expect(ids(staleRefs([conv("a", "sb-a", "running"), conv("b")], read))).toEqual(["a"]);
   });
 });
 

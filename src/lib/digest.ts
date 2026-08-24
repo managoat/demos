@@ -40,6 +40,29 @@ import type { UserEvent as ItemEvent } from "../types";
 /** As much of a conversation as the digest reads. */
 export type ConversationRef = Pick<Conversation, "id" | "status" | "sandbox_id">;
 
+/**
+ * What about a conversation, when it moves, means there may be lifecycle to go
+ * and read: the status — a turn boundary, a fast failure — and the computer it
+ * is on. The rest of a conversation moves without the lifecycle moving: a title
+ * arrives, a line of output lands, `last_active_at` ticks three times a second.
+ */
+export function historyKey(c: ConversationRef): string {
+  return `${c.status}:${c.sandbox_id ?? ""}`;
+}
+
+/**
+ * Of `refs`, the ones whose history has not been read at the state they are in
+ * now: new to the item, or moved since they were last read. `read` is what the
+ * caller has an answer in hand for, so a conversation that did not answer stays
+ * stale and is asked again rather than being written off.
+ *
+ * This is why an item with N conversations costs one request at a turn
+ * boundary rather than N: only the conversation whose status flipped is stale.
+ */
+export function staleRefs(refs: readonly ConversationRef[], read: ReadonlyMap<string, string>): ConversationRef[] {
+  return refs.filter((c) => read.get(c.id) !== historyKey(c));
+}
+
 /** Fountain's own default when a `request · started` carried no `timeout_ms`. */
 export const ASK_TIMEOUT_MS = 5 * 60 * 1000;
 

@@ -7,6 +7,13 @@
  * small GET per conversation on the item, and the project's own SSE stream
  * keeps it current after that.
  *
+ * After that first read, a conversation is asked again only when it has moved:
+ * `staleRefs` compares each one against the state its history was last read at,
+ * so the turn boundary that flips one conversation idle → running → idle costs
+ * one request whatever else is on the item. (No debounce here on top of that:
+ * status reaches this component through the store's list refresh, which already
+ * coalesces the burst behind a 300 ms timer — src/store.tsx `scheduleRefresh`.)
+ *
  * **The mark moves when you open the item**, the way `markRead` moves a
  * conversation's the moment its thread is on screen. `since` is read once,
  * before the write, so this visit still shows what the last one missed; the
@@ -15,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useProject } from "../store";
 import type { Agent, Conversation, SandboxRecord, UserEvent } from "../types";
-import { digestLine, digestOf, loadSeen, saveSeen, timeLeft, type Digest, type Waiting } from "../lib/digest";
+import { digestLine, digestOf, historyKey, loadSeen, saveSeen, staleRefs, timeLeft, type ConversationRef, type Digest, type Waiting } from "../lib/digest";
 import { computerLabel, relativeTime } from "../lib/sidebar";
 import { href } from "../router";
 import { AgentAvatar } from "./AgentAvatar";
@@ -31,6 +38,8 @@ export function ItemDigest({ itemId, conversations }: { itemId: string; conversa
   const [now, setNow] = useState(() => Date.now());
   /** Per conversation, the last log-event id read out of its history. */
   const cursors = useRef(new Map<string, number>());
+  /** Per conversation, the state its history was last read at — see `staleRefs`. */
+  const read = useRef(new Map<string, string>());
 
   // The conversation list is replaced on every line of runtime output, so both
   // of these hang off what the digest actually reads rather than off the array:
@@ -47,34 +56,48 @@ export function ItemDigest({ itemId, conversations }: { itemId: string; conversa
     saveSeen(itemId);
   }, [itemId]);
 
-  // The lifecycle so far, per conversation, from where we have read to. Keyed
-  // on `shape` rather than `ids` because the user-wide stream only follows
-  // unfinished conversations: a turn that fails fast, or a computer torn down,
+  // The lifecycle so far, per conversation, from where we have read to. Watched
+  // on `shape` rather than `ids` because the user-wide stream only ever follows
+  // conversations that were unfinished when it last looked (Fountain's
+  // EventsController.follow/2 rejects terminated and failed ones, and re-follows
+  // at most once a second): a turn that fails fast, or a computer torn down,
   // can leave a gap the stream never fills, and the status flip that goes with
-  // it is the cue to go and read it. A conversation that will not answer
-  // (deleted, a Fountain hiccup) contributes nothing rather than sinking the panel.
+  // it is the cue to go and read it.
+  //
+  // Only the conversations that actually moved are asked, though — `staleRefs`
+  // against what we have already read — so a turn boundary on an item with N
+  // conversations is one request, not N. A conversation that will not answer
+  // (deleted, a Fountain hiccup) contributes nothing rather than sinking the
+  // panel, and stays stale, so its next move asks again.
   useEffect(() => {
-    if (!shape) return;
+    const stale = staleRefs(refs, read.current);
+    if (stale.length === 0) return;
     let cancelled = false;
-    const list = shape.split(",").map((s) => s.split(":")[0]!);
     void Promise.all(
-      list.map((id) =>
+      stale.map((c) =>
         fountain
-          .resume(id)
-          .history({ streams: ["stage"], after: cursors.current.get(id) ?? 0 })
-          .then((evs) => evs.map((e): UserEvent => ({ ...e, conversation_id: id })))
-          .catch((): UserEvent[] => []),
+          .resume(c.id)
+          .history({ streams: ["stage"], after: cursors.current.get(c.id) ?? 0 })
+          .then((evs): Page => ({ ref: c, events: evs.map((e): UserEvent => ({ ...e, conversation_id: c.id })) }))
+          .catch((): Page => ({ ref: c, events: null })),
       ),
     ).then((pages) => {
-      if (cancelled) return; // the cursors stay put, so the next run reads the same span
-      const fresh = pages.flat();
-      for (const e of fresh) cursors.current.set(e.conversation_id, Math.max(cursors.current.get(e.conversation_id) ?? 0, e.id));
+      if (cancelled) return; // nothing is marked read, so the next run reads the same span
+      const fresh: UserEvent[] = [];
+      for (const page of pages) {
+        if (!page.events) continue;
+        read.current.set(page.ref.id, historyKey(page.ref));
+        for (const e of page.events) {
+          cursors.current.set(e.conversation_id, Math.max(cursors.current.get(e.conversation_id) ?? 0, e.id));
+          fresh.push(e);
+        }
+      }
       setEvents((prev) => merge(prev, fresh));
     });
     return () => {
       cancelled = true;
     };
-  }, [shape, fountain]);
+  }, [refs, fountain]);
 
   // And what happens from here, off the stream the store already holds open.
   useEffect(() => {
@@ -193,6 +216,12 @@ function WaitingRow({
       </a>
     </li>
   );
+}
+
+/** What one conversation answered with — `null` when it did not answer at all. */
+interface Page {
+  ref: ConversationRef;
+  events: UserEvent[] | null;
 }
 
 /** `base` plus whatever in `extra` it does not already hold, in id order. */
