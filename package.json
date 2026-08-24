@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@agentshit/fountain-sdk": "^0.1.4",
+    "@agentshit/fountain-sdk": "0.1.7",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

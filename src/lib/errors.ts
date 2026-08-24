@@ -14,6 +14,16 @@ export function describeError(err: unknown): string {
         return "This account needs an active subscription to start conversations.";
       case "provisioning":
         return "The sandbox is still coming up — try again in a moment.";
+      case "sandbox_not_found":
+        return "That computer is gone.";
+      case "sandbox_not_attachable":
+        return "That computer cannot take another conversation.";
+      case "sandbox_identity_mismatch":
+        return "A computer is shared only by conversations of the same teammate in the same project.";
+      case "sandbox_runtime_mismatch":
+        return "That computer runs a different runtime.";
+      case "sandbox_at_capacity":
+        return "That computer is busy with another conversation's turn — try again when it finishes.";
       case "environment_not_allowed":
         return "That agent does not allow the chosen environment.";
       case "vault_not_allowed":

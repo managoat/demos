@@ -11,6 +11,7 @@
  *                                           environment and vault are the project's, not the caller's
  *   *    /api/conversations/:id/…           get, turns, events, prompts, read, interrupt, terminate,
  *                                           requests, tree, stream — after checking :id is in the project
+ *   GET  /api/sandboxes/:id                 one computer, if a conversation of the project is on it
  *   GET  /api/agents, /api/agents/:id/avatar  the owner's agents (the team)
  *   GET  /api/environments, /api/vaults     the owner sees all; a member sees the project's
  *   GET  /api/events/stream                 the owner's stream, filtered to the project, plus
@@ -80,6 +81,9 @@ export async function handleProxy(ctx: AppContext, req: Request, projectId: stri
     if (!(await belongs(client, projectId, id))) throw new HttpError(404, "not_found", "No such conversation in this project.");
     return forward(client, req, path, url.search);
   }
+
+  const sandbox = /^\/api\/sandboxes\/([^/]+)$/.exec(path);
+  if (sandbox && method === "GET") return showSandbox(scope, decodeURIComponent(sandbox[1]!));
 
   if (method === "GET" && (path === "/api/agents" || /^\/api\/agents\/[^/]+\/avatar$/.test(path))) {
     return forward(client, req, path, url.search);
@@ -164,6 +168,26 @@ async function startConversation(ctx: AppContext, { project, client }: Scope, re
     if (addTeammate(ctx, item.id, body.agent_id)) ctx.events.emit(project.id, { kind: "items" });
   }
   return passthrough(res, text);
+}
+
+// ── sandboxes ────────────────────────────────────────────────────────────
+
+/**
+ * One computer, by id — the record the conversation list does not carry
+ * (sprite name, status, which conversation is mid-turn). It is the
+ * project's if any conversation on it is; the conversations listed on it
+ * are narrowed to the project's.
+ */
+async function showSandbox({ project, client }: Scope, id: string): Promise<Response> {
+  const res = await client.fetch(`/api/sandboxes/${encodeURIComponent(id)}`);
+  const text = await res.text();
+  if (!res.ok) return passthrough(res, text);
+  const body = JSON.parse(text) as { data?: { conversations?: { id: string }[] } };
+  const convs = body.data?.conversations ?? [];
+  const mine: { id: string }[] = [];
+  for (const c of convs) if (await belongs(client, project.id, c.id)) mine.push(c);
+  if (mine.length === 0) throw new HttpError(404, "not_found", "No such computer in this project.");
+  return json({ ...body, data: { ...body.data, conversations: mine } });
 }
 
 // ── forwarding ───────────────────────────────────────────────────────────

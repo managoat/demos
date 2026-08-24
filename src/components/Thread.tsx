@@ -21,7 +21,8 @@ export function Thread({ conversationId, onClose }: { conversationId: string; on
   const { fountain, conversations, agents, subscribe, toast, refresh } = useProject();
   const listed = conversations.find((c) => c.id === conversationId) ?? null;
   const [fetched, setFetched] = useState<Conversation | null>(null);
-  const conversation = listed ?? fetched;
+  // The list has the live status; the show has the sandbox (the list never embeds it).
+  const conversation = listed ? { ...listed, sandbox: listed.sandbox ?? fetched?.sandbox ?? null } : fetched;
   const [turns, setTurns] = useState<Turn[]>([]);
   const [events, setEvents] = useState<LogEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,7 +45,7 @@ export function Thread({ conversationId, onClose }: { conversationId: string; on
     void (async () => {
       try {
         const [record, ts, history] = await Promise.all([
-          listed ? Promise.resolve(null) : handle.get(),
+          handle.get(),
           handle.turns(),
           handle.history({ streams: HISTORY_STREAMS }),
         ]);
@@ -63,8 +64,6 @@ export function Thread({ conversationId, onClose }: { conversationId: string; on
     return () => {
       cancelled = true;
     };
-    // `listed` is deliberately not a dependency: it changes on every stream tick.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, fountain, toast, refresh]);
 
   // Live: append what the user-wide stream delivers for this conversation.

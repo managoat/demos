@@ -9,6 +9,7 @@ export type {
   ConversationStatus,
   Environment,
   LogEvent,
+  SandboxRecord,
   Turn,
   Vault,
 } from "@agentshit/fountain-sdk";

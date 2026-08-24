@@ -2,9 +2,9 @@
  * One work item: the teammates on it, the conversations it has (grouped by
  * the computer they run on), and the open thread.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useProject } from "../store";
-import type { Agent, Conversation } from "../types";
+import type { Agent, Conversation, SandboxRecord } from "../types";
 import { agentFits, channelFor } from "../lib/workbench";
 import { href, navigate } from "../router";
 import { Thread, TwoStep } from "../components/Thread";
@@ -15,10 +15,19 @@ import { formatTime, shortId } from "../lib/format";
 
 interface Computer {
   key: string;
-  sandbox: Conversation["sandbox"] | null;
+  /** The sandbox id, when the conversations have one; a conversation with no computer stands alone. */
+  sandboxId: string | null;
+  /**
+   * The sandbox record. The conversation list carries only `sandbox_id`;
+   * the record (sprite name, status) is fetched for live computers as they
+   * appear (`GET /api/sandboxes/:id`, narrowed to the project by the server).
+   */
+  sandbox: Pick<SandboxRecord, "sprite_name" | "status" | "provider"> | null;
   conversations: Conversation[];
   agent: Agent | null;
 }
+
+const LIVE_STATUSES = new Set<Conversation["status"]>(["pending", "running", "idle"]);
 
 export function WorkItem({ itemId, conversationId }: { itemId: string; conversationId: string | null }) {
   const { project, items, conversations, agents, environments, vaults, fountain, toast, refresh, updateItem, addTeammate, removeTeammate } = useProject();
@@ -26,6 +35,7 @@ export function WorkItem({ itemId, conversationId }: { itemId: string; conversat
   const [dialog, setDialog] = useState<{ join: JoinTarget | null; agentId: string | null } | null>(null);
   const [editing, setEditing] = useState(false);
   const [pick, setPick] = useState("");
+  const [sandboxes, setSandboxes] = useState<Map<string, SandboxRecord>>(new Map());
 
   const convs = useMemo(
     () =>
@@ -41,7 +51,13 @@ export function WorkItem({ itemId, conversationId }: { itemId: string; conversat
       const key = c.sandbox_id ?? `conv:${c.id}`;
       let comp = byKey.get(key);
       if (!comp) {
-        comp = { key, sandbox: c.sandbox ?? null, conversations: [], agent: c.agent_id ? agents.get(c.agent_id) ?? null : null };
+        comp = {
+          key,
+          sandboxId: c.sandbox_id ?? null,
+          sandbox: c.sandbox ?? (c.sandbox_id ? sandboxes.get(c.sandbox_id) ?? null : null),
+          conversations: [],
+          agent: c.agent_id ? agents.get(c.agent_id) ?? null : null,
+        };
         byKey.set(key, comp);
       }
       comp.conversations.push(c);
@@ -54,7 +70,28 @@ export function WorkItem({ itemId, conversationId }: { itemId: string; conversat
       if (la !== lb) return la - lb;
       return latest(b).localeCompare(latest(a));
     });
-  }, [convs, agents]);
+  }, [convs, agents, sandboxes]);
+
+  // The list does not say what a computer is called or how it is doing; its record does.
+  useEffect(() => {
+    const want = computers.filter((c) => c.sandboxId && !c.sandbox && isLive(c));
+    if (want.length === 0) return;
+    let cancelled = false;
+    for (const comp of want) {
+      fountain
+        .sandbox(comp.sandboxId!)
+        .then((rec) => {
+          if (cancelled) return;
+          setSandboxes((m) => new Map(m).set(rec.id, rec));
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      cancelled = true;
+    };
+    // Keyed on which live computers lack a record, not on every list tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [computers.filter((c) => c.sandboxId && !c.sandbox && isLive(c)).map((c) => c.key).join(","), fountain]);
 
   if (!item) {
     return (
@@ -192,19 +229,19 @@ export function WorkItem({ itemId, conversationId }: { itemId: string; conversat
                   <div className="min0 grow">
                     <div className="strong ellipsis">
                       {comp.agent?.name ?? runtime}
-                      {comp.sandbox ? <span className="muted small"> · 🖥 {comp.sandbox.sprite_name}</span> : null}
+                      {comp.sandboxId ? <span className="muted small"> · 🖥 {comp.sandbox?.sprite_name ?? shortId(comp.sandboxId)}</span> : null}
                     </div>
                     <div className="muted small">
-                      {comp.sandbox ? `${comp.sandbox.provider ?? ""} · ${comp.sandbox.status}` : "no computer"}
+                      {comp.sandbox ? `${comp.sandbox.provider ?? ""} · ${comp.sandbox.status}` : comp.sandboxId ? (live ? "up" : "gone") : "no computer"}
                       {runtime ? ` · ${runtime}` : ""}
                       {busy ? " · busy" : ""}
                     </div>
                   </div>
-                  {live && comp.sandbox && comp.agent && (
+                  {live && comp.sandboxId && comp.agent && (
                     <button
                       className="secondary small"
                       title="Another conversation with the same teammate on this computer"
-                      onClick={() => setDialog({ join: { sandboxId: comp.sandbox!.id, label: comp.sandbox!.sprite_name, agentId: comp.agent!.id }, agentId: comp.agent!.id })}
+                      onClick={() => setDialog({ join: { sandboxId: comp.sandboxId!, label: comp.sandbox?.sprite_name ?? shortId(comp.sandboxId!), agentId: comp.agent!.id }, agentId: comp.agent!.id })}
                     >
                       + Here
                     </button>
@@ -266,8 +303,14 @@ export function WorkItem({ itemId, conversationId }: { itemId: string; conversat
   );
 }
 
+/**
+ * A computer is up while a conversation still holds it: one that is pending,
+ * running or idle. The sandbox record, when we have it, has the last word.
+ */
 function isLive(c: Computer): boolean {
-  return !!c.sandbox && c.sandbox.status !== "terminated" && c.sandbox.status !== "failed";
+  if (!c.sandboxId) return false;
+  if (c.sandbox && (c.sandbox.status === "terminated" || c.sandbox.status === "failed")) return false;
+  return c.conversations.some((x) => LIVE_STATUSES.has(x.status));
 }
 
 function latest(c: Computer): string {

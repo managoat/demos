@@ -72,6 +72,12 @@ const fountain = Bun.serve({
       if (one[2] === "/terminate") return new Response(null, { status: 204 });
       return Response.json({ error: "not_found" }, { status: 404 });
     }
+    const sb = /^\/api\/sandboxes\/([^/]+)$/.exec(path);
+    if (sb) {
+      const on = convs[key]!.filter((c) => c.sandbox_id === sb[1]);
+      if (on.length === 0) return Response.json({ error: "not_found" }, { status: 404 });
+      return Response.json({ data: { id: sb[1], sprite_name: `sprite-${sb[1]}`, status: "ready", conversations: on.map((c) => ({ id: c.id, status: c.status, mid_turn: false })) } });
+    }
     if (path === "/api/agents") return Response.json({ data: [{ id: "a1", name: "Coder" }] });
     if (path === "/api/environments") return Response.json({ data: [{ id: "e1", name: "one" }, { id: "e2", name: "two" }] });
     if (path === "/api/vaults") return Response.json({ data: [{ id: "v1", name: "v-one" }, { id: "v2", name: "v-two" }] });
@@ -306,6 +312,18 @@ describe("the project-scoped proxy", () => {
     const res = await call("bob", "POST", `/f/${projectId}/api/conversations/c1/prompts`, { prompt: "more" });
     expect(res.status).toBe(202);
     expect((await res.json()).data.prompt).toBe("more");
+  });
+
+  test("a computer is the project's if a conversation of the project is on it", async () => {
+    // sb1 hosts c1 (ours) — and, after the join above, a second conversation of ours.
+    const ok = await call("bob", "GET", `/f/${projectId}/api/sandboxes/sb1`);
+    expect(ok.status).toBe(200);
+    const rec = (await ok.json()).data;
+    expect(rec.sprite_name).toBe("sprite-sb1");
+    expect(rec.conversations.map((c: { id: string }) => c.id)).toContain("c1");
+    expect((await call("bob", "GET", `/f/${projectId}/api/sandboxes/sb2`)).status).toBe(404);
+    expect((await call("bob", "GET", `/f/${projectId}/api/sandboxes/sb3`)).status).toBe(404);
+    expect((await call("bob", "GET", `/f/${projectId}/api/sandboxes/nope`)).status).toBe(404);
   });
 
   test("a bodyless answer (terminate is 204) passes through", async () => {

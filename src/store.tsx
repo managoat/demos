@@ -14,7 +14,7 @@
  * events into that stream when another member changes something.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Fountain, type FetchLike } from "@agentshit/fountain-sdk";
+import { Fountain } from "@agentshit/fountain-sdk";
 import type { Agent, Conversation, Environment, UserEvent, Vault } from "./types";
 import { api, ApiError, projectFountainBase, type Activity, type ItemDto, type Me, type ProjectDto } from "./lib/api";
 import { readSse } from "./lib/sse";
@@ -158,25 +158,10 @@ export function useProjectMaybe(): ProjectStore | null {
   return useContext(ProjectCtx);
 }
 
-/**
- * The SDK stamps a `User-Agent` on every request. Chrome drops it (a
- * forbidden header), but Firefox sends it, which turns every call into a
- * CORS preflight — harmless same-origin, but the browser has a user agent
- * already; strip the SDK's.
- */
-const browserFetch: FetchLike = (input, init) => {
-  if (init?.headers) {
-    const headers = new Headers(init.headers);
-    headers.delete("user-agent");
-    init = { ...init, headers };
-  }
-  return fetch(input, init);
-};
-
 export function makeProjectClient(projectId: string): Fountain {
   // The bearer is a placeholder: the server authenticates the session cookie and swaps in the owner's key.
   // Retiring a conversation waits for Fountain to tear the computer down, which can take longer than the SDK's 30 s default.
-  return new Fountain({ baseUrl: projectFountainBase(projectId), apiKey: "session", appUrl: "", fetch: browserFetch, timeoutMs: 120_000 });
+  return new Fountain({ baseUrl: projectFountainBase(projectId), apiKey: "session", appUrl: "", timeoutMs: 120_000 });
 }
 
 export function ProjectProvider({ projectId, children, fallback }: { projectId: string; children: ReactNode; fallback: (state: "loading" | "missing") => ReactNode }) {
