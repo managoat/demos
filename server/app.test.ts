@@ -300,7 +300,11 @@ describe("the project-scoped proxy", () => {
     expect(shown.items[0].agentIds).toEqual(["a1", "a2"]);
   });
 
-  test("joining a computer: only one of the project's, with the same teammate", async () => {
+  test("joining a computer: only one of the project's, with the same teammate, from the same work item", async () => {
+    const otherItem = (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title: "elsewhere" })).json()).data.id;
+    const crossItem = await call("bob", "POST", `/f/${projectId}/api/conversations`, { agent_id: "a1", channel_id: `workbench:${projectId}/${otherItem}`, sandbox_id: "sb1" });
+    expect(crossItem.status).toBe(422);
+    expect((await crossItem.json()).error).toBe("item_mismatch");
     const other = await call("bob", "POST", `/f/${projectId}/api/conversations`, { agent_id: "a1", channel_id: `workbench:${projectId}/${itemId}`, sandbox_id: "sb2" });
     expect(other.status).toBe(404);
     const mismatch = await call("bob", "POST", `/f/${projectId}/api/conversations`, { agent_id: "a2", channel_id: `workbench:${projectId}/${itemId}`, sandbox_id: "sb1" });

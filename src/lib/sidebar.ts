@@ -1,7 +1,10 @@
 /**
- * The sidebar's model: the project's computers — one per sandbox, the
- * active team members — each with the conversations on it, live ones
- * first. Pure functions; the component is components/Sidebar.tsx.
+ * The sidebar's model: the project's work items, each with its computers —
+ * one per sandbox, the active team members on that item — each with the
+ * conversations on it, live ones first. A computer belongs to the work
+ * item it was started for (the server enforces it on a join), so the tree
+ * is item → computer → conversation. Pure functions; the component is
+ * components/Sidebar.tsx.
  *
  * A computer is live while a conversation still holds it (pending, running
  * or idle); the sandbox record, when we have it, has the last word. Fountain
@@ -102,4 +105,51 @@ export function relativeTime(iso: string | null | undefined, now = Date.now()): 
 export function computerLabel(c: Pick<Computer, "sandbox" | "sandboxId">): string {
   if (c.sandbox?.sprite_name) return c.sandbox.sprite_name.replace(/^fountain-[0-9a-f]{8}-/, "");
   return c.sandboxId ? c.sandboxId.slice(0, 8) : "no computer";
+}
+
+export interface ItemGroup<I extends { id: string; title: string; status: string; createdAt: string }> {
+  item: I;
+  computers: Computer[];
+  live: boolean;
+  busy: boolean;
+  unread: boolean;
+  latest: string;
+}
+
+/**
+ * Work items with their computers: items that have a live computer first,
+ * then by latest activity; done items last. An item with no conversations
+ * yet is kept, so it can be started from the sidebar.
+ */
+export function groupByItem<I extends { id: string; title: string; status: string; createdAt: string }>(
+  items: I[],
+  convs: Conversation[],
+  sandboxes: ReadonlyMap<string, SandboxRecord>,
+): ItemGroup<I>[] {
+  const byItem = new Map<string, Conversation[]>();
+  for (const c of convs) {
+    const id = itemIdOf(c);
+    if (!id) continue;
+    const arr = byItem.get(id);
+    if (arr) arr.push(c);
+    else byItem.set(id, [c]);
+  }
+  const groups = items.map((item) => {
+    const computers = computersOf(byItem.get(item.id) ?? [], sandboxes);
+    return {
+      item,
+      computers,
+      live: computers.some((c) => c.live),
+      busy: computers.some((c) => c.busy),
+      unread: computers.some((c) => c.unread),
+      latest: computers.reduce((m, c) => (c.latest > m ? c.latest : m), ""),
+    };
+  });
+  return groups.sort((a, b) => {
+    const da = a.item.status === "done" ? 1 : 0;
+    const db = b.item.status === "done" ? 1 : 0;
+    if (da !== db) return da - db;
+    if (a.live !== b.live) return a.live ? -1 : 1;
+    return (b.latest || b.item.createdAt).localeCompare(a.latest || a.item.createdAt);
+  });
 }

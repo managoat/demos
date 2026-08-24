@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Conversation, SandboxRecord } from "../types";
-import { attachable, computerLabel, computersOf, itemIdOf, relativeTime } from "./sidebar";
+import { attachable, computerLabel, computersOf, groupByItem, itemIdOf, relativeTime } from "./sidebar";
 
 function conv(over: Partial<Conversation>): Conversation {
   return { id: "c", status: "idle", runtime: "claude", inserted_at: "2026-08-24T00:00:00Z", ...over } as Conversation;
@@ -57,4 +57,30 @@ test("relativeTime", () => {
   expect(relativeTime("2026-08-24T09:00:00Z", now)).toBe("3h ago");
   expect(relativeTime("2026-08-20T12:00:00Z", now)).toBe("4d ago");
   expect(relativeTime(null, now)).toBe("—");
+});
+
+describe("groupByItem", () => {
+  const items = [
+    { id: "quiet", title: "Quiet", status: "open", createdAt: "2026-08-24T00:00:00Z" },
+    { id: "hot", title: "Hot", status: "open", createdAt: "2026-08-23T00:00:00Z" },
+    { id: "done", title: "Done", status: "done", createdAt: "2026-08-25T00:00:00Z" },
+    { id: "cold", title: "Cold", status: "open", createdAt: "2026-08-22T00:00:00Z" },
+  ];
+  const convs = [
+    conv({ id: "h1", channel_id: "workbench:p/hot/t1", sandbox_id: "sb1", agent_id: "a1", status: "running", last_active_at: "2026-08-24T03:00:00Z" }),
+    conv({ id: "h2", channel_id: "workbench:p/hot/t2", sandbox_id: "sb1", agent_id: "a1", status: "idle", last_active_at: "2026-08-24T02:00:00Z" }),
+    conv({ id: "c1", channel_id: "workbench:p/cold/t1", sandbox_id: "sb2", agent_id: "a1", status: "terminated", last_active_at: "2026-08-24T04:00:00Z" }),
+    conv({ id: "d1", channel_id: "workbench:p/done/t1", sandbox_id: "sb3", agent_id: "a1", status: "idle", last_active_at: "2026-08-24T05:00:00Z" }),
+    conv({ id: "x", channel_id: "fountain:team", sandbox_id: "sb9", status: "idle" }),
+  ];
+  test("items with a live computer first, then by activity, done last; computers stay on their item", () => {
+    const g = groupByItem(items, convs, new Map());
+    expect(g.map((x) => x.item.id)).toEqual(["hot", "cold", "quiet", "done"]);
+    expect(g[0]!.computers).toHaveLength(1);
+    expect(g[0]!.computers[0]!.conversations.map((c) => c.id)).toEqual(["h1", "h2"]);
+    expect(g[0]!.busy).toBe(true);
+    expect(g[1]!.live).toBe(false);
+    expect(g[2]!.computers).toEqual([]);
+    expect(g[3]!.live).toBe(true); // done, but its computer is still up — shown last, not hidden
+  });
 });

@@ -8,7 +8,8 @@
  *
  *   GET  /api/conversations                 the owner's list, only `workbench:<project>/…`
  *   POST /api/conversations                 start one; channel must name an item of this project and is
- *                                           re-minted per conversation; environment and vault are the project's
+ *                                           re-minted per conversation; environment and vault are the project's;
+ *                                           a sandbox_id must be a computer of that same item, same teammate
  *   *    /api/conversations/:id/…           get, turns, events, prompts, read, interrupt, terminate,
  *                                           requests, tree, stream — after checking :id is in the project
  *   GET  /api/sandboxes/:id                 one computer, if a conversation of the project is on it
@@ -155,6 +156,10 @@ async function startConversation(ctx: AppContext, { project, client }: Scope, re
     const host = convs.find((c) => c.sandbox_id === body.sandbox_id && parseChannel(c.channel_id)?.projectId === project.id);
     if (!host) throw new HttpError(404, "not_found", "That computer is not one of this project's.");
     if (host.agent_id !== body.agent_id) throw new HttpError(422, "agent_mismatch", "A computer is shared only by conversations of the same teammate.");
+    // A computer belongs to the work item it was started for: the checkout and
+    // the disk are that item's context. Fountain would share it by identity
+    // alone; the workbench does not.
+    if (parseChannel(host.channel_id)?.itemId !== item.id) throw new HttpError(422, "item_mismatch", "That computer belongs to another work item.");
     out.sandbox_id = body.sandbox_id;
   }
 

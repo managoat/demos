@@ -18,10 +18,14 @@ vaults, computers and bill. A member never holds the owner's key; the
 workbench server does, and lets the member through only to that project's
 conversations.
 
-Each teammate's conversation gets its own computer. When a Fountain supports
-it (ADR 0023, *one sandbox, many conversations*), "**+ Here**" on a computer
-that is already up opens a second conversation with the same teammate on the
-same machine: shared checkout and disk, separate transcript. Against an older
+Each teammate's conversation gets its own computer, and a computer belongs
+to the work item it was started for — the checkout and the disk are that
+item's context, so the sidebar reads work item → computers → conversations.
+When a Fountain supports it (ADR 0023, *one sandbox, many conversations*),
+"**+**" on a computer that is already up opens a second conversation with
+the same teammate on the same machine, on the same item: shared checkout and
+disk, separate transcript. (Fountain itself would share the machine by
+identity alone; the item rule is the workbench's, enforced by its server.) Against an older
 Fountain the button still works; the conversation starts on a new computer and
 the app says so. The sandbox identity `(owner, agent, environment, vault)`
 falls out of the tree — same project, same agent — which is what makes sharing
