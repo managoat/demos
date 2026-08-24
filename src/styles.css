@@ -433,3 +433,62 @@ button.icon.small-icon:disabled { opacity: 0.4; }
 .composer.term .send { width: 32px; height: 32px; border-radius: 6px; font-size: 14px; margin-top: 4px; }
 .thread-head { font-family: var(--mono); font-size: 12.5px; }
 .thread-title .name { font-weight: 600; }
+
+/* ── IDE chrome: explorer tree, editor tabs, status bar ─────────────── */
+.app.ide .topbar { font-family: var(--mono); font-size: 12px; padding: 4px 10px; gap: 8px; min-height: 36px; }
+.app.ide .brand { font-weight: 600; letter-spacing: .02em; }
+.app.ide .project-pick { font-family: var(--mono); font-size: 12px; padding: 2px 6px; border-color: transparent; background: transparent; font-weight: 600; }
+.app.ide .project-pick:hover { border-color: var(--border); background: var(--bg-0); }
+.app.ide .navlink { font-family: var(--mono); font-size: 12px; padding: 2px 8px; }
+.app.ide .topbar button.secondary.small { font-family: var(--mono); font-size: 11px; padding: 2px 8px; }
+.app.ide .topbar button.icon { width: 26px; height: 26px; font-size: 14px; }
+
+.editor { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.tabbar { display: flex; align-items: stretch; overflow-x: auto; background: var(--bg-1); border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 12px; scrollbar-width: thin; }
+.tab { display: flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; height: 34px; max-width: 30ch; min-width: 0; flex-shrink: 0; border-right: 1px solid var(--border); color: var(--text-2); text-decoration: none; background: var(--bg-1); position: relative; }
+.tab:hover { background: var(--bg-2); }
+.tab.active { background: var(--bg-0); color: var(--text); }
+.tab.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: var(--bg-0); }
+.tab.active::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--brand); }
+.tab.unread .tab-text { font-weight: 600; }
+.tab-icon { color: var(--muted); font-size: 11px; flex-shrink: 0; }
+.tab-icon.conversation { color: var(--brand); }
+.tab-text { min-width: 0; }
+.tab-live { color: var(--ok); font-size: 9px; }
+.tab-close { width: 18px; height: 18px; padding: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 14px; line-height: 1; justify-content: center; flex-shrink: 0; visibility: hidden; }
+.tab:hover .tab-close, .tab.active .tab-close { visibility: visible; }
+.tab-close:hover { background: var(--bg-2); color: var(--text); }
+
+.statusbar { display: flex; align-items: center; gap: 14px; padding: 0 10px; height: 24px; border-top: 1px solid var(--border); background: var(--bg-1); font-family: var(--mono); font-size: 11px; color: var(--text-2); }
+.statusbar-item { text-decoration: none; color: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.statusbar-item:hover { color: var(--text); }
+
+/* the explorer: a tree, not cards */
+.app.ide .sidebar { width: 272px; font-family: var(--mono); font-size: 12px; }
+.explorer-head { flex-direction: row; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; }
+.explorer-title { text-transform: uppercase; letter-spacing: .08em; font-size: 10.5px; color: var(--muted); flex: 1; }
+.app.ide .sidebar-list { padding: 4px 4px 16px; }
+.app.ide .sidebar-item { margin: 0; padding: 0; border-radius: 0; }
+.app.ide .sidebar-item.current { background: transparent; }
+.app.ide .sidebar-item-head { padding: 2px 4px 2px 6px; gap: 4px; }
+.app.ide .sidebar-item-title { text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--text); font-weight: 600; gap: 6px; padding: 2px 4px; border-radius: 4px; }
+.app.ide .sidebar-item-title:hover { background: var(--bg-2); }
+.app.ide .sidebar-item.current > .sidebar-item-head .sidebar-item-title { background: color-mix(in srgb, var(--brand) 14%, transparent); }
+.tree-icon { color: var(--muted); font-size: 11px; }
+.app.ide .sidebar-item details.computer-card { margin: 0 0 0 10px; border: 0; border-left: 1px solid var(--border); border-radius: 0; background: transparent; padding: 0 0 0 4px; }
+.app.ide .sidebar-item details.computer-card[open] { padding-bottom: 2px; }
+.app.ide .sidebar summary.computer-head { padding: 2px 4px 2px 6px; gap: 6px; border-radius: 4px; }
+.app.ide .sidebar summary.computer-head::before { content: "▸"; color: var(--muted); font-size: 10px; width: 8px; flex-shrink: 0; }
+.app.ide .sidebar details[open] > summary.computer-head::before { content: "▾"; }
+.app.ide .sidebar summary.computer-head .avatar { width: 16px !important; height: 16px !important; font-size: 7px !important; }
+.app.ide .computer-name { font-size: 12px; font-weight: 500; gap: 5px; }
+.app.ide .computer-sub { font-size: 10.5px; }
+.app.ide .sidebar .swatch { width: 7px; height: 7px; }
+.app.ide .sidebar .computer-card .conv-link { margin-left: 14px; padding: 2px 6px; border-left: 1px solid color-mix(in srgb, var(--accent, var(--border)) 45%, transparent); border-radius: 0 4px 4px 0; }
+.app.ide .sidebar .conv-link.current { background: color-mix(in srgb, var(--brand) 14%, transparent); border-left-color: var(--accent); }
+.app.ide .conv-link-title { font-size: 12px; }
+.app.ide .conv-link-sub { font-size: 10.5px; margin-top: 0; }
+.app.ide .conv-link-title::before { content: "❯ "; color: var(--muted); }
+.app.ide .conv-link.unread .conv-link-title::before { color: var(--brand); }
+.app.ide button.icon.small-icon { width: 20px; height: 20px; font-size: 13px; border-radius: 4px; }
+.app.ide .sidebar-group { font-family: var(--mono); }

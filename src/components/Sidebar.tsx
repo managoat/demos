@@ -106,12 +106,13 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
 
   const group = (g: ItemGroup<WorkItem>) => (
     <section key={g.item.id} className={`sidebar-item ${g.item.id === currentItem ? "current" : ""}`}>
-      <div className="sidebar-item-head">
+      <div className="sidebar-item-head tree-row">
         <a href={href.item(project.id, g.item.id)} className="sidebar-item-title ellipsis" onClick={onNavigate} title={g.item.title}>
-          {g.unread && <span className="unread-dot" />}
+          <span className="tree-icon">▤</span>
           {g.item.title}
+          {g.unread && <span className="unread-dot" />}
         </a>
-        <span className="muted small">{g.computers.filter((c) => c.live).length > 0 ? `${g.computers.filter((c) => c.live).length} up` : g.computers.length ? "" : "no computer"}</span>
+        <span className="muted small">{g.computers.filter((c) => c.live).length > 0 ? `${g.computers.filter((c) => c.live).length} up` : ""}</span>
         <button
           type="button"
           className="icon small-icon"
@@ -128,13 +129,20 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
 
   return (
     <aside className={`sidebar ${open ? "open" : ""}`}>
-      <div className="sidebar-top">
-        <button type="button" className="small wide" onClick={() => setDialog({ join: null, agentId: null, itemId: currentItem })} disabled={agents.size === 0 || items.length === 0} title={items.length === 0 ? "Add a work item first" : agents.size === 0 ? "No agents on this Fountain" : undefined}>
-          + New conversation
+      <div className="sidebar-top explorer-head">
+        <span className="explorer-title">explorer</span>
+        <span className="muted small">
+          {liveCount} up{busyCount ? ` · ${busyCount} working` : ""}
+        </span>
+        <button
+          type="button"
+          className="icon small-icon"
+          title={items.length === 0 ? "Add a work item first" : agents.size === 0 ? "No agents on this Fountain" : "New conversation"}
+          onClick={() => setDialog({ join: null, agentId: null, itemId: currentItem })}
+          disabled={agents.size === 0 || items.length === 0}
+        >
+          +
         </button>
-        <div className="muted small">
-          {liveCount} computer{liveCount === 1 ? "" : "s"} up{busyCount ? ` · ${busyCount} working` : ""}
-        </div>
       </div>
       <div className="sidebar-list">
         {items.length === 0 && (
