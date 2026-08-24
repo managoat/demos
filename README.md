@@ -33,7 +33,13 @@ sit above what you are typing until you send, each with an × ; the transcript
 shows the images back on the turn they went with. The rules are Fountain's
 own (`shared/images.ts`): PNG, JPEG, GIF or WebP, 10 MB an image, and a file
 that breaks them is refused in the composer, by name, rather than as a failed
-POST. The start-a-conversation forms take them too, on that first prompt.
+POST. A big one is also sent *smaller*: base64 is 4/3, so a 4K screenshot is
+megabytes of JSON body for pixels nobody reads, and over 2 MB the browser
+redraws it to 2000px on its long edge and sends that instead. Never a GIF — a
+canvas keeps one frame — and never the re-encode when it came back bigger
+than the file. It is not a way past the ceiling: a 12 MB image is still
+refused, not resized into the limit. The start-a-conversation forms take them
+too, on that first prompt.
 
 The button is there because the other two ways leave people out: a touch
 device has no drag and usually nothing on the clipboard, a keyboard cannot
@@ -359,7 +365,7 @@ server/
   crypto.ts          keys at rest, session token hashing
 shared/
   channel.ts         workbench:<project>/<item> — read and written by both sides
-  images.ts          an image on a prompt: the four media types, the 10 MB ceiling
+  images.ts          an image on a prompt: the four media types, the 10 MB ceiling, the size worth re-encoding at
   status.ts          a work item's state: open, done, won't do — and the verdict a teammate proposes
 src/
   App.tsx            sign-in gate, OAuth callback, route switch
@@ -368,7 +374,7 @@ src/
   lib/api.ts         the server's API
   lib/workbench.ts   the model; the legacy-state import
   lib/start.ts       starting a conversation on an item — the request that also assigns the teammate
-  lib/images.ts      a pasted or dropped file, read into the payload a prompt takes
+  lib/images.ts      a pasted or dropped file, downscaled if it is worth it, read into the payload a prompt takes
   lib/search.ts      what ⌘K and ⌘F search: names locally, messages through the proxy
   lib/turns.ts       fold a log feed into turns for the chat view
   lib/digest.ts      a work item's stage stream → what happened since you last looked

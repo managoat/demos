@@ -27,6 +27,54 @@ export function isImageMediaType(v: unknown): v is ImageMediaType {
 }
 
 /**
+ * Under this, base64 is not what is wrong with the request: a re-encode costs
+ * a decode and a draw for a saving nobody notices.
+ */
+export const DOWNSCALE_OVER_BYTES = 2 * 1024 * 1024;
+
+/** What a screenshot is worth on its long edge. A 4K one says no more than this. */
+export const MAX_IMAGE_EDGE = 2000;
+
+/**
+ * Whether an image is worth decoding to find out — the half of the policy
+ * that needs no dimensions, so a pasted icon and an animated GIF never reach
+ * a canvas at all.
+ */
+export function mayDownscale(mediaType: string, bytes: number): boolean {
+  // Not GIF: a canvas keeps one frame, so re-encoding an animated one would
+  // silently throw the animation away.
+  if (mediaType !== "image/png" && mediaType !== "image/jpeg" && mediaType !== "image/webp") return false;
+  return bytes > DOWNSCALE_OVER_BYTES;
+}
+
+/**
+ * The size to re-encode an attached image at before sending it, or null to
+ * send the file as it was picked — the policy behind `readImage`'s canvas,
+ * kept here as a pure function so it is testable without one.
+ *
+ * Base64 is 4/3, so a 10 MB screenshot is 13.3 MB of JSON body, through the
+ * browser, through the proxy, and on to Fountain. A UI screenshot at
+ * 3840×2160 carries no more information at that size than at 2000px.
+ *
+ * This never admits a file `imageProblem` would refuse: it shrinks what is
+ * already under `MAX_IMAGE_BYTES`, and a 12 MB image is still refused by name
+ * in the composer rather than silently resized into the limit.
+ */
+export function downscaleTarget(
+  mediaType: string,
+  bytes: number,
+  width: number,
+  height: number,
+): { width: number; height: number } | null {
+  if (!mayDownscale(mediaType, bytes)) return null;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) return null;
+  const long = Math.max(width, height);
+  if (long <= MAX_IMAGE_EDGE) return null;
+  const scale = MAX_IMAGE_EDGE / long;
+  return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
+}
+
+/**
  * How many bytes a base64 string decodes to, or null if it is not the base64
  * Fountain decodes — padded, no whitespace, nothing outside the alphabet.
  */
