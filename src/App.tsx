@@ -8,15 +8,20 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, type Me } from "./lib/api";
 import { completeLoginIfCallback } from "./lib/oauth";
+import { applyTheme, loadTheme } from "./lib/theme";
 import { SignIn } from "./components/SignIn";
-import { Layout } from "./components/Layout";
-import { ProjectProvider, WorkbenchProvider } from "./store";
-import { useRoute } from "./router";
+import { Shell } from "./components/Shell";
+import { loadLastProject, ProjectProvider, WorkbenchProvider } from "./store";
+import { href, navigate, useRoute } from "./router";
 import { Projects } from "./pages/Projects";
 import { Project } from "./pages/Project";
 import { WorkItem } from "./pages/WorkItem";
+import { Conversation } from "./pages/Conversation";
 import { Team } from "./pages/Team";
+import { People } from "./pages/People";
 import { describeError } from "./lib/errors";
+
+applyTheme(loadTheme());
 
 /** The key an earlier build kept in this browser, if any — signed in with once, then forgotten. */
 const LEGACY_SETTINGS = "fountain-workbench.settings";
@@ -102,11 +107,24 @@ export function App() {
 
 function Router() {
   const route = useRoute();
+
+  // Landing at the root goes to the project this browser was in last, once.
+  useEffect(() => {
+    if (route.page !== "projects") return;
+    if (window.location.hash && window.location.hash !== "#/") return;
+    const last = loadLastProject();
+    if (last && !sessionStorage.getItem("fountain-workbench.landed")) {
+      sessionStorage.setItem("fountain-workbench.landed", "1");
+      navigate(href.project(last));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (route.page === "projects") {
     return (
-      <Layout>
+      <Shell>
         <Projects />
-      </Layout>
+      </Shell>
     );
   }
   return (
@@ -114,7 +132,7 @@ function Router() {
       key={route.projectId}
       projectId={route.projectId}
       fallback={(state) => (
-        <Layout>
+        <Shell>
           <div className="page narrow">
             {state === "loading" ? (
               <p className="muted">Loading…</p>
@@ -122,18 +140,28 @@ function Router() {
               <div className="empty card">
                 <p className="strong">No such project.</p>
                 <p className="muted">It may have been deleted, or you are not a member of it.</p>
-                <a className="button secondary" href="#/">
-                  Back to projects
+                <a className="button secondary" href={href.projects()}>
+                  All projects
                 </a>
               </div>
             )}
           </div>
-        </Layout>
+        </Shell>
       )}
     >
-      <Layout>
-        {route.page === "team" ? <Team /> : route.page === "item" ? <WorkItem itemId={route.itemId} conversationId={route.conversationId} /> : <Project />}
-      </Layout>
+      <Shell>
+        {route.page === "team" ? (
+          <Team />
+        ) : route.page === "people" ? (
+          <People />
+        ) : route.page === "item" ? (
+          <WorkItem itemId={route.itemId} />
+        ) : route.page === "conversation" ? (
+          <Conversation conversationId={route.conversationId} />
+        ) : (
+          <Project />
+        )}
+      </Shell>
     </ProjectProvider>
   );
 }

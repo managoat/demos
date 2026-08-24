@@ -1,104 +1,29 @@
 /**
- * One work item: the teammates on it, the conversations it has (grouped by
- * the computer they run on), and the open thread.
+ * One work item: its notes and status, the teammates on it, and the
+ * conversations it has — each on its computer — linking into the thread.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useProject } from "../store";
-import type { Agent, Conversation, SandboxRecord } from "../types";
+import type { Agent } from "../types";
 import { agentFits, channelIsItem } from "../lib/workbench";
-import { href, navigate } from "../router";
-import { Thread, TwoStep } from "../components/Thread";
-import { StartDialog, type JoinTarget } from "../components/StartDialog";
+import { computerLabel, computersOf, relativeTime } from "../lib/sidebar";
+import { href } from "../router";
+import { TwoStep } from "../components/Thread";
+import { StartDialog } from "../components/StartDialog";
 import { StatusPill } from "../components/StatusPill";
 import { AgentAvatar } from "../components/AgentAvatar";
-import { formatTime, shortId } from "../lib/format";
+import { shortId } from "../lib/format";
 
-interface Computer {
-  key: string;
-  /** The sandbox id, when the conversations have one; a conversation with no computer stands alone. */
-  sandboxId: string | null;
-  /**
-   * The sandbox record. The conversation list carries only `sandbox_id`;
-   * the record (sprite name, status) is fetched for live computers as they
-   * appear (`GET /api/sandboxes/:id`, narrowed to the project by the server).
-   */
-  sandbox: Pick<SandboxRecord, "sprite_name" | "status" | "provider"> | null;
-  conversations: Conversation[];
-  agent: Agent | null;
-}
-
-const LIVE_STATUSES = new Set<Conversation["status"]>(["pending", "running", "idle"]);
-/** Fountain attaches a conversation only to a sandbox in one of these states (`check_attachable`). */
-const ATTACHABLE = new Set<string>(["ready", "suspended"]);
-
-export function WorkItem({ itemId, conversationId }: { itemId: string; conversationId: string | null }) {
-  const { project, items, conversations, agents, environments, vaults, fountain, toast, refresh, updateItem, addTeammate, removeTeammate } = useProject();
+export function WorkItem({ itemId }: { itemId: string }) {
+  const { project, items, conversations, agents, sandboxes, environments, vaults, fountain, toast, refresh, updateItem, addTeammate, removeTeammate } = useProject();
   const item = items.find((w) => w.id === itemId);
-  const [dialog, setDialog] = useState<{ join: JoinTarget | null; agentId: string | null } | null>(null);
+  const [dialog, setDialog] = useState<{ agentId: string | null } | null>(null);
   const [editing, setEditing] = useState(false);
   const [pick, setPick] = useState("");
-  const [sandboxes, setSandboxes] = useState<Map<string, SandboxRecord>>(new Map());
 
-  const convs = useMemo(
-    () =>
-      conversations
-        .filter((c) => channelIsItem(c.channel_id, project.id, itemId))
-        .sort((a, b) => (a.inserted_at ?? "").localeCompare(b.inserted_at ?? "")),
-    [conversations, project.id, itemId],
-  );
-
-  const computers = useMemo<Computer[]>(() => {
-    const byKey = new Map<string, Computer>();
-    for (const c of convs) {
-      const key = c.sandbox_id ?? `conv:${c.id}`;
-      let comp = byKey.get(key);
-      if (!comp) {
-        comp = {
-          key,
-          sandboxId: c.sandbox_id ?? null,
-          sandbox: (c.sandbox_id ? sandboxes.get(c.sandbox_id) : null) ?? c.sandbox ?? null,
-          conversations: [],
-          agent: c.agent_id ? agents.get(c.agent_id) ?? null : null,
-        };
-        byKey.set(key, comp);
-      }
-      comp.conversations.push(c);
-      if (!comp.sandbox && c.sandbox) comp.sandbox = c.sandbox;
-    }
-    // Live computers first, then by most recent activity.
-    return [...byKey.values()].sort((a, b) => {
-      const la = isLive(a) ? 0 : 1;
-      const lb = isLive(b) ? 0 : 1;
-      if (la !== lb) return la - lb;
-      return latest(b).localeCompare(latest(a));
-    });
-  }, [convs, agents, sandboxes]);
-
-  // The list does not say what a computer is called or how it is doing; its
-  // record does. Read it for every live computer, and again whenever a
-  // conversation on one changes state — that is when starting becomes ready.
-  const liveKey = computers
-    .filter((c) => c.sandboxId && isLive(c))
-    .map((c) => `${c.key}:${c.conversations.map((x) => x.status).join("")}`)
-    .join(",");
-  useEffect(() => {
-    const want = computers.filter((c) => c.sandboxId && isLive(c));
-    if (want.length === 0) return;
-    let cancelled = false;
-    for (const comp of want) {
-      fountain
-        .sandbox(comp.sandboxId!)
-        .then((rec) => {
-          if (cancelled) return;
-          setSandboxes((m) => new Map(m).set(rec.id, rec));
-        })
-        .catch(() => undefined);
-    }
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveKey, fountain]);
+  const convs = useMemo(() => conversations.filter((c) => channelIsItem(c.channel_id, project.id, itemId)), [conversations, project.id, itemId]);
+  const computers = useMemo(() => computersOf(convs, sandboxes), [convs, sandboxes]);
+  const byKey = useMemo(() => new Map(computers.map((c) => [c.key, c])), [computers]);
 
   if (!item) {
     return (
@@ -120,213 +45,162 @@ export function WorkItem({ itemId, conversationId }: { itemId: string; conversat
   const vaultName = project.vaultId ? vaults.get(project.vaultId)?.name ?? "?" : "none";
 
   return (
-    <div className={`item-layout ${conversationId ? "with-thread" : ""}`}>
-      <aside className="item-side">
-        <div className="item-head">
-          {editing ? (
-            <form
-              className="stack tight"
-              onSubmit={(e) => {
-                e.preventDefault();
-                setEditing(false);
-              }}
-            >
-              <input value={item.title} onChange={(e) => void updateItem(item.id, { title: e.target.value })} />
-              <textarea rows={4} value={item.notes} onChange={(e) => void updateItem(item.id, { notes: e.target.value })} placeholder="Notes" />
-              <div className="row end">
-                <button type="submit" className="secondary small">
-                  Done
-                </button>
-              </div>
-            </form>
-          ) : (
-            <>
-              <div className="row top">
-                <h1 className="item-title grow">{item.title}</h1>
-                <button className="secondary small" onClick={() => setEditing(true)}>
-                  Edit
-                </button>
-              </div>
-              {item.notes && <p className="muted small pre">{item.notes}</p>}
-              <div className="row wrap">
-                <span className={`pill ${item.status === "done" ? "terminated" : "running"}`}>{item.status}</span>
-                <button className="secondary small" onClick={() => void updateItem(item.id, { status: item.status === "done" ? "open" : "done" })}>
-                  {item.status === "done" ? "Reopen" : "Mark done"}
-                </button>
-              </div>
-              <div className="muted small">
-                env {envName} · vault {vaultName}
-              </div>
-            </>
-          )}
-        </div>
-
-        <section className="item-section">
-          <div className="row">
-            <h2 className="h2 grow">Teammates</h2>
-            {available.length > 0 && (
-              <select
-                className="compact"
-                value={pick}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  setPick("");
-                  if (id) void addTeammate(item.id, id);
-                }}
-              >
-                <option value="">+ Add…</option>
-                {available.map((a) => {
-                  const f = agentFits(a, project);
-                  return (
-                    <option key={a.id} value={a.id} disabled={!f.ok}>
-                      {a.name}
-                      {f.ok ? "" : ` — ${f.reason}`}
-                    </option>
-                  );
-                })}
-              </select>
-            )}
-          </div>
-          {team.length === 0 && (
-            <p className="muted small">
-              No agents on {project.ownerEmail}'s Fountain yet. <a href={href.team(project.id)}>See the team</a>.
-            </p>
-          )}
-          <ul className="member-list">
-            {onItem.map((a) => {
-              const fit = agentFits(a, project);
-              const live = convs.filter((c) => c.agent_id === a.id && (c.status === "running" || c.status === "pending" || c.status === "idle")).length;
-              return (
-                <li key={a.id} className="member-row">
-                  <AgentAvatar agent={a} size={28} />
-                  <div className="min0 grow">
-                    <div className="strong ellipsis">{a.name}</div>
-                    <div className="muted small ellipsis">
-                      {a.runtime}
-                      {live ? ` · ${live} live` : ""}
-                      {fit.ok ? "" : ` · ${fit.reason}`}
-                    </div>
-                  </div>
-                  <button className="small" onClick={() => setDialog({ join: null, agentId: a.id })} disabled={!fit.ok} title={fit.ok ? "New conversation on a new computer" : fit.reason}>
-                    Talk
-                  </button>
-                  <button className="icon" title="Remove from this item" onClick={() => void removeTeammate(item.id, a.id)}>
-                    ×
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-          <button className="secondary small" onClick={() => setDialog({ join: null, agentId: null })} disabled={team.length === 0}>
-            + Start a conversation
-          </button>
-        </section>
-
-        <section className="item-section">
-          <h2 className="h2">Conversations</h2>
-          {computers.length === 0 && <p className="muted small">None yet.</p>}
-          {computers.map((comp) => {
-            const live = isLive(comp);
-            const runtime = comp.conversations[0]?.runtime;
-            const busy = comp.conversations.some((c) => c.status === "running" || c.status === "pending");
-            return (
-              <div className={`computer ${live ? "live" : "gone"}`} key={comp.key}>
-                <div className="computer-head">
-                  {comp.agent ? <AgentAvatar agent={comp.agent} size={26} /> : <span className="computer-icon">🖥</span>}
-                  <div className="min0 grow">
-                    <div className="strong ellipsis">
-                      {comp.agent?.name ?? runtime}
-                      {comp.sandboxId ? <span className="muted small"> · 🖥 {comp.sandbox?.sprite_name ?? shortId(comp.sandboxId)}</span> : null}
-                    </div>
-                    <div className="muted small">
-                      {comp.sandbox ? `${comp.sandbox.provider ?? ""} · ${comp.sandbox.status}` : comp.sandboxId ? (live ? "up" : "gone") : "no computer"}
-                      {runtime ? ` · ${runtime}` : ""}
-                      {busy ? " · busy" : ""}
-                    </div>
-                  </div>
-                  {live && comp.sandboxId && comp.agent && (
-                    <button
-                      className="secondary small"
-                      disabled={!comp.sandbox || !ATTACHABLE.has(comp.sandbox.status)}
-                      title={
-                        !comp.sandbox
-                          ? "Checking the computer…"
-                          : ATTACHABLE.has(comp.sandbox.status)
-                            ? "Another conversation with the same teammate on this computer"
-                            : `The computer is ${comp.sandbox.status}; a second conversation attaches once it is ready`
-                      }
-                      onClick={() => setDialog({ join: { sandboxId: comp.sandboxId!, label: comp.sandbox?.sprite_name ?? shortId(comp.sandboxId!), agentId: comp.agent!.id }, agentId: comp.agent!.id })}
-                    >
-                      + Here
-                    </button>
-                  )}
-                </div>
-                <ul className="conv-list flat">
-                  {comp.conversations.map((c) => (
-                    <li key={c.id} className={c.id === conversationId ? "current" : ""}>
-                      <a className="conv-row" href={href.conversation(project.id, item.id, c.id)}>
-                        {c.unread && <span className="unread-dot" />}
-                        <div className="conv-main">
-                          <div className="conv-title">{c.title ?? shortId(c.id)}</div>
-                          <div className="conv-sub muted">
-                            {c.turn_count ?? 0} turn{c.turn_count === 1 ? "" : "s"} · {formatTime(c.last_active_at ?? c.inserted_at)}
-                          </div>
-                        </div>
-                        <StatusPill status={c.status} sandbox={c.sandbox?.status} />
-                      </a>
-                      {c.status !== "terminated" && (
-                        <TwoStep
-                          label="Retire"
-                          className="danger small self-center"
-                          onConfirm={() =>
-                            fountain
-                              .resume(c.id)
-                              .terminate()
-                              .then(() => {
-                                if (c.id === conversationId) navigate(href.item(project.id, item.id));
-                                return refresh();
-                              })
-                              .catch((err) => toast(String(err), "error"))
-                          }
-                        />
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            );
-          })}
-        </section>
-      </aside>
-
-      <div className="item-main">
-        {conversationId ? (
-          <Thread key={conversationId} conversationId={conversationId} onClose={() => navigate(href.item(project.id, item.id))} />
-        ) : (
-          <div className="centered muted">
-            <div>
-              <p className="strong">Pick a conversation, or start one.</p>
-              <p className="small">A teammate gets its own computer; “+ Here” opens a second conversation on a computer that is already up.</p>
+    <div className="page narrow">
+      <div className="page-header">
+        {editing ? (
+          <form
+            className="stack tight grow"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setEditing(false);
+            }}
+          >
+            <input value={item.title} onChange={(e) => void updateItem(item.id, { title: e.target.value })} />
+            <textarea rows={4} value={item.notes} onChange={(e) => void updateItem(item.id, { notes: e.target.value })} placeholder="Notes" />
+            <div className="row end">
+              <button type="submit" className="secondary small">
+                Done
+              </button>
             </div>
-          </div>
+          </form>
+        ) : (
+          <>
+            <div className="min0">
+              <div className="muted small">
+                <a href={href.project(project.id)}>{project.name}</a> · env {envName} · vault {vaultName}
+              </div>
+              <h1>{item.title}</h1>
+              {item.notes && <p className="muted small pre">{item.notes}</p>}
+            </div>
+            <div className="row">
+              <span className={`pill ${item.status === "done" ? "terminated" : "running"}`}>{item.status}</span>
+              <button className="secondary small" onClick={() => void updateItem(item.id, { status: item.status === "done" ? "open" : "done" })}>
+                {item.status === "done" ? "Reopen" : "Mark done"}
+              </button>
+              <button className="secondary small" onClick={() => setEditing(true)}>
+                Edit
+              </button>
+            </div>
+          </>
         )}
       </div>
 
-      {dialog && <StartDialog item={item} join={dialog.join} initialAgentId={dialog.agentId} onClose={() => setDialog(null)} />}
+      <section className="card stack tight">
+        <div className="row">
+          <h2 className="h2 grow">Teammates</h2>
+          {available.length > 0 && (
+            <select
+              className="compact"
+              value={pick}
+              onChange={(e) => {
+                const id = e.target.value;
+                setPick("");
+                if (id) void addTeammate(item.id, id);
+              }}
+            >
+              <option value="">+ Add…</option>
+              {available.map((a) => {
+                const f = agentFits(a, project);
+                return (
+                  <option key={a.id} value={a.id} disabled={!f.ok}>
+                    {a.name}
+                    {f.ok ? "" : ` — ${f.reason}`}
+                  </option>
+                );
+              })}
+            </select>
+          )}
+        </div>
+        {team.length === 0 && (
+          <p className="muted small">
+            No agents on {project.ownerEmail}'s Fountain yet. <a href={href.team(project.id)}>See the team</a>.
+          </p>
+        )}
+        <ul className="member-list">
+          {onItem.map((a) => {
+            const fit = agentFits(a, project);
+            const live = convs.filter((c) => c.agent_id === a.id && (c.status === "running" || c.status === "pending" || c.status === "idle")).length;
+            return (
+              <li key={a.id} className="member-row">
+                <AgentAvatar agent={a} size={28} />
+                <div className="min0 grow">
+                  <div className="strong ellipsis">{a.name}</div>
+                  <div className="muted small ellipsis">
+                    {a.runtime}
+                    {live ? ` · ${live} live` : ""}
+                    {fit.ok ? "" : ` · ${fit.reason}`}
+                  </div>
+                </div>
+                <button className="small" onClick={() => setDialog({ agentId: a.id })} disabled={!fit.ok} title={fit.ok ? "New conversation on a new computer" : fit.reason}>
+                  Talk
+                </button>
+                <button className="icon" title="Remove from this item" onClick={() => void removeTeammate(item.id, a.id)}>
+                  ×
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        <div>
+          <button className="secondary small" onClick={() => setDialog({ agentId: null })} disabled={team.length === 0}>
+            + Start a conversation
+          </button>
+        </div>
+      </section>
+
+      <h2 className="h2 section">Conversations</h2>
+      {convs.length === 0 && <p className="muted">None yet. Talk to a teammate above; a second conversation on a computer that is up starts from the sidebar's +.</p>}
+      {computers.map((comp) => {
+        const agent = comp.agentId ? agents.get(comp.agentId) ?? null : null;
+        return (
+          <div className={`computer ${comp.live ? "live" : "gone"}`} key={comp.key}>
+            <div className="computer-head static">
+              {agent ? <AgentAvatar agent={agent} size={26} /> : <span className="computer-icon">🖥</span>}
+              <div className="min0 grow">
+                <div className="strong ellipsis">
+                  {agent?.name ?? comp.conversations[0]?.runtime}
+                  <span className="muted small"> · 🖥 {computerLabel(comp)}</span>
+                </div>
+                <div className="muted small">
+                  {comp.sandbox ? `${comp.sandbox.provider ?? ""} · ${comp.sandbox.status}` : comp.sandboxId ? (comp.live ? "up" : "gone") : "no computer"}
+                  {comp.busy ? " · working" : ""}
+                </div>
+              </div>
+            </div>
+            <ul className="conv-list flat">
+              {comp.conversations.map((c) => (
+                <li key={c.id}>
+                  <a className="conv-row" href={href.conversation(project.id, c.id)}>
+                    {c.unread && <span className="unread-dot" />}
+                    <div className="conv-main">
+                      <div className="conv-title">{c.title ?? shortId(c.id)}</div>
+                      <div className="conv-sub muted">
+                        {c.turn_count ?? 0} turn{c.turn_count === 1 ? "" : "s"} · {relativeTime(c.last_active_at ?? c.inserted_at)}
+                      </div>
+                    </div>
+                    <StatusPill status={c.status} sandbox={byKey.get(comp.key)?.sandbox?.status} />
+                  </a>
+                  {c.status !== "terminated" && (
+                    <TwoStep
+                      label="Retire"
+                      className="danger small self-center"
+                      onConfirm={() =>
+                        fountain
+                          .resume(c.id)
+                          .terminate()
+                          .then(() => refresh())
+                          .catch((err) => toast(String(err), "error"))
+                      }
+                    />
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+
+      {dialog && <StartDialog itemId={item.id} initialAgentId={dialog.agentId} onClose={() => setDialog(null)} />}
     </div>
   );
-}
-
-/**
- * A computer is up while a conversation still holds it: one that is pending,
- * running or idle. The sandbox record, when we have it, has the last word.
- */
-function isLive(c: Computer): boolean {
-  if (!c.sandboxId) return false;
-  if (c.sandbox && (c.sandbox.status === "terminated" || c.sandbox.status === "failed")) return false;
-  return c.conversations.some((x) => LIVE_STATUSES.has(x.status));
-}
-
-function latest(c: Computer): string {
-  return c.conversations.reduce((m, x) => ((x.last_active_at ?? x.inserted_at ?? "") > m ? x.last_active_at ?? x.inserted_at ?? "" : m), "");
 }

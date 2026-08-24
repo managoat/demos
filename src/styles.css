@@ -19,8 +19,10 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   color-scheme: light dark;
 }
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg-0: #101014;
     --bg-1: #17171c;
     --bg-2: #202027;
@@ -32,6 +34,18 @@
     --them-text: #f2f2f6;
     --danger-bg: #2a1616;
   }
+}
+:root[data-theme="dark"] {
+  --bg-0: #101014;
+  --bg-1: #17171c;
+  --bg-2: #202027;
+  --border: #2a2a33;
+  --text: #f2f2f6;
+  --text-2: #b4b4c0;
+  --muted: #7d7d8a;
+  --them: #26262e;
+  --them-text: #f2f2f6;
+  --danger-bg: #2a1616;
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -318,3 +332,47 @@ li.editing { padding: 0; }
 }
 .notice { margin-bottom: 16px; }
 .notice p { margin: 0; }
+
+/* ── shell: top bar + sidebar of computers ───────────────────────────── */
+.project-pick { max-width: 26ch; }
+.shell-body { flex: 1; min-height: 0; display: flex; }
+.sidebar { width: 280px; flex-shrink: 0; border-right: 1px solid var(--border); background: var(--bg-1); display: flex; flex-direction: column; min-height: 0; }
+.sidebar-top { padding: 10px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--border); }
+button.wide { justify-content: center; width: 100%; }
+.sidebar-list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 6px 16px; }
+.sidebar-empty { padding: 12px; }
+.sidebar-group { display: flex; align-items: center; gap: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 8px 8px 4px; }
+.sidebar-group span:last-child { margin-left: auto; }
+button.linklike-group { background: transparent; border: 0; width: 100%; border-radius: 6px; cursor: pointer; }
+button.linklike-group:hover { background: var(--bg-2); }
+.sidebar details { margin-bottom: 4px; }
+.sidebar summary.computer-head { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; background: transparent; }
+.sidebar summary.computer-head::-webkit-details-marker { display: none; }
+.sidebar summary.computer-head:hover { background: var(--bg-2); }
+.sidebar summary.computer-head.gone { opacity: 0.7; }
+.computer-name { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+.computer-sub { display: block; margin-top: 1px; }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); animation: pulse 1.2s infinite; flex-shrink: 0; }
+button.icon.small-icon { width: 26px; height: 26px; font-size: 16px; border: 1px solid var(--border); flex-shrink: 0; }
+button.icon.small-icon:disabled { opacity: 0.4; }
+.sidebar details > .conv-link { margin-left: 22px; }
+.conv-link { display: block; padding: 5px 8px; border-radius: 8px; text-decoration: none; color: inherit; }
+.conv-link:hover { background: var(--bg-2); }
+.conv-link.current { background: color-mix(in srgb, var(--brand) 14%, transparent); }
+.conv-link-title { font-size: 13px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-link.unread .conv-link-title { font-weight: 600; }
+.conv-link-sub { display: flex; align-items: center; gap: 5px; margin-top: 2px; font-size: 11px; min-width: 0; }
+.count { flex-shrink: 0; font-size: 10px; padding: 0 5px; border-radius: 999px; background: var(--bg-2); color: var(--text-2); }
+.count.running { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.computer-head.static { cursor: default; }
+.menu { display: none; }
+.drawer-backdrop { display: none; }
+.conversation-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+@media (max-width: 900px) {
+  .menu { display: inline-flex; }
+  .sidebar { position: fixed; top: 0; bottom: 0; left: 0; z-index: 70; transform: translateX(-100%); transition: transform .18s ease; }
+  .sidebar.open { transform: none; }
+  .drawer-backdrop { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 65; }
+  .crumbs { display: flex; }
+}

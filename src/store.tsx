@@ -15,7 +15,8 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Fountain } from "@agentshit/fountain-sdk";
-import type { Agent, Conversation, Environment, UserEvent, Vault } from "./types";
+import type { Agent, Conversation, Environment, SandboxRecord, UserEvent, Vault } from "./types";
+import { computersOf } from "./lib/sidebar";
 import { api, ApiError, projectFountainBase, type Activity, type ItemDto, type Me, type ProjectDto } from "./lib/api";
 import { readSse } from "./lib/sse";
 import { describeError } from "./lib/errors";
@@ -23,6 +24,16 @@ import { describeError } from "./lib/errors";
 export type EventHandler = (ev: UserEvent) => void;
 
 const THREAD_STREAMS = ["acp", "stdout", "stage"];
+const LAST_PROJECT = "fountain-workbench.lastProject";
+
+/** The project this browser was in last, to land there again. */
+export function loadLastProject(): string | null {
+  try {
+    return localStorage.getItem(LAST_PROJECT);
+  } catch {
+    return null;
+  }
+}
 
 // ── the user's store ───────────────────────────────────────────────────────
 
@@ -122,6 +133,8 @@ export interface ProjectStore {
   /** Fountain from inside this project: the owner's key, this project's conversations. */
   fountain: Fountain;
   conversations: Conversation[];
+  /** Sandbox records for the project's live computers, by id — the list carries only `sandbox_id`. */
+  sandboxes: Map<string, SandboxRecord>;
   agents: Map<string, Agent>;
   environments: Map<string, Environment>;
   vaults: Map<string, Vault>;
@@ -171,6 +184,7 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
   const [items, setItems] = useState<ItemDto[]>([]);
   const [missing, setMissing] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [sandboxes, setSandboxes] = useState<Map<string, SandboxRecord>>(new Map());
   const [agents, setAgents] = useState<Map<string, Agent>>(new Map());
   const [environments, setEnvironments] = useState<Map<string, Environment>>(new Map());
   const [vaults, setVaults] = useState<Map<string, Vault>>(new Map());
@@ -220,7 +234,37 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
     void reload();
     void refresh();
     void refreshResources();
-  }, [reload, refresh, refreshResources]);
+    try {
+      localStorage.setItem(LAST_PROJECT, projectId);
+    } catch {
+      // fine
+    }
+  }, [reload, refresh, refreshResources, projectId]);
+
+  // The list does not say what a computer is called or how it is doing; its
+  // record does. Read it for every live computer, and again whenever a
+  // conversation on one changes state — that is when starting becomes ready.
+  const liveKey = computersOf(conversations, sandboxes)
+    .filter((c) => c.sandboxId && c.live)
+    .map((c) => `${c.key}:${c.conversations.map((x) => x.status).join("")}`)
+    .join(",");
+  useEffect(() => {
+    if (!liveKey) return;
+    let cancelled = false;
+    for (const part of liveKey.split(",")) {
+      const id = part.split(":")[0]!;
+      fountain
+        .sandbox(id)
+        .then((rec) => {
+          if (cancelled) return;
+          setSandboxes((m) => new Map(m).set(rec.id, rec));
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [liveKey, fountain]);
 
   // Debounced refreshes: stage events arrive in bursts, and so do workbench notices.
   const timers = useRef<{ list: number | null; tree: number | null }>({ list: null, tree: null });
@@ -394,6 +438,7 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
             isOwner: project.role === "owner",
             fountain,
             conversations,
+            sandboxes,
             agents,
             environments,
             vaults,
@@ -420,6 +465,7 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
       items,
       fountain,
       conversations,
+      sandboxes,
       agents,
       environments,
       vaults,

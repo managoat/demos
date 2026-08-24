@@ -3,7 +3,7 @@
  * store's stream, and a composer. Chat layout: your prompts on the right, the
  * agent's blocks on the left.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { useProject } from "../store";
 import type { Stream } from "@agentshit/fountain-sdk";
 import type { Conversation, LogEvent, Turn, UserEvent } from "../types";
@@ -17,12 +17,13 @@ import { AgentAvatar } from "./AgentAvatar";
 
 const HISTORY_STREAMS: Stream[] = ["acp", "stdout", "stage"];
 
-export function Thread({ conversationId, onClose }: { conversationId: string; onClose?: () => void }) {
-  const { fountain, conversations, agents, subscribe, toast, refresh } = useProject();
+export function Thread({ conversationId, onClose, context }: { conversationId: string; onClose?: () => void; context?: ReactNode }) {
+  const { fountain, conversations, agents, sandboxes, subscribe, toast, refresh } = useProject();
   const listed = conversations.find((c) => c.id === conversationId) ?? null;
   const [fetched, setFetched] = useState<Conversation | null>(null);
   // The list has the live status; the show has the sandbox (the list never embeds it).
   const conversation = listed ? { ...listed, sandbox: listed.sandbox ?? fetched?.sandbox ?? null } : fetched;
+  const sandbox = conversation?.sandbox ?? (conversation?.sandbox_id ? sandboxes.get(conversation.sandbox_id) ?? null : null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [events, setEvents] = useState<LogEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -155,11 +156,12 @@ export function Thread({ conversationId, onClose }: { conversationId: string; on
         <div className="thread-title">
           <div className="name">{conversation?.title ?? who}</div>
           <div className="sub muted small">
+            {context ? <>{context} · </> : null}
             {who}
-            {conversation?.sandbox ? ` · ${conversation.sandbox.sprite_name} (${conversation.sandbox.status})` : ""}
+            {sandbox ? ` · 🖥 ${sandbox.sprite_name.replace(/^fountain-[0-9a-f]{8}-/, "")} (${sandbox.status})` : ""}
           </div>
         </div>
-        {conversation && <StatusPill status={conversation.status} sandbox={conversation.sandbox?.status} />}
+        {conversation && <StatusPill status={conversation.status} sandbox={sandbox?.status} />}
         <label className="check small">
           <input type="checkbox" checked={showStdout} onChange={(e) => setShowStdout(e.target.checked)} /> stdout
         </label>
