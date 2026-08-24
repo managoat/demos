@@ -64,6 +64,16 @@ export class FountainClient {
     return body.data ?? [];
   }
 
+  /**
+   * Retire a conversation. Fountain tears the sprite down with the last live
+   * conversation on it (ADR 0023), so a computer another conversation still
+   * holds stays up. Idempotent for one that is already dead.
+   */
+  async terminate(id: string): Promise<void> {
+    const res = await this.fetch(`/api/conversations/${encodeURIComponent(id)}/terminate`, { method: "POST" });
+    if (!res.ok) throw new FountainHttpError(res.status, await res.text());
+  }
+
   async conversation(id: string): Promise<ConversationSummary | null> {
     try {
       const body = await this.json<{ data: ConversationSummary }>(`/api/conversations/${encodeURIComponent(id)}`);

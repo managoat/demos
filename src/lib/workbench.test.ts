@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { agentFits, normalizeLegacy } from "./workbench";
+import { agentFits, normalizeLegacy, retiredMessage } from "./workbench";
 
 describe("agentFits", () => {
   const project = { environmentId: "e1", vaultId: "v1" };
@@ -16,6 +16,26 @@ describe("agentFits", () => {
   });
   test("a project with no env/vault set never trips an allowlist", () => {
     expect(agentFits({ allowed_environment_ids: ["e2"], allowed_vault_ids: ["v2"] }, { environmentId: null, vaultId: null })).toEqual({ ok: true });
+  });
+});
+
+describe("retiredMessage", () => {
+  test("nothing was running: nothing to say", () => {
+    expect(retiredMessage({ conversations: 0, computers: 0, failed: 0 })).toBeNull();
+  });
+  test("what went, counted", () => {
+    expect(retiredMessage({ conversations: 2, computers: 1, failed: 0 })).toEqual({ text: "Retired 2 conversations on 1 computer.", kind: "info" });
+    expect(retiredMessage({ conversations: 1, computers: 0, failed: 0 })).toEqual({ text: "Retired 1 conversation.", kind: "info" });
+  });
+  test("what did not is an error, with Fountain's reason", () => {
+    expect(retiredMessage({ conversations: 1, computers: 1, failed: 1, error: "Fountain answered 500." })).toEqual({
+      text: "Marked done, but 1 conversation would not retire: Fountain answered 500.",
+      kind: "error",
+    });
+    expect(retiredMessage({ conversations: 0, computers: 0, failed: 0, error: "Fountain answered 401." })).toEqual({
+      text: "Marked done, but its computers could not be retired: Fountain answered 401.",
+      kind: "error",
+    });
   });
 });
 

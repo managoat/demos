@@ -39,6 +39,14 @@ the app says so. The sandbox identity `(owner, agent, environment, vault)`
 falls out of the tree — same project, same agent — which is what makes sharing
 a computer legal, whichever member opens the second conversation.
 
+**Done means done.** Marking a work item done retires every conversation
+still live on it, which is what takes its computers down — Fountain destroys
+a sprite with the last live conversation on it, so a machine something
+outside the item still holds stays up. The work is over; the disks and the
+bill for them do not outlive it. The button asks first when there is
+something to lose, and the app says what actually went. Reopening an item
+brings nothing back: it is new conversations from there.
+
 **Themes.** The top bar's ☀/☾/◐ opens a colour-scheme menu the way an editor
 has one: follow the OS, or pick a palette — solarized, nord, dracula, gruvbox,
 tokyo night, one dark, catppuccin latte. Hovering a line previews it on the

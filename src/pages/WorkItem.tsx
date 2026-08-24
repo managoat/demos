@@ -25,6 +25,7 @@ export function WorkItem({ itemId }: { itemId: string }) {
   const convs = useMemo(() => conversations.filter((c) => channelIsItem(c.channel_id, project.id, itemId)), [conversations, project.id, itemId]);
   const computers = useMemo(() => computersOf(convs, sandboxes), [convs, sandboxes]);
   const byKey = useMemo(() => new Map(computers.map((c) => [c.key, c])), [computers]);
+  const live = convs.filter((c) => c.status !== "terminated").length;
 
   if (!item) {
     return (
@@ -75,9 +76,23 @@ export function WorkItem({ itemId }: { itemId: string }) {
             </div>
             <div className="row">
               <span className={`pill ${item.status === "done" ? "terminated" : "running"}`}>{item.status}</span>
-              <button className="secondary small" onClick={() => void updateItem(item.id, { status: item.status === "done" ? "open" : "done" })}>
-                {item.status === "done" ? "Reopen" : "Mark done"}
-              </button>
+              {item.status === "done" ? (
+                <button className="secondary small" onClick={() => void updateItem(item.id, { status: "open" })}>
+                  Reopen
+                </button>
+              ) : live > 0 ? (
+                // Done retires what is still up on the item — the same loss as Retire, so the same ask.
+                <TwoStep
+                  label="Mark done"
+                  className="danger small"
+                  title={`Retires ${live} conversation${live === 1 ? "" : "s"} — the computers go with them`}
+                  onConfirm={() => void updateItem(item.id, { status: "done" })}
+                />
+              ) : (
+                <button className="secondary small" onClick={() => void updateItem(item.id, { status: "done" })}>
+                  Mark done
+                </button>
+              )}
               <button className="secondary small" onClick={() => setEditing(true)}>
                 Edit
               </button>

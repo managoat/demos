@@ -7,10 +7,10 @@
  * deletion. Everything else — items, teammates, conversations — is any
  * member's.
  */
-import { channelPrefix, newId, parseChannel, recoveredTitle } from "../shared/channel";
+import { channelIsItem, channelPrefix, newId, parseChannel, recoveredTitle } from "../shared/channel";
 import { authenticate, ownerClient, projectAccess, requireOwner, userClient, type AppContext } from "./context";
 import { now, parseAgentIds, type ItemRow, type ProjectRow, type Role } from "./db";
-import type { ConversationSummary } from "./fountain";
+import { FountainHttpError, type ConversationSummary, type FountainClient } from "./fountain";
 import { HttpError, isEmail, json, normalizeEmail, optId, readJson, str } from "./http";
 
 export interface ProjectDto {
@@ -34,6 +34,18 @@ export interface ItemDto {
   status: "open" | "done";
   agentIds: string[];
   createdAt: string;
+}
+
+/** What marking a work item done did to its computers. */
+export interface RetiredDto {
+  /** Conversations retired. */
+  conversations: number;
+  /** Distinct computers they were on; Fountain takes each down with the last live conversation on it. */
+  computers: number;
+  /** Conversations Fountain would not retire; their computers may still be up. */
+  failed: number;
+  /** Why, when something did not go. */
+  error?: string;
 }
 
 function projectDto(ctx: AppContext, p: ProjectRow, role: Role, counts?: { open: number; done: number }): ProjectDto {
@@ -192,7 +204,7 @@ export async function createItem(ctx: AppContext, req: Request, id: string): Pro
 
 export async function patchItem(ctx: AppContext, req: Request, id: string, itemId: string): Promise<Response> {
   const user = await authenticate(ctx, req);
-  projectAccess(ctx, user, id);
+  const { project } = projectAccess(ctx, user, id);
   const cur = ctx.db.getItem(itemId);
   if (!cur || cur.project_id !== id) throw new HttpError(404, "not_found", "No such work item.");
   const body = await readJson(req);
@@ -203,7 +215,9 @@ export async function patchItem(ctx: AppContext, req: Request, id: string, itemI
   if (Array.isArray(body.agentIds)) p.agent_ids = JSON.stringify(body.agentIds.filter((x: unknown): x is string => typeof x === "string").slice(0, 100));
   ctx.db.updateItem(itemId, p);
   ctx.events.emit(id, { kind: "items" });
-  return json({ data: itemDto(ctx.db.getItem(itemId)!) });
+  const done = p.status === "done" && cur.status !== "done";
+  const item = itemDto(ctx.db.getItem(itemId)!);
+  return json(done ? { data: item, retired: await retire(ctx, project, itemId) } : { data: item });
 }
 
 export async function removeItem(ctx: AppContext, req: Request, id: string, itemId: string): Promise<Response> {
@@ -214,6 +228,53 @@ export async function removeItem(ctx: AppContext, req: Request, id: string, item
   ctx.db.deleteItem(itemId);
   ctx.events.emit(id, { kind: "items" });
   return json({ ok: true });
+}
+
+/**
+ * An item's computers, once it is done: the work is over, so the machines go.
+ *
+ * Fountain has no "destroy this sandbox" — a sprite is torn down with the
+ * last live conversation on it (ADR 0023), so retiring every conversation of
+ * the item is how its computers go, and a machine something outside the item
+ * still holds rightly stays up. Terminating is idempotent, so an already-dead
+ * conversation is simply skipped.
+ *
+ * Best effort: the item is done whatever Fountain says. What actually went is
+ * reported back, so the browser can say so rather than imply a machine is
+ * gone when it is still running.
+ */
+async function retire(ctx: AppContext, project: ProjectRow, itemId: string): Promise<RetiredDto> {
+  const out: RetiredDto = { conversations: 0, computers: 0, failed: 0 };
+  let convs: ConversationSummary[];
+  let client: FountainClient;
+  try {
+    client = await ownerClient(ctx, project);
+    convs = await client.conversations({ roots_only: "false" });
+  } catch (err) {
+    return { ...out, error: reason(err) };
+  }
+  const live = convs.filter((c) => channelIsItem(c.channel_id, project.id, itemId) && c.status !== "terminated");
+  const computers = new Set<string>();
+  await Promise.all(
+    live.map(async (c) => {
+      try {
+        await client.terminate(c.id);
+        out.conversations += 1;
+        if (c.sandbox_id) computers.add(c.sandbox_id);
+      } catch (err) {
+        out.failed += 1;
+        out.error ??= reason(err);
+      }
+    }),
+  );
+  out.computers = computers.size;
+  return out;
+}
+
+function reason(err: unknown): string {
+  if (err instanceof FountainHttpError) return `Fountain answered ${err.status}.`;
+  if (err instanceof HttpError) return err.message;
+  return err instanceof Error ? err.message : String(err);
 }
 
 /** Put an agent on an item, if it is not there already. True when something changed. */

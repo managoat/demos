@@ -266,7 +266,7 @@ function failReason(ev: LogEvent): string | null {
 }
 
 /** A destructive button that asks once, inline — never a browser dialog. */
-export function TwoStep({ label, onConfirm, className = "danger small" }: { label: string; onConfirm: () => void; className?: string }) {
+export function TwoStep({ label, onConfirm, className = "danger small", title }: { label: string; onConfirm: () => void; className?: string; title?: string }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
@@ -276,6 +276,7 @@ export function TwoStep({ label, onConfirm, className = "danger small" }: { labe
   return armed ? (
     <button
       className={className}
+      title={title}
       onClick={() => {
         setArmed(false);
         onConfirm();
@@ -284,7 +285,7 @@ export function TwoStep({ label, onConfirm, className = "danger small" }: { labe
       Sure? {label}
     </button>
   ) : (
-    <button className={className.replace("danger", "secondary")} onClick={() => setArmed(true)}>
+    <button className={className.replace("danger", "secondary")} title={title} onClick={() => setArmed(true)}>
       {label}
     </button>
   );

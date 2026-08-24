@@ -28,6 +28,8 @@ const KEYS: Record<string, { id: string; email: string }> = {
 
 const convs: Record<string, FakeConv[]> = { "key-alice": [], "key-bob": [], "key-carol": [] };
 const posted: { key: string; body: Record<string, unknown> }[] = [];
+/** Conversations this fake was asked to terminate; one whose id starts with `stuck` refuses. */
+const terminated: string[] = [];
 let streamEvents: { conversation_id: string; id: number }[] = [];
 
 function whose(req: Request): string | null {
@@ -69,7 +71,12 @@ const fountain = Bun.serve({
       if (!one[2]) return Response.json({ data: c });
       if (one[2] === "/turns") return Response.json({ data: [{ id: "t1", prompt: "hi" }] });
       if (one[2] === "/prompts") return Response.json({ data: { ok: true, prompt: (await req.json()).prompt } }, { status: 202 });
-      if (one[2] === "/terminate") return new Response(null, { status: 204 });
+      if (one[2] === "/terminate") {
+        if (c.id.startsWith("stuck")) return Response.json({ error: "boom" }, { status: 500 });
+        terminated.push(c.id);
+        c.status = "terminated";
+        return new Response(null, { status: 204 });
+      }
       return Response.json({ error: "not_found" }, { status: 404 });
     }
     const sb = /^\/api\/sandboxes\/([^/]+)$/.exec(path);
@@ -374,6 +381,82 @@ describe("the project-scoped proxy", () => {
     expect(text).not.toContain('"conversation_id":"c2"');
     expect(text).not.toContain('"conversation_id":"c3"');
     expect(text).toContain("event: conversations");
+  });
+});
+
+describe("done retires the item's computers", () => {
+  let doneItem = "";
+  let otherItem = "";
+
+  beforeAll(async () => {
+    const make = async (title: string) => (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title })).json()).data.id as string;
+    doneItem = await make("ship it");
+    otherItem = await make("still going");
+    const conv = (id: string, channel: string | null, sandbox: string | null, status: string): FakeConv => ({
+      id,
+      channel_id: channel,
+      title: null,
+      agent_id: "a1",
+      environment_id: "e1",
+      vault_id: "v1",
+      sandbox_id: sandbox,
+      status,
+      inserted_at: "2026-08-23T00:00:00Z",
+    });
+    convs["key-alice"] = [
+      conv("d1", `workbench:${projectId}/${doneItem}/aaaaaaaaaaaa`, "sbA", "running"),
+      conv("d2", `workbench:${projectId}/${doneItem}/bbbbbbbbbbbb`, "sbA", "idle"), // the same computer as d1
+      conv("d3", `workbench:${projectId}/${doneItem}/cccccccccccc`, "sbB", "terminated"), // already gone
+      conv("o1", `workbench:${projectId}/${otherItem}/dddddddddddd`, "sbC", "running"), // another item
+      conv("x1", "workbench:otherproj/item9", "sbD", "running"), // another project
+      conv("p1", "fountain:team", "sbE", "running"), // not the workbench's at all
+    ];
+    terminated.length = 0;
+  });
+
+  test("marking it done retires every live conversation on that item, and nothing else", async () => {
+    const res = await call("bob", "PATCH", `/api/projects/${projectId}/items/${doneItem}`, { status: "done" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { status: string }; retired: unknown };
+    expect(body.data.status).toBe("done");
+    // d1 and d2 share sbA, so two conversations retire one computer.
+    expect(body.retired).toEqual({ conversations: 2, computers: 1, failed: 0 });
+    expect([...terminated].sort()).toEqual(["d1", "d2"]);
+  });
+
+  test("a title edit, a reopen, or a second done retires nothing", async () => {
+    terminated.length = 0;
+    for (const patch of [{ title: "ship it!" }, { status: "done" }, { status: "open" }]) {
+      const res = await call("bob", "PATCH", `/api/projects/${projectId}/items/${doneItem}`, patch);
+      expect((await res.json()).retired).toBeUndefined();
+    }
+    expect(terminated).toEqual([]);
+    // The other item's conversation was never touched.
+    expect(convs["key-alice"]!.find((c) => c.id === "o1")!.status).toBe("running");
+  });
+
+  test("what Fountain would not retire is reported; the item is done either way", async () => {
+    convs["key-alice"]!.push({
+      id: "stuck1",
+      channel_id: `workbench:${projectId}/${otherItem}/eeeeeeeeeeee`,
+      title: null,
+      agent_id: "a1",
+      environment_id: "e1",
+      vault_id: "v1",
+      sandbox_id: "sbF",
+      status: "idle",
+      inserted_at: "2026-08-23T00:00:00Z",
+    });
+    terminated.length = 0;
+    const res = await call("bob", "PATCH", `/api/projects/${projectId}/items/${otherItem}`, { status: "done" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { status: string }; retired: { conversations: number; computers: number; failed: number; error?: string } };
+    expect(body.data.status).toBe("done");
+    expect(terminated).toEqual(["o1"]);
+    expect(body.retired.conversations).toBe(1);
+    expect(body.retired.computers).toBe(1);
+    expect(body.retired.failed).toBe(1);
+    expect(body.retired.error).toContain("500");
   });
 });
 

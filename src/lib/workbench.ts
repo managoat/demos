@@ -17,8 +17,28 @@
  * channel binds only one), which is what makes the tree recoverable from
  * the conversation list alone.
  */
+import type { RetiredDto } from "./api";
+
 export { channelFor, channelIsItem, channelPrefix, conversationTitle, newId, parseChannel } from "../../shared/channel";
 export type { ItemDto as WorkItem, ProjectDto as Project } from "./api";
+
+/**
+ * What to say after an item was marked done and the server retired its
+ * computers. Nothing to report when there was nothing running on it.
+ */
+export function retiredMessage(r: RetiredDto): { text: string; kind: "info" | "error" } | null {
+  if (r.failed > 0 || r.error) {
+    const what = r.failed > 0 ? `${count(r.failed, "conversation")} would not retire` : "its computers could not be retired";
+    return { text: `Marked done, but ${what}${r.error ? `: ${r.error}` : "."}`, kind: "error" };
+  }
+  if (r.conversations === 0) return null;
+  const on = r.computers > 0 ? ` on ${count(r.computers, "computer")}` : "";
+  return { text: `Retired ${count(r.conversations, "conversation")}${on}.`, kind: "info" };
+}
+
+function count(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
 
 /**
  * Whether an agent can run in a project: its allowlists, when set, must admit

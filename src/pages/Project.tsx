@@ -62,6 +62,7 @@ export function Project() {
   const row = (w: (typeof items)[number]) => {
     const convs = conversations.filter((c) => channelIsItem(c.channel_id, project.id, w.id));
     const working = convs.filter((c) => c.status === "running" || c.status === "pending").length;
+    const live = convs.filter((c) => c.status !== "terminated").length;
     const unread = convs.some((c) => c.unread);
     const latest = convs.reduce((m, c) => ((c.last_active_at ?? "") > m ? c.last_active_at ?? "" : m), "");
     const teammates = w.agentIds.map((id) => agents.get(id)).filter((a): a is NonNullable<typeof a> => !!a);
@@ -88,9 +89,23 @@ export function Project() {
             <span className="time muted">{formatTime(latest || w.createdAt)}</span>
           </div>
         </a>
-        <button className="secondary small self-center" onClick={() => void updateItem(w.id, { status: w.status === "done" ? "open" : "done" })}>
-          {w.status === "done" ? "Reopen" : "Done"}
-        </button>
+        {w.status === "done" ? (
+          <button className="secondary small self-center" onClick={() => void updateItem(w.id, { status: "open" })}>
+            Reopen
+          </button>
+        ) : live > 0 ? (
+          // Done retires what is still up on the item — the same loss as Retire, so the same ask.
+          <TwoStep
+            label="Done"
+            className="danger small self-center"
+            title={`Retires ${live} conversation${live === 1 ? "" : "s"} — the computers go with them`}
+            onConfirm={() => void updateItem(w.id, { status: "done" })}
+          />
+        ) : (
+          <button className="secondary small self-center" onClick={() => void updateItem(w.id, { status: "done" })}>
+            Done
+          </button>
+        )}
         <TwoStep label="Delete" onConfirm={() => void removeItem(w.id)} className="danger small self-center" />
       </li>
     );

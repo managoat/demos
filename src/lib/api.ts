@@ -28,6 +28,14 @@ export interface ItemDto {
   createdAt: string;
 }
 
+/** What marking a work item done did to its computers (server/projects.ts). */
+export interface RetiredDto {
+  conversations: number;
+  computers: number;
+  failed: number;
+  error?: string;
+}
+
 export interface Activity {
   live: number;
   latest: string | null;
@@ -88,8 +96,9 @@ export const api = {
   removeMember: (id: string, email: string) => data(call<{ data: ProjectDto }>("DELETE", `/api/projects/${id}/members/${encodeURIComponent(email)}`)),
 
   createItem: (projectId: string, input: { title: string; notes?: string }) => data(call<{ data: ItemDto }>("POST", `/api/projects/${projectId}/items`, input)),
+  // The envelope, not just the item: marking one done retires its computers, and says what went.
   patchItem: (projectId: string, itemId: string, patch: Partial<Pick<ItemDto, "title" | "notes" | "status" | "agentIds">>) =>
-    data(call<{ data: ItemDto }>("PATCH", `/api/projects/${projectId}/items/${itemId}`, patch)),
+    call<{ data: ItemDto; retired?: RetiredDto }>("PATCH", `/api/projects/${projectId}/items/${itemId}`, patch),
   deleteItem: (projectId: string, itemId: string) => call<{ ok: true }>("DELETE", `/api/projects/${projectId}/items/${itemId}`),
 
   recover: () => data(call<{ data: { projects: number; items: number } }>("POST", "/api/projects/recover")),

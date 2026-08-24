@@ -21,6 +21,7 @@ import { api, ApiError, projectFountainBase, type Activity, type ItemDto, type M
 import { startBody, type StartInput } from "./lib/start";
 import { readSse } from "./lib/sse";
 import { describeError } from "./lib/errors";
+import { retiredMessage } from "./lib/workbench";
 
 export type EventHandler = (ev: UserEvent) => void;
 
@@ -406,10 +407,18 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
   const updateItem = useCallback<ProjectStore["updateItem"]>(
     async (id, patch) => {
       setItems((ws) => ws.map((w) => (w.id === id ? { ...w, ...patch } : w)));
-      await run(() => api.patchItem(projectId, id, patch));
+      // Done retires the item's computers (server/projects.ts): say what went, and
+      // show the conversations as retired without waiting for Fountain's notice.
+      await run(async () => {
+        const { retired } = await api.patchItem(projectId, id, patch);
+        if (!retired) return;
+        const msg = retiredMessage(retired);
+        if (msg) toast(msg.text, msg.kind);
+        if (retired.conversations > 0) void refresh();
+      });
       void refreshProjects();
     },
-    [projectId, run, refreshProjects],
+    [projectId, run, refresh, refreshProjects, toast],
   );
   const removeItem = useCallback<ProjectStore["removeItem"]>(
     async (id) => {
