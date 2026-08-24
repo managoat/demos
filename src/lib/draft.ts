@@ -77,5 +77,7 @@ export function useDraft<T>(record: T, save: (value: T) => void, delay = 500) {
     [saver],
   );
 
-  return { draft, edit, flush: saver.flush };
+  // `cancel` is for the edit that has been overtaken — the record is being
+  // deleted, say — where flushing on the way out would save onto nothing.
+  return { draft, edit, flush: saver.flush, cancel: saver.cancel };
 }

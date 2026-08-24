@@ -381,7 +381,9 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
 
   const updateProject = useCallback<ProjectStore["updateProject"]>(
     async (patch) => {
-      // Edit-as-you-type: show it now, save it, let the reload settle it.
+      // One write per pause in the typing, not per keystroke — the page holds
+      // the draft (src/lib/draft.ts). Show the patch now so everywhere else a
+      // project is named keeps up, save it, let the reload settle it.
       setProject((p) => (p ? { ...p, ...patch } : p));
       await run(() => api.patchProject(projectId, patch));
       void refreshProjects();

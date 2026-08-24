@@ -39,6 +39,18 @@ describe("debounce", () => {
     expect(saved).toEqual([]);
   });
 
+  // What the settings page leans on when the project is deleted under it:
+  // cancel first, and the flush on the way out saves onto nothing.
+  test("flush after cancel saves nothing", async () => {
+    const saved: string[] = [];
+    const d = debounce<string>((v) => saved.push(v), 10);
+    d.push("x");
+    d.cancel();
+    d.flush();
+    await Bun.sleep(40);
+    expect(saved).toEqual([]);
+  });
+
   test("pending is true from the first edit until it is saved", async () => {
     const d = debounce<string>(() => {}, 10);
     expect(d.pending()).toBe(false);

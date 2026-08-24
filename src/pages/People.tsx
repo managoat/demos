@@ -1,8 +1,9 @@
 /** Who is in the project, and — for the owner — its settings: name, notes, the computer it runs on. */
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { useProject, useWorkbench } from "../store";
 import { api } from "../lib/api";
 import { describeError } from "../lib/errors";
+import { useDraft } from "../lib/draft";
 import { href, navigate } from "../router";
 import { TwoStep } from "../components/Thread";
 import { EnvVaultFields } from "../components/EnvVaultFields";
@@ -11,6 +12,13 @@ export function People() {
   const { me, refreshProjects, toast } = useWorkbench();
   const { project, isOwner, environments, vaults, resourcesLoaded, updateProject, addMember, removeMember } = useProject();
   const [invite, setInvite] = useState("");
+
+  // What is saved, against what the fields show: one PATCH per pause in the
+  // typing and not one per keystroke, and another member's rename still lands
+  // on a field nobody is in. The selects below stay direct — a pick is one
+  // write already.
+  const settings = useMemo(() => ({ name: project.name, notes: project.notes }), [project.name, project.notes]);
+  const { draft, edit, flush, cancel } = useDraft(settings, (v) => void updateProject(v));
 
   async function share(e: FormEvent) {
     e.preventDefault();
@@ -24,7 +32,8 @@ export function People() {
     <div className="page narrow">
       <div className="page-header">
         <div>
-          <h1>{project.name}</h1>
+          {/* The draft, so the heading still keeps up with the field below it. */}
+          <h1>{draft.name}</h1>
           <div className="muted small">{isOwner ? "Your project" : `${project.ownerEmail}'s project`}</div>
         </div>
       </div>
@@ -80,14 +89,20 @@ export function People() {
       {isOwner && (
         <>
           <h2 className="h2 section">Settings</h2>
-          <form className="card stack" onSubmit={(e) => e.preventDefault()}>
+          <form
+            className="card stack"
+            onSubmit={(e) => {
+              e.preventDefault();
+              flush();
+            }}
+          >
             <label>
               Name
-              <input value={project.name} onChange={(e) => void updateProject({ name: e.target.value })} />
+              <input value={draft.name} onChange={(e) => edit({ ...draft, name: e.target.value })} />
             </label>
             <label>
               Notes <span className="hint">Where the code is, what it is. Shown to members, not sent to agents.</span>
-              <input value={project.notes} onChange={(e) => void updateProject({ notes: e.target.value })} placeholder="github.com/…" />
+              <input value={draft.notes} onChange={(e) => edit({ ...draft, notes: e.target.value })} placeholder="github.com/…" />
             </label>
             <EnvVaultFields
               environments={environments.values()}
@@ -103,13 +118,16 @@ export function People() {
               <TwoStep
                 label="Delete project"
                 className="danger small"
-                onConfirm={() =>
-                  api
+                onConfirm={() => {
+                  // Drop the half-typed name first: leaving the page would
+                  // otherwise flush it onto a project that is no longer there.
+                  cancel();
+                  void api
                     .deleteProject(project.id)
                     .then(() => refreshProjects())
                     .then(() => navigate(href.projects()))
-                    .catch((err) => toast(describeError(err), "error"))
-                }
+                    .catch((err) => toast(describeError(err), "error"));
+                }}
               />
             </div>
           </form>
