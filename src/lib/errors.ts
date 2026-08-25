@@ -35,6 +35,10 @@ export function describeError(err: unknown): string {
         return "Your session has ended, or the project owner's Fountain key no longer works. Sign in again.";
       case "rate_limited":
         return "Slow down — Fountain rate-limited that request.";
+      case "broker_unavailable":
+        return "The egress broker did not answer, so its log cannot be read right now.";
+      case "brokerage_not_enabled":
+        return "Egress credential brokerage is not on for this account.";
     }
     if (err.status === 0) return "Could not reach the workbench server.";
     const fields = Object.entries(err.fieldErrors)

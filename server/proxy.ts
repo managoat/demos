@@ -12,7 +12,8 @@
  *                                           a sandbox_id must be a computer of that same item, same teammate
  *   *    /api/conversations/:id/…           get, turns, events, prompts (images checked against
  *                                           Fountain's rules), read, interrupt, terminate, requests,
- *                                           tree, stream, a turn's image bytes — after checking :id
+ *                                           tree, stream, a turn's image bytes, egress (the broker's
+ *                                           record of what its sandbox reached) — after checking :id
  *                                           is in the project
  *   GET  /api/sandboxes/:id                 one computer, if a conversation of the project is on it
  *   GET  /api/search                        full text, cut down to hits in this project's conversations
@@ -285,7 +286,12 @@ function conversationRouteAllowed(method: string, sub: string, role: Role): bool
   if (sub === "" || sub === "/") return method === "GET" || (method === "DELETE" && role === "owner");
   // `/turns/:turn/images/:position` is the bytes of an image sent on a prompt,
   // which is how the transcript shows one back.
-  if (method === "GET") return ["/turns", "/events", "/tree", "/stream"].includes(sub) || /^\/turns\/[^/]+\/images\/\d+$/.test(sub);
+  // `/egress` is the broker's log of what the sandbox reached and which
+  // credential went with it — names of secrets, never values — and every
+  // member reads the transcript that made those requests, so every member
+  // reads this. The account-wide binding config stays on the owner's side
+  // of the line (`server/brokering.ts`).
+  if (method === "GET") return ["/turns", "/events", "/tree", "/stream", "/egress"].includes(sub) || /^\/turns\/[^/]+\/images\/\d+$/.test(sub);
   if (method === "POST") return ["/prompts", "/read", "/interrupt", "/terminate"].includes(sub) || /^\/requests\/[^/]+$/.test(sub);
   return false;
 }

@@ -18,6 +18,8 @@
  *   POST   /api/import                      the tree an old browser kept in localStorage
  *   GET    /api/projects/:id                project + items
  *   PATCH  /api/projects/:id                owner
+ *   GET    /api/projects/:id/brokering      owner: the egress broker's replacement config, read against
+ *                                           the project's environment and vault
  *   DELETE /api/projects/:id                owner
  *   POST   /api/projects/:id/members        owner: { email }
  *   DELETE /api/projects/:id/members/:email owner, or yourself
@@ -31,6 +33,7 @@
 import { existsSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
 import * as auth from "./auth";
+import * as brokering from "./brokering";
 import type { AppContext } from "./context";
 import * as cost from "./cost";
 import { errorResponse, HttpError, json } from "./http";
@@ -91,6 +94,7 @@ export function buildApp(ctx: AppContext): (req: Request) => Promise<Response> {
   on("GET", "/api/projects/:id", (req, p) => projects.show(ctx, req, p.id!));
   on("PATCH", "/api/projects/:id", (req, p) => projects.patch(ctx, req, p.id!));
   on("DELETE", "/api/projects/:id", (req, p) => projects.remove(ctx, req, p.id!));
+  on("GET", "/api/projects/:id/brokering", (req, p) => brokering.show(ctx, req, p.id!));
   on("POST", "/api/projects/:id/members", (req, p) => projects.addMember(ctx, req, p.id!));
   on("DELETE", "/api/projects/:id/members/:email", (req, p) => projects.removeMember(ctx, req, p.id!, p.email!));
   on("POST", "/api/projects/:id/items", (req, p) => projects.createItem(ctx, req, p.id!));

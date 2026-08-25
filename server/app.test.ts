@@ -103,6 +103,16 @@ function ask(conversationId: string, id: number, requestId: string, tool: string
 /** An instance with billing switched off answers 404 there; flip this to be one. */
 let billingEnabled = true;
 /**
+ * Keys the egress broker is on for. Fountain's own rule: off, the bindings
+ * routes answer 404 `brokerage_not_enabled` and a conversation's egress page
+ * is `brokered: false` with nothing asked of the broker.
+ */
+const brokered = new Set<string>();
+/** The broker's log per conversation, newest first, as `GET /api/conversations/:id/egress` pages it. */
+const egressOf: Record<string, { id: number; host: string; path: string; method: string; service: string | null; credential_keys: string[]; status: number | null; error: string | null }[]> = {};
+/** Every egress read the fake was asked for, with the paging it was sent. */
+const egressAsked: { id: string; limit: string | null; before: string | null }[] = [];
+/**
  * The fake's billing period, anchored to now rather than written out: the
  * per-period cost route measures against the wall clock (a turn still running
  * accrues only as far as *now*), so a hard-coded month would pass today and
@@ -151,6 +161,16 @@ const fountain = Bun.serve({
       const c = convs[key]!.find((x) => x.id === one[1]);
       if (!c) return Response.json({ error: "not_found" }, { status: 404 });
       if (!one[2]) return Response.json({ data: c });
+      if (one[2] === "/egress") {
+        egressAsked.push({ id: c.id, limit: url.searchParams.get("limit"), before: url.searchParams.get("before") });
+        if (!brokered.has(key)) return Response.json({ data: [], next: null, brokered: false });
+        if (c.id.startsWith("stuck")) return Response.json({ error: "broker_unavailable", message: "{:broker, :request_log, :econnrefused}" }, { status: 502 });
+        const before = Number(url.searchParams.get("before") ?? Infinity);
+        const limit = Number(url.searchParams.get("limit") ?? 100);
+        const page = (egressOf[c.id] ?? []).filter((e) => e.id < before).slice(0, limit);
+        const more = (egressOf[c.id] ?? []).some((e) => e.id < (page[page.length - 1]?.id ?? Infinity));
+        return Response.json({ data: page, next: more ? page[page.length - 1]!.id : null, brokered: true });
+      }
       if (one[2] === "/turns") {
         turnsAsked.push(c.id);
         if (turnsBroken.has(c.id)) return Response.json({ error: "boom" }, { status: 500 });
@@ -246,6 +266,20 @@ const fountain = Bun.serve({
       });
     if (path === "/api/environments") return Response.json({ data: [{ id: "e1", name: "one" }, { id: "e2", name: "two" }] });
     if (path === "/api/vaults") return Response.json({ data: [{ id: "v1", name: "v-one" }, { id: "v2", name: "v-two" }] });
+    // Secrets are names only, as on Fountain itself; a parent that is not there is 404.
+    if (path === "/api/environments/e1/secrets") return Response.json({ data: [{ id: "s1", key: "GITHUB_TOKEN", environment_id: "e1" }, { id: "s2", key: "STRIPE_SECRET_KEY", environment_id: "e1" }, { id: "s3", key: "BUZZ_PRIVATE_KEY", environment_id: "e1" }] });
+    if (path === "/api/vaults/v1/secrets") return Response.json({ data: [{ id: "s4", key: "STRIPE_SECRET_KEY", vault_id: "v1" }, { id: "s5", key: "OPENAI_API_KEY", vault_id: "v1" }] });
+    if (/^\/api\/(environments|vaults)\/[^/]+\/secrets$/.test(path)) return Response.json({ error: "not_found" }, { status: 404 });
+    if (path === "/api/secret-bindings") {
+      if (!brokered.has(key)) return Response.json({ error: "brokerage_not_enabled", message: "Egress credential brokerage is not enabled for this account." }, { status: 404 });
+      return Response.json({
+        data: [
+          { id: "b1", key: "STRIPE_SECRET_KEY", host: "api.stripe.com", auth_type: "bearer", headers: {}, enabled: true, created_at: "2026-08-25T00:00:00Z", updated_at: "2026-08-25T00:00:00Z" },
+          { id: "b2", key: "OPENAI_API_KEY", host: "api.openai.com", auth_type: "substitute", headers: {}, enabled: false, created_at: "2026-08-25T00:00:00Z", updated_at: "2026-08-25T00:00:00Z" },
+          { id: "b3", key: "STRIPE_SECRET_KEY", host: "files.stripe.com", auth_type: "custom", headers: { "X-Api-Key": "{{ STRIPE_SECRET_KEY }}" }, enabled: true, created_at: "2026-08-25T00:00:00Z", updated_at: "2026-08-25T00:00:00Z" },
+        ],
+      });
+    }
     if (path === "/api/events/stream") {
       // `?streams=stage` is what server/watch.ts follows: every conversation
       // of this key, its stage events only, resumable on `Last-Event-ID`.
@@ -770,6 +804,47 @@ describe("the project-scoped proxy", () => {
     expect(forAlice!.metadata).toEqual({ team: "platform" });
   });
 
+  test("a conversation's egress log comes through for a member, paged as asked, and only for the project's", async () => {
+    brokered.add("key-alice");
+    egressOf.c1 = [
+      { id: 30, host: "api.stripe.com:443", path: "/v1/charges", method: "POST", service: "stripe-secret-key-api-stripe-com", credential_keys: ["STRIPE_SECRET_KEY"], status: 200, error: null },
+      { id: 20, host: "evil.example:443", path: "/", method: "GET", service: null, credential_keys: [], status: 403, error: "no_match" },
+      { id: 10, host: "api.github.com:443", path: "/repos/acme/thing", method: "GET", service: "github-api", credential_keys: ["GITHUB_TOKEN"], status: 200, error: null },
+    ];
+    try {
+      const res = await call("bob", "GET", `/f/${projectId}/api/conversations/c1/egress?limit=2`);
+      expect(res.status).toBe(200);
+      const page = await res.json();
+      expect(page.brokered).toBe(true);
+      expect(page.data.map((e: { id: number }) => e.id)).toEqual([30, 20]);
+      expect(page.next).toBe(20);
+      expect(egressAsked.at(-1)).toEqual({ id: "c1", limit: "2", before: null });
+      const rest = await (await call("bob", "GET", `/f/${projectId}/api/conversations/c1/egress?limit=2&before=20`)).json();
+      expect(rest.data.map((e: { id: number }) => e.id)).toEqual([10]);
+      expect(rest.next).toBeNull();
+      // c3 is the owner's, but not this project's: as unreachable as anything else about it.
+      expect((await call("bob", "GET", `/f/${projectId}/api/conversations/c3/egress`)).status).toBe(404);
+    } finally {
+      brokered.delete("key-alice");
+      delete egressOf.c1;
+    }
+  });
+
+  test("an unbrokered account's egress page says so, and a broker that is down is a 502 the browser can name", async () => {
+    const off = await (await call("bob", "GET", `/f/${projectId}/api/conversations/c1/egress`)).json();
+    expect(off).toEqual({ data: [], next: null, brokered: false });
+    brokered.add("key-alice");
+    convs["key-alice"]!.push({ id: "stuck-e", channel_id: `workbench:${projectId}/${itemId}`, title: null, agent_id: "a1", environment_id: "e1", vault_id: "v1", sandbox_id: null, status: "idle", inserted_at: "2026-08-23T00:00:00Z" });
+    try {
+      const res = await call("bob", "GET", `/f/${projectId}/api/conversations/stuck-e/egress`);
+      expect(res.status).toBe(502);
+      expect((await res.json()).error).toBe("broker_unavailable");
+    } finally {
+      brokered.delete("key-alice");
+      convs["key-alice"] = convs["key-alice"]!.filter((c) => c.id !== "stuck-e");
+    }
+  });
+
   test("the rest of the API is closed", async () => {
     expect((await call("alice", "GET", `/f/${projectId}/api/auth/me`)).status).toBe(404);
     expect((await call("alice", "POST", `/f/${projectId}/api/agents`, {})).status).toBe(404);
@@ -964,6 +1039,66 @@ describe("search across the project's conversations", () => {
     // A window wider than Fountain's page is cut down here rather than asked for.
     await call("bob", "GET", `/f/${projectId}/api/search?q=walk&conversation_id=s1&limit=500`);
     expect(searched[1]!.limit).toBe("100");
+  });
+});
+
+describe("the broker's replacement config, from the owner's side", () => {
+  let projectId = "";
+  beforeAll(async () => {
+    const res = await call("alice", "POST", "/api/projects", { name: "Brokered", environmentId: "e1", vaultId: "v1" });
+    projectId = (await res.json()).data.id;
+    await call("alice", "POST", `/api/projects/${projectId}/members`, { email: "bob@example.com" });
+  });
+  // The MCP suite below counts alice's projects; leave her with what she had.
+  afterAll(async () => {
+    await call("alice", "DELETE", `/api/projects/${projectId}`);
+  });
+
+  test("off for the account: enabled false, and nothing else is asked or said", async () => {
+    const res = await call("alice", "GET", `/api/projects/${projectId}/brokering`);
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toEqual({ enabled: false, bindings: [], secrets: [], environment: false, vault: false });
+  });
+
+  test("on: every binding, and the project's secrets joined to the hosts they go to — names, never values", async () => {
+    brokered.add("key-alice");
+    try {
+      const dto = (await (await call("alice", "GET", `/api/projects/${projectId}/brokering`)).json()).data;
+      expect(dto.enabled).toBe(true);
+      expect(dto.environment).toBe(true);
+      expect(dto.vault).toBe(true);
+      expect(dto.bindings.map((b: { id: string }) => b.id)).toEqual(["b2", "b1", "b3"]);
+      expect(dto.secrets).toEqual([
+        // In the sandbox in the clear: ADR 0019 §7's unbrokerable case, labelled by having nowhere to go.
+        { key: "BUZZ_PRIVATE_KEY", source: "environment", hosts: [] },
+        // The catalog default: brokered to GitHub with no binding of its own.
+        { key: "GITHUB_TOKEN", source: "environment", hosts: ["api.github.com", "github.com"] },
+        // A disabled binding is not a binding.
+        { key: "OPENAI_API_KEY", source: "vault", hosts: [] },
+        { key: "STRIPE_SECRET_KEY", source: "both", hosts: ["api.stripe.com", "files.stripe.com"] },
+      ]);
+      expect(JSON.stringify(dto)).not.toContain("supersecret");
+    } finally {
+      brokered.delete("key-alice");
+    }
+  });
+
+  test("a vault that is gone reads as no vault, not as a failed page", async () => {
+    brokered.add("key-alice");
+    await call("alice", "PATCH", `/api/projects/${projectId}`, { vaultId: "v-gone" });
+    try {
+      const dto = (await (await call("alice", "GET", `/api/projects/${projectId}/brokering`)).json()).data;
+      expect(dto.vault).toBe(false);
+      expect(dto.secrets.map((s: { key: string }) => s.key)).toEqual(["BUZZ_PRIVATE_KEY", "GITHUB_TOKEN", "STRIPE_SECRET_KEY"]);
+    } finally {
+      brokered.delete("key-alice");
+      await call("alice", "PATCH", `/api/projects/${projectId}`, { vaultId: "v1" });
+    }
+  });
+
+  test("a member is not told: it is the owner's configuration", async () => {
+    expect((await call("bob", "GET", `/api/projects/${projectId}/brokering`)).status).toBe(403);
+    expect((await call("carol", "GET", `/api/projects/${projectId}/brokering`)).status).toBe(404);
   });
 });
 

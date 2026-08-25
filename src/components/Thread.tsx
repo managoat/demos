@@ -14,6 +14,7 @@ import type { Stream } from "@agentshit/fountain-sdk";
 import type { Conversation, LogEvent, Turn, UserEvent } from "../types";
 import { arrange } from "../lib/blocks";
 import { fold, stageLine } from "../lib/turns";
+import { brokerStageDetail } from "../lib/egress";
 import { formatTime } from "../lib/format";
 import { describeError } from "../lib/errors";
 import { BlockView } from "./Blocks";
@@ -347,7 +348,10 @@ function SetupLine({ events, done }: { events: LogEvent[]; done: boolean }) {
       <pre>
         {events
           .filter((e) => e.kind === "stage")
-          .map((e) => `${formatTime(e.ts)}  ${e.stage ?? ""} ${e.state ?? ""}${e.duration_ms != null ? ` (${e.duration_ms} ms)` : ""}`)
+          .map((e) => {
+            const detail = brokerStageDetail(e);
+            return `${formatTime(e.ts)}  ${e.stage ?? ""} ${e.state ?? ""}${e.duration_ms != null ? ` (${e.duration_ms} ms)` : ""}${detail ? ` — ${detail}` : ""}`;
+          })
           .join("\n")}
       </pre>
     </details>

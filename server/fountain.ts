@@ -90,6 +90,61 @@ export interface Billing {
   usage?: { conversations?: number; turns?: number; turn_hours?: number; turn_hours_included?: number; turn_hours_remaining?: number; sandbox_minutes?: number };
 }
 
+// ── egress credential brokerage (Fountain ADR 0019) ──────────────────────
+// On a brokered account a sandbox never holds a credential: it gets a
+// placeholder and a proxy address, and the broker attaches the real value on
+// the way out. Two things a client can read about that. The *configuration*
+// — which secret goes to which host, in what shape — is account-wide, one
+// row per (secret name, host). The *record* — what the broker did with each
+// request a conversation's sandbox made — is per conversation, kept for a
+// while after it ends.
+
+/** `substitute` replaces the placeholder wherever it appears; the rest name an auth header shape. */
+export type BindingAuthType = "substitute" | "bearer" | "basic" | "api_key" | "custom";
+
+/** One row of `GET /api/secret-bindings`, as Fountain reports it. */
+export interface SecretBinding {
+  id: string;
+  /** The secret's name — it binds wherever an environment or vault holds that name. */
+  key: string;
+  /** `api.example.com`, `*.example.com`, `host:port`, `host/path/*`. */
+  host: string;
+  auth_type: BindingAuthType;
+  header?: string | null;
+  prefix?: string | null;
+  username?: string | null;
+  headers?: Record<string, string>;
+  enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** One request the broker saw, from `GET /api/conversations/:id/egress`. */
+export interface EgressEvent {
+  id: number;
+  at?: string | null;
+  method: string;
+  /** Host and port, as the sandbox dialed it. */
+  host: string;
+  path: string;
+  /** The binding's service that matched; null is a request that went through with no credential. */
+  service?: string | null;
+  credential_keys: string[];
+  /** The upstream's status, or the broker's refusal. */
+  status?: number | null;
+  latency_ms?: number | null;
+  /** The broker's refusal code, e.g. `no_match` on a `limited` environment. */
+  error?: string | null;
+}
+
+export interface EgressPage {
+  data: EgressEvent[];
+  /** Pass back as `before` for the next page; null at the end. */
+  next?: number | null;
+  /** False on an account the broker is not on for — the page is empty and nothing was asked. */
+  brokered: boolean;
+}
+
 export class FountainHttpError extends Error {
   constructor(
     readonly status: number,
@@ -184,6 +239,37 @@ export class FountainClient {
     try {
       const body = await this.json<{ data: ConversationSummary }>(`/api/conversations/${encodeURIComponent(id)}`);
       return body.data ?? null;
+    } catch (err) {
+      if (err instanceof FountainHttpError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  /**
+   * The account's secret bindings — the replacement config. Null when the
+   * broker is not on for this account: Fountain answers 404
+   * `brokerage_not_enabled` there, and it is a fact to show, not a failure.
+   */
+  async secretBindings(): Promise<SecretBinding[] | null> {
+    try {
+      const body = await this.json<{ data: SecretBinding[] }>("/api/secret-bindings");
+      return body.data ?? [];
+    } catch (err) {
+      if (err instanceof FountainHttpError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  /**
+   * The *names* of the secrets on one environment or vault. Fountain never
+   * returns a value, and neither does anything built on this. Null for a
+   * parent that is gone, so a project pointing at a deleted vault reads as
+   * "no vault" rather than failing the page.
+   */
+  async secretKeys(parent: "environments" | "vaults", id: string): Promise<string[] | null> {
+    try {
+      const body = await this.json<{ data: { key: string }[] }>(`/api/${parent}/${encodeURIComponent(id)}/secrets`);
+      return (body.data ?? []).map((s) => s.key);
     } catch (err) {
       if (err instanceof FountainHttpError && err.status === 404) return null;
       throw err;

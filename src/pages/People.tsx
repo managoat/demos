@@ -8,6 +8,7 @@ import { href, navigate } from "../router";
 import { TwoStep } from "../components/Thread";
 import { EnvVaultFields } from "../components/EnvVaultFields";
 import { DefaultTeammateField } from "../components/DefaultTeammateField";
+import { BrokeringSettings } from "../components/BrokeringSettings";
 
 export function People() {
   const { me, refreshProjects, toast } = useWorkbench();
@@ -143,6 +144,13 @@ export function People() {
               />
             </div>
           </form>
+
+          {/* After the settings, because it is read against them: change the
+              environment or vault above and this answer changes with it. */}
+          <h2 className="h2 section">Credential brokering</h2>
+          <div className="card stack tight">
+            <BrokeringSettings projectId={project.id} environmentId={project.environmentId} vaultId={project.vaultId} />
+          </div>
         </>
       )}
     </div>

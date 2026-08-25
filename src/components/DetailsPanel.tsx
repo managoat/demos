@@ -2,8 +2,9 @@
  * The right-hand panel: what the conversation you are reading is actually
  * running with. The transcript says what was said; this says what it was
  * said *by* — the teammate and model behind it, the computer under it, the
- * skills and MCP servers loaded into that computer, and the permission
- * policy in force.
+ * skills and MCP servers loaded into that computer, where the computer went
+ * on the internet and what the credential broker did about it, and the
+ * permission policy in force.
  *
  * It is the answer to a question the workbench could not answer at all: an
  * agent reaches for a tool you did not know it had, or fails to reach one
@@ -24,10 +25,12 @@
  * threads.
  */
 import { useEffect, useState } from "react";
+import type { LogEvent } from "../types";
 import { useProject } from "../store";
 import { href } from "../router";
 import type { SandboxRecord } from "../types";
 import { AgentAvatar } from "./AgentAvatar";
+import { EgressSection } from "./EgressSection";
 import { StatusPill } from "./StatusPill";
 import { computerLabel, itemIdOf, relativeTime } from "../lib/sidebar";
 import { conversationLabel, formatCompact, formatTime, shortId } from "../lib/format";
@@ -47,7 +50,7 @@ import {
 } from "../lib/details";
 
 export function DetailsPanel({ conversationId, onClose }: { conversationId: string; onClose: () => void }) {
-  const { project, items, conversations, agents, environments, vaults, sandboxes, fountain } = useProject();
+  const { project, items, conversations, agents, environments, vaults, sandboxes, fountain, subscribe } = useProject();
   const [width, setWidth] = useState(() => loadPanelWidth());
 
   const conversation = conversations.find((c) => c.id === conversationId) ?? null;
@@ -74,6 +77,29 @@ export function DetailsPanel({ conversationId, onClose }: { conversationId: stri
     };
   }, [sandboxId, held, fountain]);
   const sandbox = held ?? (fetched?.id === sandboxId ? fetched : null);
+
+  // The `broker` stage lives on the conversation's feed: read its history
+  // once, then keep up on the live stream, so the egress section can say
+  // which secrets were withheld from the sandbox before the log has a row.
+  const [stages, setStages] = useState<LogEvent[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    setStages([]);
+    fountain
+      .resume(conversationId)
+      .history({ streams: ["stage"] })
+      .then((events) => {
+        if (!cancelled) setStages((have) => mergeStages(have, events));
+      })
+      .catch(() => undefined);
+    const off = subscribe(conversationId, (ev) => {
+      if (ev.kind === "stage") setStages((have) => mergeStages(have, [ev]));
+    });
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, [conversationId, fountain, subscribe]);
 
   // Drag the left edge. The panel is on the right, so the width grows as the
   // pointer moves left — the mirror of the explorer's.
@@ -265,6 +291,8 @@ export function DetailsPanel({ conversationId, onClose }: { conversationId: stri
             <p className="details-note">{mcpCaveat}</p>
           </Section>
 
+          <EgressSection conversationId={conversation.id} lastActiveAt={conversation.last_active_at ?? conversation.updated_at} feed={stages} />
+
           <Section title="permissions">
             {!policyBites(policy) ? (
               <p className="muted small">Every tool runs without asking.</p>
@@ -292,6 +320,12 @@ export function DetailsPanel({ conversationId, onClose }: { conversationId: stri
       )}
     </aside>
   );
+}
+
+function mergeStages(have: LogEvent[], more: LogEvent[]): LogEvent[] {
+  const seen = new Set(have.map((e) => e.id));
+  const out = [...have, ...more.filter((e) => e.kind === "stage" && !seen.has(e.id))];
+  return out.sort((a, b) => a.id - b.id);
 }
 
 function Section({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {

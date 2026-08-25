@@ -493,8 +493,10 @@ browser ──(session cookie)──▶ workbench server ──(owner's Fountain
   base URL `/f/<project>`; the server (`server/proxy.ts`) forwards to Fountain
   on the owner's key and admits only conversations whose `channel_id` starts
   with `workbench:<project>/`: it filters the list, checks every
-  per-conversation call, forces the project's environment and vault on a new
-  conversation, cuts full-text search down to hits in the project's
+  per-conversation call (a conversation's egress log — what its sandbox
+  reached through the credential broker, and which secret went with each
+  request, by name — included), forces the project's environment and vault
+  on a new conversation, cuts full-text search down to hits in the project's
   conversations, lets a member see only the project's environment and
   vault (the owner sees all), and shapes every agent on the way out: the values
   of every MCP `env` and `headers` withheld from everyone — the two fields that

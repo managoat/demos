@@ -1046,6 +1046,29 @@ body.resizing-col { cursor: col-resize; user-select: none; }
 .verdict.auto_deny { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
 
 .details-foot { margin: 12px 0 0; }
+.details-note.error { color: var(--bad); }
+
+/* egress: what the sandbox reached, and what the broker did about it */
+.egress-stage { margin-bottom: 6px; }
+.egress-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: var(--muted); }
+.egress-dot.brokered { background: var(--ok); }
+.egress-dot.refused { background: var(--bad); }
+.egress-hosts > li { display: flex; align-items: baseline; gap: 6px; }
+.egress-keys { color: var(--text-2); overflow-wrap: anywhere; }
+.egress-rows { margin-top: 8px; padding-top: 6px; border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.egress-row { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; padding: 2px 0; }
+.egress-at { font-variant-numeric: tabular-nums; }
+.egress-req { display: flex; gap: 4px; min-width: 0; }
+.egress-req .ellipsis { min-width: 0; }
+.egress-what { grid-column: 2; color: var(--text-2); }
+.egress-row.refused .egress-refused { color: var(--bad); }
+.egress-rows + button { margin-top: 6px; }
+
+/* the owner's brokering settings */
+.secret-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.secret-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.secret-row code { flex: 0 0 auto; }
+.secret-hosts { color: var(--text-2); overflow-wrap: anywhere; }
 
 /* A sandbox's own statuses, which the conversation pills never carry. */
 .pill.ready { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }

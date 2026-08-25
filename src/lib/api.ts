@@ -206,6 +206,40 @@ export interface PeriodCost {
   fanout: CostFanout;
 }
 
+// ── egress credential brokerage (server/brokering.ts) ────────────────────
+// The owner's replacement config, joined to this project's environment and
+// vault. Names only; Fountain's secrets API has no values to give.
+
+export type BindingAuthType = "substitute" | "bearer" | "basic" | "api_key" | "custom";
+
+export interface SecretBinding {
+  id: string;
+  key: string;
+  host: string;
+  auth_type: BindingAuthType;
+  header?: string | null;
+  prefix?: string | null;
+  username?: string | null;
+  headers?: Record<string, string>;
+  enabled: boolean;
+}
+
+export interface ProjectSecret {
+  key: string;
+  /** A name on both is one secret to the sandbox — the vault's wins. */
+  source: "environment" | "vault" | "both";
+  /** Hosts its enabled bindings send it to. Empty: it reaches the sandbox in the clear. */
+  hosts: string[];
+}
+
+export interface BrokeringDto {
+  enabled: boolean;
+  bindings: SecretBinding[];
+  secrets: ProjectSecret[];
+  environment: boolean;
+  vault: boolean;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -260,6 +294,7 @@ export const api = {
   project: (id: string) => data(call<{ data: { project: ProjectDto; items: ItemDto[] } }>("GET", `/api/projects/${id}`)),
   patchProject: (id: string, patch: Partial<Pick<ProjectDto, "name" | "notes" | "environmentId" | "vaultId" | "defaultAgentId">>) => data(call<{ data: ProjectDto }>("PATCH", `/api/projects/${id}`, patch)),
   deleteProject: (id: string) => call<{ ok: true }>("DELETE", `/api/projects/${id}`),
+  brokering: (id: string) => data(call<{ data: BrokeringDto }>("GET", `/api/projects/${id}/brokering`)),
   addMember: (id: string, email: string) => data(call<{ data: ProjectDto }>("POST", `/api/projects/${id}/members`, { email })),
   removeMember: (id: string, email: string) => data(call<{ data: ProjectDto }>("DELETE", `/api/projects/${id}/members/${encodeURIComponent(email)}`)),
 
