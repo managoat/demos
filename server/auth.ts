@@ -14,6 +14,7 @@ import { authenticate, userClient, type AppContext } from "./context";
 import { randomToken, sha256 } from "./crypto";
 import { FountainClient, FountainHttpError } from "./fountain";
 import { HttpError, clearedSessionCookie, cookieValue, json, readJson, SESSION_COOKIE, sessionCookie, str } from "./http";
+import { withoutMcpSecrets } from "./proxy";
 
 export function config(ctx: AppContext): Response {
   return json({ fountainUrl: ctx.config.fountainUrl });
@@ -54,13 +55,26 @@ export async function signOut(ctx: AppContext, req: Request): Promise<Response> 
   return json({ ok: true }, 200, { "set-cookie": clearedSessionCookie(req) });
 }
 
-/** The caller's own environments and vaults — what a new project can be made of. */
+/**
+ * The caller's own environments, vaults and agents — what a new project can be
+ * made of, before the project exists to have a Fountain view of its own.
+ *
+ * The agents are here for the same reason the other two are: the create-project
+ * form asks who new work starts with, and until the project is made there is no
+ * `/f/<project>/api/agents` to ask. They go out with every MCP server's `env`
+ * and `headers` blanked, exactly as the proxy sends them — the caller's own key
+ * would read the values from Fountain directly, so withholding them costs
+ * nothing and keeps one rule rather than one per route.
+ */
 export async function myResources(ctx: AppContext, req: Request): Promise<Response> {
   const user = await authenticate(ctx, req);
   const client = await userClient(ctx, user);
-  const [envs, vaults] = await Promise.all([client.fetch("/api/environments"), client.fetch("/api/vaults")]);
-  if (!envs.ok || !vaults.ok) throw new HttpError(502, "fountain_error", "Fountain would not list your environments and vaults. Is your key still valid? Sign in again to refresh it.");
+  const [envs, vaults, agents] = await Promise.all([client.fetch("/api/environments"), client.fetch("/api/vaults"), client.fetch("/api/agents")]);
+  if (!envs.ok || !vaults.ok || !agents.ok) {
+    throw new HttpError(502, "fountain_error", "Fountain would not list your environments, vaults and agents. Is your key still valid? Sign in again to refresh it.");
+  }
   const e = (await envs.json()) as { data?: unknown[] };
   const v = (await vaults.json()) as { data?: unknown[] };
-  return json({ data: { environments: e.data ?? [], vaults: v.data ?? [] } });
+  const a = (await agents.json()) as { data?: unknown[] };
+  return json({ data: { environments: e.data ?? [], vaults: v.data ?? [], agents: (a.data ?? []).map(withoutMcpSecrets) } });
 }

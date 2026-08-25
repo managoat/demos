@@ -1,13 +1,14 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useWorkbench } from "../store";
 import { api } from "../lib/api";
-import { clearLegacyState, loadLegacyState, type LegacyState } from "../lib/workbench";
+import { agentFits, clearLegacyState, loadLegacyState, type LegacyState } from "../lib/workbench";
 import { describeError } from "../lib/errors";
 import { href } from "../router";
 import { TwoStep } from "../components/Thread";
 import { formatTime } from "../lib/format";
 import { EnvVaultFields } from "../components/EnvVaultFields";
-import type { Environment, Vault } from "../types";
+import { DefaultTeammateField } from "../components/DefaultTeammateField";
+import type { MyResources } from "../lib/api";
 
 export function Projects() {
   const { me, projects, projectsLoaded, activity, refreshProjects, refreshActivity, toast } = useWorkbench();
@@ -15,26 +16,56 @@ export function Projects() {
   const [notes, setNotes] = useState("");
   const [environmentId, setEnvironmentId] = useState("");
   const [vaultId, setVaultId] = useState("");
+  const [defaultAgentId, setDefaultAgentId] = useState("");
+  const [dropped, setDropped] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [resources, setResources] = useState<{ environments: Environment[]; vaults: Vault[] } | null>(null);
+  const [resources, setResources] = useState<MyResources | null>(null);
   const [legacy, setLegacy] = useState<LegacyState | null>(() => loadLegacyState());
 
-  // The new-project form needs your own environments and vaults — the computer the project will be.
+  // The new-project form needs your own environments, vaults and agents — the
+  // computer the project will be, and who does its work.
   useEffect(() => {
     api
       .myResources()
-      .then(setResources)
+      .then((r) => {
+        setResources(r);
+        // One agent is almost certainly the answer, so start on it rather than
+        // making the first project the slow path over a list of one. The field
+        // says whose name it is and undoes it in a click.
+        if (r.agents.length === 1) setDefaultAgentId(r.agents[0]!.id);
+      })
       .catch((err) => toast(describeError(err), "error"));
   }, [toast]);
+
+  /**
+   * The environment or vault just changed, which can put the chosen teammate
+   * outside the project it is about to make. Drop the pick and say so: a
+   * default that cannot run is one every picker ignores, and creating the
+   * project with it set would look like a project that starts with somebody.
+   */
+  function keepFit(next: { environmentId: string | null; vaultId: string | null }) {
+    const agent = resources?.agents.find((a) => a.id === defaultAgentId);
+    if (!agent) return;
+    const fit = agentFits(agent, next);
+    if (fit.ok) return;
+    setDefaultAgentId("");
+    setDropped(`${agent.name} ${fit.reason}, so new work here will ask every time.`);
+  }
+
+  function pickTeammate(id: string) {
+    setDefaultAgentId(id);
+    setDropped(null);
+  }
 
   async function create(e: FormEvent) {
     e.preventDefault();
     if (!name.trim() || busy) return;
     setBusy(true);
     try {
-      await api.createProject({ name, notes, environmentId: environmentId || null, vaultId: vaultId || null });
+      await api.createProject({ name, notes, environmentId: environmentId || null, vaultId: vaultId || null, defaultAgentId: defaultAgentId || null });
       setName("");
       setNotes("");
+      setDropped(null);
       await refreshProjects();
     } catch (err) {
       toast(describeError(err), "error");
@@ -187,9 +218,24 @@ export function Projects() {
           loaded={!!resources}
           environmentId={environmentId}
           vaultId={vaultId}
-          onEnvironment={setEnvironmentId}
-          onVault={setVaultId}
+          onEnvironment={(id) => {
+            setEnvironmentId(id);
+            keepFit({ environmentId: id || null, vaultId: vaultId || null });
+          }}
+          onVault={(id) => {
+            setVaultId(id);
+            keepFit({ environmentId: environmentId || null, vaultId: id || null });
+          }}
         />
+        <DefaultTeammateField
+          agents={resources?.agents ?? []}
+          loaded={!!resources}
+          project={{ environmentId: environmentId || null, vaultId: vaultId || null }}
+          value={defaultAgentId}
+          onChange={pickTeammate}
+          hint="Who new work here starts with. With one set, a work item typed in the explorer starts them on it the moment you press Enter — which brings a computer up on your account. You can change it later in Settings & sharing."
+        />
+        {dropped && <p className="muted small">{dropped}</p>}
         <label>
           Notes <span className="hint">Where the code is, what it is. Shown to members, not sent to agents.</span>
           <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="github.com/BinaryBourbon/fountain" />

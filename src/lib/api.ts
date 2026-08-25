@@ -1,10 +1,22 @@
 import type { ItemCounts, ItemStatus, Proposal } from "../../shared/status";
-import type { Environment, Vault } from "../types";
+import type { Agent, Environment, Vault } from "../types";
 
 /**
  * The workbench's own API (server/app.ts), same origin, session cookie.
  * Fountain itself is reached through the SDK at `/f/<project>` — see store.tsx.
  */
+
+/**
+ * The caller's own Fountain view, for the form that makes a project: there is
+ * no `/f/<project>` to ask through until the project exists. Agents are here
+ * so the default teammate is a field on the create form rather than a trip
+ * back through Settings & sharing afterwards.
+ */
+export interface MyResources {
+  environments: Environment[];
+  vaults: Vault[];
+  agents: Agent[];
+}
 
 export interface ProjectDto {
   id: string;
@@ -232,7 +244,9 @@ export const api = {
   me: () => call<Me>("GET", "/api/me"),
   signIn: (apiKey: string) => call<Me>("POST", "/api/session", { apiKey }),
   signOut: () => call<{ ok: true }>("DELETE", "/api/session"),
-  myResources: () => data(call<{ data: { environments: Environment[]; vaults: Vault[] } }>("GET", "/api/me/resources")),
+  // Environments, vaults and agents on the caller's own key: what the
+  // create-project form is made of, before there is a project to ask through.
+  myResources: () => data(call<{ data: MyResources }>("GET", "/api/me/resources")),
   // Your own bill and your own projects. Not `/f/<project>/…`: the proxy is the
   // member boundary, and a bill does not belong on the far side of it.
   cost: () => data(call<{ data: Cost }>("GET", "/api/me/cost")),
@@ -241,7 +255,8 @@ export const api = {
 
   projects: () => data(call<{ data: ProjectDto[] }>("GET", "/api/projects")),
   activity: () => data(call<{ data: ActivityDto }>("GET", "/api/projects/activity")),
-  createProject: (input: { name: string; notes?: string; environmentId?: string | null; vaultId?: string | null }) => data(call<{ data: ProjectDto }>("POST", "/api/projects", input)),
+  createProject: (input: { name: string; notes?: string; environmentId?: string | null; vaultId?: string | null; defaultAgentId?: string | null }) =>
+    data(call<{ data: ProjectDto }>("POST", "/api/projects", input)),
   project: (id: string) => data(call<{ data: { project: ProjectDto; items: ItemDto[] } }>("GET", `/api/projects/${id}`)),
   patchProject: (id: string, patch: Partial<Pick<ProjectDto, "name" | "notes" | "environmentId" | "vaultId" | "defaultAgentId">>) => data(call<{ data: ProjectDto }>("PATCH", `/api/projects/${id}`, patch)),
   deleteProject: (id: string) => call<{ ok: true }>("DELETE", `/api/projects/${id}`),

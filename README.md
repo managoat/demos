@@ -17,8 +17,17 @@ the thread. On an item that already exists, the whole team is a row of chips
 under its teammates: click one and write the prompt. ("+" on a chip only
 earmarks them, for an item you are staffing before there is anything to say.)
 
-**A default teammate makes it no steps at all.** Settings & sharing has
-*Default teammate* — who new work here starts with. With one set, the
+**A default teammate makes it no steps at all.** The new-project form asks
+*Default teammate* — who new work here starts with — beside the environment
+and vault, and Settings & sharing changes it afterwards. It is asked at create
+time because that is when it saves the most: a project made without one starts
+on the slow path, which is exactly the moment a default would have helped. When
+the owner has exactly one agent, the field does not offer a list of one — it
+says whose name it is and lets you decline in a click. Changing the environment
+or the vault under a pick that no longer fits drops the pick and says so,
+rather than creating a project that looks like it starts with somebody and
+does not. Both places are the same field
+(`src/components/DefaultTeammateField.tsx`). With one set, the
 explorer's composer stops being a title box: type what needs doing, press
 Enter, and the item is filed *and* they are on it, with the thread open. The
 first line names the item, the rest is its notes, and what you typed is what
@@ -167,7 +176,10 @@ a panel that lists what is plugged in is what made an already-crossed line
 visible. The proxy now replaces the values of every server's `env` and
 `headers` on the way out, for the owner as much as for a member, and keeps the
 names. The names are the question — what is this teammate plugged into — and
-the values are the answer to nobody's.
+the values are the answer to nobody's. The create-project form needs that same
+list before there is a project to ask through, so `GET /api/me/resources`
+carries the caller's own agents beside their environments and vaults — through
+the same function, so the rule is one rule and not one per route.
 
 Two more fields go the same way, for two different reasons, and the reasons are
 worth keeping apart. An inline skill's `content` is the whole SKILL.md body:
@@ -623,7 +635,7 @@ src/
   lib/draft.ts       a field's draft and the debounced save behind it
   lib/theme.ts       the palette list; the blocks themselves are in styles.css
   pages/             Projects, Project (items as a list or a board, people), WorkItem, Team, Cost
-  components/        Thread, ThreadFind (⌘F), DetailsPanel, Board, ItemDigest, Feed (🔔), Palette (⌘K), StartDialog, Attachments, EnvVaultFields, Blocks, ItemStatus, SignIn, Layout
+  components/        Thread, ThreadFind (⌘F), DetailsPanel, Board, ItemDigest, Feed (🔔), Palette (⌘K), StartDialog, Attachments, EnvVaultFields, DefaultTeammateField, Blocks, ItemStatus, SignIn, Layout
 test/
   preload.ts         a document for the test run (happy-dom), loaded by bunfig.toml
   render.tsx         mount a component or a hook and drive it, inside React's act

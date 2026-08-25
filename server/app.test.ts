@@ -424,6 +424,40 @@ describe("projects and sharing", () => {
     await call("alice", "PATCH", `/api/projects/${projectId}`, { defaultAgentId: null, notes: "" });
   });
 
+  test("a project is created with a default teammate, so the first item is not the slow path", async () => {
+    // The create-project form offers it beside the environment and vault; the
+    // whole point is not having to make the project, find Settings & sharing
+    // and come back. Which means POST has to take it, not just PATCH.
+    const res = await call("alice", "POST", "/api/projects", { name: "With a default", environmentId: "e1", vaultId: "v1", defaultAgentId: "a1" });
+    expect(res.status).toBe(201);
+    const created = (await res.json()).data;
+    expect(created.defaultAgentId).toBe("a1");
+    // And it is stored, not just echoed.
+    const shown = (await (await call("alice", "GET", `/api/projects/${created.id}`)).json()).data.project;
+    expect(shown.defaultAgentId).toBe("a1");
+    // Omitted is none, and so is a blank: "ask every time" stays the default default.
+    const without = (await (await call("alice", "POST", "/api/projects", { name: "Without" })).json()).data;
+    expect(without.defaultAgentId).toBeNull();
+    const blank = (await (await call("alice", "POST", "/api/projects", { name: "Blank", defaultAgentId: "" })).json()).data;
+    expect(blank.defaultAgentId).toBeNull();
+    for (const id of [created.id, without.id, blank.id]) await call("alice", "DELETE", `/api/projects/${id}`);
+  });
+
+  test("your own resources include your agents, without their MCP credentials", async () => {
+    // The create form has no project to ask `/f/<project>/api/agents` through,
+    // so the agents come out on this route — under the same rule as the proxy's.
+    const res = await call("alice", "GET", "/api/me/resources");
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain("supersecret");
+    const r = JSON.parse(text).data as { environments: { id: string }[]; vaults: { id: string }[]; agents: { id: string; mcp_servers: Record<string, { env?: unknown; headers?: unknown }> }[] };
+    expect(r.environments.map((e) => e.id)).toEqual(["e1", "e2"]);
+    expect(r.vaults.map((v) => v.id)).toEqual(["v1", "v2"]);
+    expect(r.agents.map((a) => a.id)).toEqual(["a1"]);
+    expect(r.agents[0]!.mcp_servers.gh!.env).toEqual({ GITHUB_TOKEN: "[withheld by the workbench]", GH_HOST: "[withheld by the workbench]" });
+    expect(r.agents[0]!.mcp_servers.workbench!.headers).toEqual({ Authorization: "[withheld by the workbench]" });
+  });
+
   test("a member creates items the owner sees", async () => {
     const res = await call("bob", "POST", `/api/projects/${projectId}/items`, { title: "fix foo", notes: "repro…" });
     expect(res.status).toBe(201);

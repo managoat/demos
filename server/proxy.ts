@@ -217,13 +217,18 @@ function withoutSkillBodies(skills: unknown): { skills?: unknown } {
  * the rules in `visibleAgent` does have a role in it, for a reason said
  * there: it is answering a different question than this one.)
  *
+ * Which is why it is exported: `GET /api/me/resources` (`server/auth.ts`)
+ * hands the caller their own agents so the create-project form can offer a
+ * default teammate, and that is a second route out of Fountain's agent
+ * rendering. Nobody's browser needs the values, so neither route sends them.
+ *
  * What this does **not** claim: a credential written into an `args` entry or
  * a query string on a `url` still passes, because those fields are the
  * server's identity and blanking them would leave the panel unable to say
  * what is plugged in at all. The two fields cut here are the two that exist
  * to hold secrets; the rest is a config a reader has to be able to read.
  */
-function withoutMcpSecrets(agent: unknown): unknown {
+export function withoutMcpSecrets(agent: unknown): unknown {
   if (!isRecord(agent) || !isRecord(agent.mcp_servers)) return agent;
   const servers: Record<string, unknown> = {};
   for (const [name, entry] of Object.entries(agent.mcp_servers)) {
