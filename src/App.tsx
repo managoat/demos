@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, FountainClient, describeError } from "./api/client";
-import type { CommsStatus, LogEvent, Schedule, SearchHit, TeamEvent, Teammate, Turn } from "./api/types";
+import type { CommsStatus, Conversation, LogEvent, Schedule, SearchHit, TeamEvent, Teammate, Turn } from "./api/types";
 import { clearSettings, loadSettings, saveSettings, type Settings } from "./lib/settings";
 import { SettingsScreen } from "./components/Settings";
 import { completeLoginIfCallback, revoke } from "./lib/oauth";
@@ -26,6 +26,7 @@ import { askFrom, openAsk, resolutionFrom, type PermissionAsk } from "./lib/perm
 import { loadPrefs, savePrefs, sortPinnedFirst, toggleIn, without, type Prefs } from "./lib/prefs";
 import { drain, enqueue, newQueuedId, removeQueued, withoutConversation, type QueuedMessage } from "./lib/queue";
 import { loadTranscriptBase, transcriptUrl } from "./lib/transcript";
+import { LIVE_STATUSES, groupSideThreads, nextThreadTitle, threadOfKey } from "./lib/threads";
 
 const THREAD_STREAMS = ["acp", "stdout", "stage"];
 
@@ -115,6 +116,10 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
   const [teamLoaded, setTeamLoaded] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(() => idFromHash());
+  /** a side thread of the selected teammate (a conversation id), or null for the main thread */
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(() => threadFromHash());
+  /** every teammate's side threads — more conversations on the same computer — by agent id */
+  const [threads, setThreads] = useState<ReadonlyMap<string, readonly Conversation[]>>(() => new Map());
   const [page, setPage] = useState<"team" | "routines" | "runners">(() => pageFromHash());
   const [historyFor, setHistoryFor] = useState<string | null>(null);
   /** a row-menu "Customize…" for the selected teammate, consumed by Thread */
@@ -135,6 +140,8 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
   const [focusTurnId, setFocusTurnId] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [events, setEvents] = useState<LogEvent[]>([]);
+  const eventsRef = useRef<LogEvent[]>([]);
+  eventsRef.current = events;
   // Conversations with a permission request open, by conversation id. Learned
   // from the `request` stage events on the team stream, so it covers rows the
   // thread is not showing — the whole point of a "waiting on you" roster
@@ -154,7 +161,10 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
   const [queues, setQueues] = useState<ReadonlyMap<string, readonly QueuedMessage[]>>(() => new Map());
 
   const selected = team.find((t) => t.agent_id === selectedId) ?? null;
-  const selectedConvId = selected?.conversation.id ?? null;
+  const selectedThread = (selected && selectedThreadId && threads.get(selected.agent_id)?.find((c) => c.id === selectedThreadId)) || null;
+  const selectedConvId = selectedThread?.id ?? selected?.conversation.id ?? null;
+  const threadsRef = useRef(threads);
+  threadsRef.current = threads;
   const selectedConvRef = useRef<string | null>(null);
   selectedConvRef.current = selectedConvId;
   const teamRef = useRef<Teammate[]>([]);
@@ -182,8 +192,15 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
 
   const refreshTeam = useCallback(async () => {
     try {
-      const list = await client.listTeam();
+      // The roster, and — from the account's live conversations — each
+      // teammate's side threads. An older server without the filter just
+      // means no threads, not no roster.
+      const [list, live] = await Promise.all([
+        client.listTeam(),
+        client.listConversations({ status: [...LIVE_STATUSES] }).catch(() => null),
+      ]);
       setTeam(list);
+      if (live) setThreads(groupSideThreads(live, list));
       setTeamError(null);
       return list;
     } catch (err) {
@@ -233,6 +250,7 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
   useEffect(() => {
     const onHash = () => {
       setSelectedId(idFromHash());
+      setSelectedThreadId(threadFromHash());
       setPage(pageFromHash());
     };
     window.addEventListener("hashchange", onHash);
@@ -240,10 +258,11 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
   }, []);
 
   const select = useCallback(
-    (agentId: string | null) => {
-      window.location.hash = agentId ? `#/team/${agentId}` : "";
+    (agentId: string | null, threadId: string | null = null) => {
+      window.location.hash = agentId ? (threadId ? `#/team/${agentId}/${threadId}` : `#/team/${agentId}`) : "";
       setPage("team");
       setSelectedId(agentId);
+      setSelectedThreadId(agentId ? threadId : null);
       setRenaming(false);
       if (agentId && prefsRef.current.unread.includes(agentId)) {
         updatePrefs((p) => ({ ...p, unread: without(p.unread, agentId) }));
@@ -271,12 +290,22 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
       .finally(() => !cancelled && setThreadLoading(false));
     client
       .markRead(selectedConvId)
-      .then(() => setTeam((ts) => ts.map((t) => (t.conversation.id === selectedConvId ? { ...t, unread: false } : t))))
+      .then(() => {
+        setTeam((ts) => ts.map((t) => (t.conversation.id === selectedConvId ? { ...t, unread: false } : t)));
+        setThreads((m) => markThreadRead(m, selectedConvId));
+      })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, [client, selectedConvId, toast]);
+
+  // A hash naming a thread that is gone (closed in another tab): fall back to the main one.
+  useEffect(() => {
+    if (!selected || !selectedThreadId || selectedThread || !threads.size) return;
+    if (!threads.get(selected.agent_id)) return; // not listed yet, or none: wait for a refresh
+    select(selected.agent_id);
+  }, [selected, selectedThreadId, selectedThread, threads, select]);
 
   // Which conversations are waiting on an answer. The live map covers rows the
   // thread is not showing; the open thread is re-derived from its own events,
@@ -293,7 +322,9 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
   }, [openAsks, selectedAsk, selectedConvId, loadedConvId]);
 
   // On a phone, the thread has no room for the roster: only one shows.
-  const unreadCount = team.filter((t) => t.agent_id !== selectedId && (t.unread || prefs.unread.includes(t.agent_id))).length;
+  const unreadCount = team.filter(
+    (t) => (t.agent_id !== selectedId && (t.unread || prefs.unread.includes(t.agent_id))) || threads.get(t.agent_id)?.some((c) => c.unread && c.id !== selectedConvId),
+  ).length;
   useEffect(() => {
     const base = selected ? `${selected.name} · Team` : "Team";
     document.title = unreadCount > 0 ? `(${unreadCount}) ${base}` : base;
@@ -303,27 +334,49 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
 
   const flushing = useRef(new Set<string>());
 
-  /** Send everything queued for a teammate as one turn, now that they are free. */
+  /**
+   * Send everything queued under `key` as one turn, now that it is free. The
+   * key is a teammate's agent id (the main thread) or a side thread's
+   * conversation id.
+   */
   const flush = useCallback(
-    async (agentId: string) => {
-      const d = drain(queuesRef.current, agentId);
-      if (!d || flushing.current.has(agentId)) return;
-      flushing.current.add(agentId);
+    async (key: string) => {
+      const d = drain(queuesRef.current, key);
+      if (!d || flushing.current.has(key)) return;
+      flushing.current.add(key);
       try {
-        const before = teamRef.current.find((t) => t.agent_id === agentId)?.conversation.id;
-        const r = await client.sendMessage(agentId, d.prompt, d.images);
-        setQueues((q) => withoutConversation(q, agentId));
-        releaseImages(d.images);
-        if (r.conversation_id !== before) await refreshTeam();
+        const side = threadOfKey(threadsRef.current, key);
+        if (side) {
+          await client.prompt(key, d.prompt, d.images);
+          setQueues((q) => withoutConversation(q, key));
+          releaseImages(d.images);
+          void refreshTeam();
+        } else {
+          const before = teamRef.current.find((t) => t.agent_id === key)?.conversation.id;
+          const r = await client.sendMessage(key, d.prompt, d.images);
+          setQueues((q) => withoutConversation(q, key));
+          releaseImages(d.images);
+          if (r.conversation_id !== before) await refreshTeam();
+        }
       } catch (err) {
-        // still busy (a new turn started first) — keep it; the next turn end retries.
-        if (err instanceof ApiError && (err.code === "conversation_busy" || err.status === 503)) return;
+        // still busy (a new turn started first, or the computer runs one turn
+        // at a time and another thread has it) — keep it; the next turn end retries.
+        if (err instanceof ApiError && (err.code === "conversation_busy" || err.status === 409 || err.status === 503)) return;
         toast(describeError(err), "error");
       } finally {
-        flushing.current.delete(agentId);
+        flushing.current.delete(key);
       }
     },
     [client, refreshTeam, toast],
+  );
+
+  /** Every queue of a teammate — its main thread and each side thread — since a turn ending on any of them may free the computer. */
+  const flushAll = useCallback(
+    (agentId: string) => {
+      void flush(agentId);
+      for (const c of threadsRef.current.get(agentId) ?? []) void flush(c.id);
+    },
+    [flush],
   );
 
   // Provisioning makes no event this stream delivers for a conversation it
@@ -336,10 +389,13 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
         (t.presence.state === "starting" && t.conversation.sandbox?.status !== "ready") ||
         (queues.get(t.agent_id)?.length && t.presence.state !== "working" && t.conversation.status !== "running"),
     );
-    if (!waiting) return;
+    // A side thread mid-turn that is not the open one has no stream here; its
+    // tab and queue follow the list instead.
+    const sideBusy = [...threads.values()].some((list) => list.some((c) => c.id !== selectedConvId && (c.status === "running" || queues.get(c.id)?.length)));
+    if (!waiting && !sideBusy) return;
     const id = window.setInterval(() => void refreshTeam(), 4000);
     return () => window.clearInterval(id);
-  }, [team, queues, refreshTeam]);
+  }, [team, threads, queues, selectedConvId, refreshTeam]);
 
   // A safety net for the event path: after any roster refresh, a free
   // teammate with a queue gets it (a reconnect can miss the turn-end event).
@@ -352,7 +408,10 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
       const busy = t.presence.state === "working" || t.conversation.status === "running";
       if (!busy) void flush(t.agent_id);
     }
-  }, [team, queues, flush]);
+    for (const list of threads.values()) {
+      for (const c of list) if (queues.get(c.id)?.length && c.status !== "running") void flush(c.id);
+    }
+  }, [team, threads, queues, flush]);
 
   const notifyReply = useCallback(
     (agentId: string, conversationId: string) => {
@@ -368,11 +427,12 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
       )
         return;
       const t = teamRef.current.find((x) => x.agent_id === agentId);
+      const side = threadOfKey(threadsRef.current, conversationId);
       showReplyNotification({
         name: t?.name ?? "Teammate",
-        body: t?.preview?.kind === "them" && t.preview.text ? t.preview.text : "replied",
+        body: !side && t?.preview?.kind === "them" && t.preview.text ? t.preview.text : "replied",
         conversationId,
-        onClick: () => select(agentId),
+        onClick: () => select(agentId, side ? conversationId : null),
       });
     },
     [select],
@@ -386,7 +446,8 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
    */
   const notifyAsk = useCallback(
     (conversationId: string, ask: PermissionAsk) => {
-      const t = teamRef.current.find((x) => x.conversation.id === conversationId);
+      const side = threadOfKey(threadsRef.current, conversationId);
+      const t = teamRef.current.find((x) => x.conversation.id === conversationId || x.agent_id === side?.agentId);
       const p = prefsRef.current;
       if (
         !shouldNotify({
@@ -402,7 +463,7 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
         name: t?.name ?? "Teammate",
         tool: ask.tool,
         conversationId,
-        onClick: () => t && select(t.agent_id),
+        onClick: () => t && select(t.agent_id, side ? conversationId : null),
       });
     },
     [select],
@@ -416,7 +477,83 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
     }
   }, [client, toast]);
 
-  // ── the team stream ───────────────────────────────────────────────────────
+  // ── the streams ───────────────────────────────────────────────────────────
+
+  /** One event about one conversation, from the team stream or a side thread's own. */
+  const handleEvent = useCallback(
+    (ev: TeamEvent) => {
+      const isSelected = ev.conversation_id === selectedConvRef.current;
+      if (isSelected) {
+        setEvents((es) => (es.some((e) => e.id === ev.id) ? es : [...es, ev]));
+        if (ev.kind === "stage" && ev.stage === "turn") {
+          if (ev.state === "started") {
+            client.listTurns(ev.conversation_id).then(setTurns).catch(() => undefined);
+          } else {
+            client.listTurns(ev.conversation_id).then(setTurns).catch(() => undefined);
+            client.markRead(ev.conversation_id).catch(() => undefined);
+          }
+        }
+      }
+      // A permission request, on any row — including one the thread is not
+      // showing. Tracked here rather than in Thread because the roster has to
+      // say "waiting on you" for a teammate you are not looking at.
+      if (ev.kind === "stage" && ev.stage === "request") {
+        const ask = askFrom(ev);
+        if (ask) {
+          setOpenAsks((m) => new Map(m).set(ev.conversation_id, ask));
+          notifyAsk(ev.conversation_id, ask);
+        } else if (resolutionFrom(ev)) {
+          setOpenAsks((m) => {
+            if (!m.has(ev.conversation_id)) return m;
+            const next = new Map(m);
+            next.delete(ev.conversation_id);
+            return next;
+          });
+        }
+      }
+      // A request cannot outlive its turn — the server resolves whatever is
+      // held before the peer goes away. Clearing on the turn's end too means a
+      // `done` this client was offline for cannot strand a row on "waiting on
+      // you" until the next reload.
+      if (ev.kind === "stage" && ev.stage === "turn" && ev.state !== "started") {
+        setOpenAsks((m) => {
+          if (!m.has(ev.conversation_id)) return m;
+          const next = new Map(m);
+          next.delete(ev.conversation_id);
+          return next;
+        });
+      }
+      if (ev.kind === "stage") {
+        if (ev.stage === "turn" && ev.state !== "started" && ev.agent_id) {
+          const agentId = ev.agent_id;
+          // Re-list first so the preview carries the reply, then notify and drain.
+          void refreshTeam().then(() => {
+            notifyReply(agentId, ev.conversation_id);
+            flushAll(agentId);
+          });
+        } else {
+          scheduleRefresh();
+        }
+      } else if (ev.kind === "output") {
+        // Someone else's row: bump it and show "typing…" without a query.
+        setTeam((ts) =>
+          ts
+            .map((t): Teammate =>
+              t.conversation.id === ev.conversation_id
+                ? {
+                    ...t,
+                    conversation: { ...t.conversation, last_active_at: ev.ts },
+                    preview: { kind: "typing", text: null },
+                    unread: t.conversation.id !== selectedConvRef.current,
+                  }
+                : t,
+            )
+            .sort(byActivity),
+        );
+      }
+    },
+    [client, refreshTeam, scheduleRefresh, flushAll, notifyReply, notifyAsk],
+  );
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -468,84 +605,59 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
       });
     };
 
-    const handleEvent = (ev: TeamEvent) => {
-      const isSelected = ev.conversation_id === selectedConvRef.current;
-      if (isSelected) {
-        setEvents((es) => (es.some((e) => e.id === ev.id) ? es : [...es, ev]));
-        if (ev.kind === "stage" && ev.stage === "turn") {
-          if (ev.state === "started") {
-            client.listTurns(ev.conversation_id).then(setTurns).catch(() => undefined);
-          } else {
-            client.listTurns(ev.conversation_id).then(setTurns).catch(() => undefined);
-            client.markRead(ev.conversation_id).catch(() => undefined);
-          }
-        }
-      }
-      // A permission request, on any row — including one the thread is not
-      // showing. Tracked here rather than in Thread because the roster has to
-      // say "waiting on you" for a teammate you are not looking at.
-      if (ev.kind === "stage" && ev.stage === "request") {
-        const ask = askFrom(ev);
-        if (ask) {
-          setOpenAsks((m) => new Map(m).set(ev.conversation_id, ask));
-          notifyAsk(ev.conversation_id, ask);
-        } else if (resolutionFrom(ev)) {
-          setOpenAsks((m) => {
-            if (!m.has(ev.conversation_id)) return m;
-            const next = new Map(m);
-            next.delete(ev.conversation_id);
-            return next;
-          });
-        }
-      }
-      // A request cannot outlive its turn — the server resolves whatever is
-      // held before the peer goes away. Clearing on the turn's end too means a
-      // `done` this client was offline for cannot strand a row on "waiting on
-      // you" until the next reload.
-      if (ev.kind === "stage" && ev.stage === "turn" && ev.state !== "started") {
-        setOpenAsks((m) => {
-          if (!m.has(ev.conversation_id)) return m;
-          const next = new Map(m);
-          next.delete(ev.conversation_id);
-          return next;
-        });
-      }
-      if (ev.kind === "stage") {
-        if (ev.stage === "turn" && ev.state !== "started" && ev.agent_id) {
-          const agentId = ev.agent_id;
-          // Re-list first so the preview carries the reply, then notify and drain.
-          void refreshTeam().then(() => {
-            notifyReply(agentId, ev.conversation_id);
-            void flush(agentId);
-          });
-        } else {
-          scheduleRefresh();
-        }
-      } else if (ev.kind === "output") {
-        // Someone else's row: bump it and show "typing…" without a query.
-        setTeam((ts) =>
-          ts
-            .map((t): Teammate =>
-              t.conversation.id === ev.conversation_id
-                ? {
-                    ...t,
-                    conversation: { ...t.conversation, last_active_at: ev.ts },
-                    preview: { kind: "typing", text: null },
-                    unread: t.conversation.id !== selectedConvRef.current,
-                  }
-                : t,
-            )
-            .sort(byActivity),
-        );
-      }
-    };
-
     connect();
     return () => {
       stopped = true;
       ctrl.abort();
     };
-  }, [client, refreshTeam, refreshSchedules, scheduleRefresh, flush, notifyReply, notifyAsk]);
+  }, [client, refreshTeam, refreshSchedules, handleEvent]);
+
+  // The open side thread's own stream: the team stream follows one
+  // conversation per teammate, and this is not it. Opened once the thread's
+  // history is loaded, from its last event, so nothing replays twice.
+  const sideStreamFrom = selectedThread && loadedConvId === selectedThread.id ? selectedThread.id : null;
+  const agentOfSide = selectedThread ? selectedId : null;
+  useEffect(() => {
+    if (!sideStreamFrom || !agentOfSide) return;
+    const convId = sideStreamFrom;
+    const agentId = agentOfSide;
+    const ctrl = new AbortController();
+    let lastEventId: string | null = String(eventsRef.current.reduce((m, e) => Math.max(m, e.id), 0));
+    let backoff = 1000;
+    let stopped = false;
+    const connect = () => {
+      if (stopped) return;
+      void client.streamConversation(convId, {
+        lastEventId,
+        streams: THREAD_STREAMS,
+        signal: ctrl.signal,
+        onOpen: () => {
+          backoff = 1000;
+        },
+        onMessage: (msg) => {
+          if (msg.id) lastEventId = msg.id;
+          let ev: LogEvent;
+          try {
+            ev = JSON.parse(msg.data) as LogEvent;
+          } catch {
+            return;
+          }
+          if (msg.id) ev.id = Number(msg.id);
+          handleEvent({ ...ev, conversation_id: convId, agent_id: agentId });
+        },
+        onClose: () => {
+          if (stopped) return;
+          window.setTimeout(connect, backoff);
+          backoff = Math.min(backoff * 2, 15000);
+        },
+      });
+    };
+    connect();
+    return () => {
+      stopped = true;
+      ctrl.abort();
+    };
+  }, [client, sideStreamFrom, agentOfSide, handleEvent]);
 
   // ── routines ──────────────────────────────────────────────────────────────
 
@@ -633,6 +745,12 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
         setFocusTurnId(hit.turn_id);
         return;
       }
+      const side = threadOfKey(threadsRef.current, hit.conversation_id);
+      if (side) {
+        select(side.agentId, hit.conversation_id);
+        setFocusTurnId(hit.turn_id);
+        return;
+      }
       // An older conversation of a teammate, or one outside the team: Fountain shows it.
       window.open(transcriptUrl(client.baseUrl, hit.conversation_id), "_blank", "noopener");
     },
@@ -702,10 +820,28 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
     async (text: string, images: OutgoingImage[]): Promise<"sent" | "queued"> => {
       if (!selected) throw new Error("no teammate selected");
       const agentId = selected.agent_id;
+      const key = selectedThread?.id ?? agentId;
       const queue = () => {
-        setQueues((q) => enqueue(q, agentId, { id: newQueuedId(), text, images, at: new Date().toISOString() }));
+        setQueues((q) => enqueue(q, key, { id: newQueuedId(), text, images, at: new Date().toISOString() }));
         return "queued" as const;
       };
+      if (selectedThread) {
+        if (selectedThread.status === "running" || queues.get(key)?.length) return queue();
+        try {
+          await client.prompt(selectedThread.id, text, images);
+          releaseImages(images);
+          void refreshTeam();
+          return "sent";
+        } catch (err) {
+          // Busy after all — or the computer runs one turn at a time and another thread has it (409).
+          if (err instanceof ApiError && (err.code === "conversation_busy" || err.status === 409 || err.status === 503)) {
+            void refreshTeam();
+            return queue();
+          }
+          toast(describeError(err), "error");
+          throw err;
+        }
+      }
       // Only a turn in flight is a reason not to try: "starting" and
       // "machine offline" are the server's call (503 → queued, below), and
       // the roster's idea of them can be stale.
@@ -730,17 +866,84 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
         throw err;
       }
     },
-    [client, selected, queues, refreshTeam, toast],
+    [client, selected, selectedThread, queues, refreshTeam, toast],
   );
 
   const onCancelQueued = useCallback(
     (id: string) => {
       if (!selected) return;
-      const item = queues.get(selected.agent_id)?.find((m) => m.id === id);
+      const key = selectedThread?.id ?? selected.agent_id;
+      const item = queues.get(key)?.find((m) => m.id === id);
       if (item) releaseImages(item.images);
-      setQueues((q) => removeQueued(q, selected.agent_id, id));
+      setQueues((q) => removeQueued(q, key, id));
     },
-    [selected, queues],
+    [selected, selectedThread, queues],
+  );
+
+  // ── threads ───────────────────────────────────────────────────────────────
+
+  /** Close every side thread of a teammate (before its computer goes, or the teammate does). */
+  const closeSideThreads = useCallback(
+    async (agentId: string) => {
+      const side = threadsRef.current.get(agentId) ?? [];
+      await Promise.all(side.map((c) => client.terminate(c.id).catch(() => undefined)));
+      setQueues((q) => side.reduce<ReadonlyMap<string, readonly QueuedMessage[]>>((acc, c) => withoutConversation(acc, c.id), q));
+    },
+    [client],
+  );
+
+  /** A new thread with the selected teammate, on the computer they already have. */
+  const openThread = useCallback(
+    async (agentId: string) => {
+      const t = teamRef.current.find((x) => x.agent_id === agentId);
+      if (!t) return;
+      const sb = t.conversation.sandbox;
+      if (!sb || (sb.status !== "ready" && sb.status !== "suspended")) {
+        toast(`${t.name}'s computer is not up yet — a thread can be opened once it is ready.`, "error");
+        return;
+      }
+      const existing = threadsRef.current.get(agentId) ?? [];
+      const title = window.prompt(`Name the new thread with ${t.name}`, nextThreadTitle(existing));
+      if (title === null) return;
+      try {
+        const conv = await client.openThread({
+          agent_id: agentId,
+          sandbox_id: sb.id,
+          environment_id: t.conversation.environment_id,
+          vault_id: t.conversation.vault_id,
+          title: title.trim() || nextThreadTitle(existing),
+        });
+        await refreshTeam();
+        select(agentId, conv.id);
+      } catch (err) {
+        if (err instanceof ApiError && err.code === "sandbox_not_attachable") {
+          toast(`${t.name}'s computer cannot take another thread right now — try again in a moment.`, "error");
+          return;
+        }
+        toast(describeError(err), "error");
+      }
+    },
+    [client, refreshTeam, select, toast],
+  );
+
+  /** Close a side thread: it ends and leaves the strip; the computer stays up for the main thread. */
+  const closeThread = useCallback(
+    (agentId: string, conversationId: string) => {
+      const t = teamRef.current.find((x) => x.agent_id === agentId);
+      const c = threadsRef.current.get(agentId)?.find((x) => x.id === conversationId);
+      if (!t || !c) return;
+      const name = c.title?.trim() || "this thread";
+      if (c.turn_count > 0 && !window.confirm(`Close ${name} with ${t.name}? The conversation ends (it stays readable in Fountain); ${t.name} keeps the computer and the main thread.`)) return;
+      client
+        .terminate(conversationId)
+        .then(() => {
+          setQueues((q) => withoutConversation(q, conversationId));
+          if (selectedConvRef.current === conversationId) select(agentId);
+          return refreshTeam();
+        })
+        .catch((err) => toast(describeError(err), "error"));
+    },
+    [client, refreshTeam, select, toast],
   );
 
   const onToggleNotify = useCallback(async () => {
@@ -771,8 +974,8 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
       const t = team.find((x) => x.agent_id === agentId);
       if (!t) return;
       if (!window.confirm(`Remove ${t.name} from the team? Their computer is shut down; the conversation stays in your Fountain history.`)) return;
-      client
-        .removeTeammate(agentId)
+      closeSideThreads(agentId)
+        .then(() => client.removeTeammate(agentId))
         .then(() => {
           toast("Removed from the team");
           if (selectedId === agentId) select(null);
@@ -781,7 +984,7 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
         })
         .catch((err) => toast(describeError(err), "error"));
     },
-    [client, team, selectedId, refreshTeam, select, toast],
+    [client, team, selectedId, refreshTeam, select, toast, closeSideThreads],
   );
 
   /**
@@ -810,7 +1013,9 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
         // End the current computer, then open the new conversation right away: with the old one
         // past resuming, Fountain opens it on a fresh sandbox and provisions immediately, so the
         // thread goes "Starting their computer…" → "ready" without waiting for a first message.
-        (live ? client.terminate(t.conversation.id) : Promise.resolve())
+        // Side threads hold the computer up too, so they go first.
+        closeSideThreads(agentId)
+          .then(() => (live ? client.terminate(t.conversation.id) : Promise.resolve()))
           .then(() => client.freshConversation(agentId))
           .then(() => {
             toast(`Starting ${t.name}'s new computer…`);
@@ -850,7 +1055,7 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
           toast(describeError(err), "error");
         });
     },
-    [client, team, refreshTeam, toast],
+    [client, team, refreshTeam, toast, closeSideThreads],
   );
 
   const onRemove = useCallback(() => {
@@ -957,6 +1162,9 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
           select(agentId);
           setCustomizeRequested(true);
           break;
+        case "thread":
+          void openThread(agentId);
+          break;
         case "retire":
           retireThread(agentId);
           break;
@@ -977,7 +1185,7 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
           break;
       }
     },
-    [team, client, updatePrefs, removeTeammate, retireThread, toast, select, giveContact, changeContactNumber, releaseContact],
+    [team, client, updatePrefs, removeTeammate, retireThread, toast, select, giveContact, changeContactNumber, releaseContact, openThread],
   );
 
   const orderedTeam = useMemo(() => sortPinnedFirst(team, prefs.pinned), [team, prefs.pinned]);
@@ -1011,6 +1219,7 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
         connected={connected}
         comms={comms}
         waitingConvIds={waitingConvIds}
+        threads={threads}
       />
       {page === "runners" ? (
         <Runners client={client} onBack={() => select(null)} toast={toast} fountainUrl={client.baseUrl} refreshKey={teamVersion} />
@@ -1030,10 +1239,15 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
         <Thread
           client={client}
           teammate={selected}
+          thread={selectedThread}
+          threads={threads.get(selected.agent_id) ?? []}
+          onSelectThread={(id) => select(selected.agent_id, id)}
+          onNewThread={() => void openThread(selected.agent_id)}
+          onCloseThread={(id) => closeThread(selected.agent_id, id)}
           turns={turns}
           events={events}
-          queued={queues.get(selected.agent_id) ?? []}
-          loading={threadLoading || loadedConvId !== selected.conversation.id}
+          queued={queues.get(selectedThread?.id ?? selected.agent_id) ?? []}
+          loading={threadLoading || loadedConvId !== selectedConvId}
           onSend={onSend}
           onCancelQueued={onCancelQueued}
           onInterrupt={onInterrupt}
@@ -1141,8 +1355,26 @@ function Team({ settings, onSettings, onSignOut }: { settings: Settings; email: 
 }
 
 function idFromHash(): string | null {
-  const m = /^#\/team\/([0-9a-f-]{36})$/.exec(window.location.hash);
+  const m = /^#\/team\/([0-9a-f-]{36})(?:\/[0-9a-f-]{36})?$/.exec(window.location.hash);
   return m?.[1] ?? null;
+}
+
+/** `#/team/<agent>/<conversation>` — a side thread of that teammate. */
+function threadFromHash(): string | null {
+  const m = /^#\/team\/[0-9a-f-]{36}\/([0-9a-f-]{36})$/.exec(window.location.hash);
+  return m?.[1] ?? null;
+}
+
+function markThreadRead(m: ReadonlyMap<string, readonly Conversation[]>, conversationId: string): ReadonlyMap<string, readonly Conversation[]> {
+  let changed = false;
+  const next = new Map<string, readonly Conversation[]>();
+  for (const [k, list] of m) {
+    if (list.some((c) => c.id === conversationId && c.unread)) {
+      changed = true;
+      next.set(k, list.map((c) => (c.id === conversationId ? { ...c, unread: false } : c)));
+    } else next.set(k, list);
+  }
+  return changed ? next : m;
 }
 
 function pageFromHash(): "team" | "routines" | "runners" {

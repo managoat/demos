@@ -9,7 +9,7 @@ import {
   type DragEvent,
   type KeyboardEvent,
 } from "react";
-import type { CommsStatus, LogEvent, Teammate, TreeNode, Turn } from "../api/types";
+import type { CommsStatus, Conversation, LogEvent, Teammate, TreeNode, Turn } from "../api/types";
 import { describeError, type FountainClient } from "../api/client";
 import { blocksForTurn, type Block } from "../lib/acp";
 import { loadDraft, saveDraft } from "../lib/drafts";
@@ -27,10 +27,18 @@ import { groupBlocks, toolsLabel, duration, type FeedItem } from "../lib/feed";
 import { asks as asksFrom, resolutions as resolutionsFrom, type PermissionAsk, type PermissionResolution } from "../lib/permissions";
 import { PermissionCard } from "./PermissionCard";
 import { transcriptUrl } from "../lib/transcript";
+import { threadPresence, threadTitle, viewThrough } from "../lib/threads";
 
 interface Props {
   client: FountainClient;
   teammate: Teammate;
+  /** the side thread being shown, or null for the teammate's main thread */
+  thread: Conversation | null;
+  /** the teammate's side threads: more conversations on the same computer */
+  threads: readonly Conversation[];
+  onSelectThread: (conversationId: string | null) => void;
+  onNewThread: () => void;
+  onCloseThread: (conversationId: string) => void;
   turns: Turn[];
   events: LogEvent[];
   queued: readonly QueuedMessage[];
@@ -75,6 +83,11 @@ interface Props {
 export function Thread({
   client,
   teammate,
+  thread,
+  threads,
+  onSelectThread,
+  onNewThread,
+  onCloseThread,
   turns,
   events,
   queued,
@@ -106,18 +119,21 @@ export function Thread({
   onChangeContactNumber,
   fountainUrl,
 }: Props) {
-  const conv = teammate.conversation;
-  const machineOffline = teammate.presence.state === "machine_offline";
+  // On a side thread, the conversation and its presence are the thread's; the
+  // person (name, agent, contact, usage) stays the teammate's.
+  const view = thread ? viewThrough(teammate, thread) : teammate;
+  const conv = view.conversation;
+  const machineOffline = view.presence.state === "machine_offline";
   // "starting" is deliberately not busy: the send is attempted and the server
   // decides (503 → queued). A stale "starting" must not lock the composer.
-  const busy = machineOffline || teammate.presence.state === "working" || conv.status === "running";
+  const busy = machineOffline || view.presence.state === "working" || conv.status === "running";
   const runner = conv.sandbox?.runner ?? null;
   // A conversation opened without a prompt stays "pending" until its first
   // turn, and the server reads that as "starting computer" even once the
   // sandbox is ready (fountain#839). Read the sandbox too.
-  const sandboxReady = teammate.presence.state === "starting" && conv.sandbox?.status === "ready";
-  const presenceState = sandboxReady ? "online" : teammate.presence.state;
-  const presenceLabel = sandboxReady ? "ready" : teammate.presence.label;
+  const sandboxReady = view.presence.state === "starting" && conv.sandbox?.status === "ready";
+  const presenceState = sandboxReady ? "online" : view.presence.state;
+  const presenceLabel = sandboxReady ? "ready" : view.presence.label;
   const [draft, setDraft] = useState(() => loadDraft(conv.id));
   const [images, setImages] = useState<OutgoingImage[]>([]);
   const [sending, setSending] = useState(false);
@@ -507,6 +523,36 @@ export function Thread({
         </div>
       </header>
 
+      {(threads.length > 0 || thread) && (
+        <nav className="thread-strip" aria-label={`Threads with ${teammate.name}`}>
+          <button className={`thread-tab ${thread ? "" : "active"}`} onClick={() => onSelectThread(null)} aria-current={thread ? undefined : "page"} title="The main thread — the one the team knows">
+            <span className={`presence inline ${teammate.presence.state === "starting" && teammate.conversation.sandbox?.status === "ready" ? "online" : teammate.presence.state}`} />
+            Main
+            {teammate.unread && thread && <span className="unread-dot" title="Unread" />}
+          </button>
+          {threads.map((c, i) => {
+            const active = thread?.id === c.id;
+            const p = threadPresence(c, teammate);
+            return (
+              <span key={c.id} className={`thread-tab-wrap ${active ? "active" : ""}`}>
+                <button className={`thread-tab ${active ? "active" : ""}`} onClick={() => onSelectThread(c.id)} aria-current={active ? "page" : undefined} title={`${threadTitle(c, i)} · ${p.label}`}>
+                  <span className={`presence inline ${p.state}`} />
+                  {threadTitle(c, i)}
+                  {c.unread && !active && <span className="unread-dot" title="Unread" />}
+                </button>
+                {active && (
+                  <button className="thread-close" onClick={() => onCloseThread(c.id)} aria-label={`Close ${threadTitle(c, i)}`} title="Close this thread — the computer and the main thread stay">
+                    ×
+                  </button>
+                )}
+              </span>
+            );
+          })}
+          <button className="thread-tab new" onClick={onNewThread} title="Another conversation with this teammate on the same computer — same files, its own context">
+            + New thread
+          </button>
+        </nav>
+      )}
       {teammate.contact && (
         <div className="contact-bar" role="region" aria-label={`${teammate.name}'s email and phone`}>
           <ContactLine contact={teammate.contact} compact onChangeNumber={onChangeContactNumber} />
@@ -576,7 +622,7 @@ export function Thread({
           )}
           {!loading && turns.length === 0 && queued.length === 0 && (
             <div className="centered muted empty-thread">
-              {teammate.presence.state === "starting" && conv.sandbox?.status !== "ready" ? (
+              {view.presence.state === "starting" && conv.sandbox?.status !== "ready" ? (
                 <>
                   <div className="glyph pulse">🖥️</div>
                   <div>

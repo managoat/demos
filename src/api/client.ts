@@ -197,6 +197,48 @@ export class FountainClient {
     return (await this.json<{ data: SearchHit[] }>("GET", `/api/search?${qs}`, undefined, opts.signal)).data;
   }
 
+  // ── threads: more conversations on one teammate's computer ──────────────
+
+  /**
+   * The caller's conversations, filtered. `status` is a comma-joined subset of
+   * pending/running/idle/failed/terminated (an unknown one is a 400).
+   */
+  async listConversations(filter: { agentId?: string; status?: string[] } = {}): Promise<Conversation[]> {
+    const qs = new URLSearchParams();
+    if (filter.agentId) qs.set("agent_id", filter.agentId);
+    if (filter.status?.length) qs.set("status", filter.status.join(","));
+    const q = qs.toString();
+    return (await this.json<{ data: Conversation[] }>("GET", `/api/conversations${q ? `?${q}` : ""}`)).data;
+  }
+
+  /**
+   * A second conversation on a computer the teammate already has: Fountain
+   * provisions nothing and attaches it to `sandbox_id`, which must have been
+   * built for the same agent, environment and vault (404 `sandbox_not_found`,
+   * 409 `sandbox_not_attachable`, 422 `sandbox_identity_mismatch` otherwise).
+   * It sits `pending` until its first prompt.
+   */
+  async openThread(input: {
+    agent_id: string;
+    sandbox_id: string;
+    environment_id?: string | null;
+    vault_id?: string | null;
+    title?: string | null;
+  }): Promise<Conversation> {
+    const body: Record<string, unknown> = { agent_id: input.agent_id, sandbox_id: input.sandbox_id };
+    if (input.environment_id) body.environment_id = input.environment_id;
+    if (input.vault_id) body.vault_id = input.vault_id;
+    if (input.title) body.title = input.title;
+    return (await this.json<{ data: Conversation }>("POST", "/api/conversations", body)).data;
+  }
+
+  /** A turn on a conversation directly (a side thread; the main thread goes through `sendMessage`). */
+  prompt(conversationId: string, prompt: string, images: Array<{ data: string; media_type: string }> = []): Promise<{ status: string }> {
+    const body: Record<string, unknown> = { prompt };
+    if (images.length) body.images = images.map((i) => ({ data: i.data, media_type: i.media_type }));
+    return this.json("POST", `/api/conversations/${conversationId}/prompts`, body);
+  }
+
   // ── conversations (the thread) ──────────────────────────────────────────
 
   async tree(conversationId: string): Promise<TreeNode[]> {
@@ -393,6 +435,33 @@ export class FountainClient {
   }): Promise<void> {
     const qs = new URLSearchParams({ streams: opts.streams.join(",") });
     return readSse(`${this.baseUrl}/api/team/stream?${qs}`, {
+      headers: { authorization: `Bearer ${this.settings.apiKey}` },
+      lastEventId: opts.lastEventId,
+      signal: opts.signal,
+      onMessage: opts.onMessage,
+      onOpen: opts.onOpen,
+      onClose: opts.onClose,
+    });
+  }
+
+  /**
+   * One conversation's events, for a thread the team stream does not follow
+   * (a side thread on a teammate's computer). Same payload as the team
+   * stream's, minus `conversation_id`/`agent_id` — the caller adds them.
+   */
+  streamConversation(
+    conversationId: string,
+    opts: {
+      lastEventId: string | null;
+      streams: string[];
+      signal: AbortSignal;
+      onMessage: (msg: SseMessage) => void;
+      onOpen?: () => void;
+      onClose: (err?: unknown) => void;
+    },
+  ): Promise<void> {
+    const qs = new URLSearchParams({ streams: opts.streams.join(",") });
+    return readSse(`${this.baseUrl}/api/conversations/${conversationId}/stream?${qs}`, {
       headers: { authorization: `Bearer ${this.settings.apiKey}` },
       lastEventId: opts.lastEventId,
       signal: opts.signal,

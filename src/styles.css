@@ -449,6 +449,19 @@ button.added:hover { color: var(--danger); border-color: color-mix(in srgb, var(
 /* a teammate's own email + phone (team_comms) */
 .menu button.is-disabled { color: var(--muted); cursor: not-allowed; }
 .menu button.is-disabled:hover { background: transparent; }
+.thread-strip { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--border); background: var(--bg-1); padding: 6px 20px; font-size: 13px; }
+.thread-tab-wrap { display: inline-flex; align-items: center; border-radius: 999px; }
+.thread-tab-wrap.active { background: var(--bg-2); }
+.thread-tab { display: inline-flex; align-items: center; gap: 6px; background: transparent; color: var(--text-2); border: 1px solid transparent; border-radius: 999px; padding: 3px 10px; font-size: 13px; }
+.thread-tab:hover { background: var(--bg-2); color: var(--text); }
+.thread-tab.active { background: var(--bg-2); color: var(--text); border-color: var(--border); }
+.thread-tab-wrap.active .thread-tab { border-color: transparent; }
+.thread-tab.new { color: var(--brand); }
+.thread-tab .unread-dot { margin-left: 2px; }
+.thread-close { background: transparent; color: var(--muted); padding: 0 8px 0 2px; font-size: 15px; line-height: 1; border-radius: 999px; }
+.thread-close:hover { color: var(--danger, #c33); }
+.threads-mark { color: var(--muted); font-size: 11px; }
+.threads-mark.working { color: var(--brand); }
 .contact-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--border); background: var(--bg-1); padding: 6px 20px; font-size: 13px; }
 .contact-bar .contact-line { flex: 1; }
 .contact-bar > button { flex-shrink: 0; }

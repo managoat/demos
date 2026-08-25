@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
-import type { CommsStatus, Teammate } from "../api/types";
+import type { CommsStatus, Conversation, Teammate } from "../api/types";
 import { contactOffer } from "../lib/contact";
 import type { FountainClient } from "../api/client";
 import type { Prefs } from "../lib/prefs";
@@ -18,6 +18,7 @@ export type RowAction =
   | "remove"
   | "rename"
   | "history"
+  | "thread"
   | "retire"
   | "retire-new"
   | "customize"
@@ -54,6 +55,8 @@ interface Props {
   comms: CommsStatus | null;
   /** conversations blocked on a permission request — the row says so and sorts nothing else */
   waitingConvIds: ReadonlySet<string>;
+  /** each teammate's side threads — more conversations on the same computer — by agent id */
+  threads: ReadonlyMap<string, readonly Conversation[]>;
 }
 
 interface MenuState {
@@ -86,6 +89,7 @@ export function Roster({
   connected,
   comms,
   waitingConvIds,
+  threads,
 }: Props) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [teamMenu, setTeamMenu] = useState<{ x: number; y: number } | null>(null);
@@ -161,7 +165,8 @@ export function Roster({
               pinned={prefs.pinned.includes(t.agent_id)}
               muted={prefs.muted.includes(t.agent_id)}
               markedUnread={prefs.unread.includes(t.agent_id)}
-              waiting={waitingConvIds.has(t.conversation.id)}
+              waiting={waitingConvIds.has(t.conversation.id) || (threads.get(t.agent_id) ?? []).some((c) => waitingConvIds.has(c.id))}
+              threads={threads.get(t.agent_id) ?? []}
               onSelect={() => onSelect(t.agent_id)}
               onMenu={(x, y) => openMenu(t.agent_id, x, y)}
             />
@@ -212,6 +217,7 @@ function RosterRow({
   muted,
   markedUnread,
   waiting,
+  threads,
   onSelect,
   onMenu,
 }: {
@@ -223,10 +229,14 @@ function RosterRow({
   markedUnread: boolean;
   /** blocked on a permission request: it needs an answer, not just a read */
   waiting: boolean;
+  threads: readonly Conversation[];
   onSelect: () => void;
   onMenu: (x: number, y: number) => void;
 }) {
-  const unread = !selected && (t.unread || markedUnread);
+  // A side thread's news counts even while the teammate is open on another thread.
+  const sideUnread = threads.some((c) => c.unread);
+  const sideWorking = threads.some((c) => c.status === "running");
+  const unread = (!selected && (t.unread || markedUnread)) || sideUnread;
   const onContext = (e: MouseEvent) => {
     e.preventDefault();
     onMenu(e.clientX, e.clientY);
@@ -255,6 +265,11 @@ function RosterRow({
               {muted && (
                 <span className="muted-mark" title="Muted">
                   🔕{" "}
+                </span>
+              )}
+              {threads.length > 0 && (
+                <span className={`threads-mark ${sideWorking ? "working" : ""}`} title={`${threads.length + 1} threads on the same computer${sideWorking ? " — one is working" : ""}`}>
+                  ⧉{threads.length + 1}{" "}
                 </span>
               )}
               {formatTime(t.conversation.last_active_at)}
@@ -377,6 +392,9 @@ function RowMenu({
           Release email &amp; phone…
         </button>
       )}
+      <button role="menuitem" onClick={() => onAction("thread")} title="Another conversation with this teammate on the same computer, alongside the main one — same files, its own context">
+        New thread…
+      </button>
       <button role="menuitem" onClick={() => onAction("retire")} title="Retire this conversation and start a new one on the same computer — files and tools stay, the context is fresh. The thread stays in History.">
         Start a fresh thread…
       </button>

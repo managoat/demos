@@ -1,8 +1,9 @@
 # fountain-team
 
 A messaging-style client for your [Fountain](https://github.com/BinaryBourbon/fountain)
-team: your agents as teammates, one ongoing conversation each — the roster on
-the left, the thread on the right, Enter to send. It is the `/team` page as a
+team: your agents as teammates, one ongoing conversation each (and, when you
+want it, more threads on the same computer) — the roster on the left, the
+thread on the right, Enter to send. It is the `/team` page as a
 standalone app: static files, no backend of its own, talking only to the
 Fountain API with an API key you paste in once.
 
@@ -136,6 +137,25 @@ do, each on the public API:
   where they were. **Fresh thread on a new computer…** is the other option:
   the current conversation and its computer are shut down and a new computer
   starts right away — the thread shows it starting, then ready.
+- **Threads** — more than one conversation with a teammate on the one
+  computer. Fountain lets several conversations share a sandbox as long as
+  they belong to the same agent, so besides the **main thread** (the one the
+  team knows) a teammate can have **side threads**: **New thread…** (row
+  menu, or "+ New thread" in the strip under the thread header) opens
+  another conversation on the same computer — same files, clones and tools,
+  its own clean context — named on the way in ("Thread 2" by default). The
+  strip switches between them; each tab carries its own presence dot and
+  unread mark, the roster row shows ⧉n while a teammate has more than one,
+  and the tab title counts a side thread's unread too. A side thread is
+  sent to directly, queues while it is mid-turn (or, on an opencode /
+  gemini computer that runs one turn at a time, while any thread is), and
+  shows its own Activity, permission requests and Interrupt. **×** on the
+  active tab closes it: the conversation ends and stays readable in
+  Fountain; the computer and the main thread stay. Side threads are closed
+  before "Fresh thread on a new computer…" and before Remove, since they
+  would otherwise keep the machine up. URLs are
+  `#/team/<agent>/<conversation>`.
+
 - **Runners** (team menu ⋯): your own machines serving as a teammate's
   computer (Fountain's self-hosted runner): which are online, forget one,
   how to start `fountain runner`. To put a teammate on one: right-click them
@@ -221,6 +241,7 @@ Everything is the public API (`docs/api.md` in Fountain, "Team"):
 | Export | `GET /api/agents/:id` + `/api/environments`, emitted as YAML client-side |
 | Rename / History | `PATCH /api/team/:agent_id`, `GET /api/team/:agent_id/conversations` |
 | Fresh thread (same computer / new computer) | `POST /api/team/:agent_id/conversations`; new computer: `POST /api/conversations/:id/terminate` first, then the same call (which provisions now) |
+| Threads | `GET /api/conversations?status=pending,idle,running` (side threads = same agent + same `sandbox_id`, off the team channel), `POST /api/conversations` (`agent_id`, `sandbox_id`, `title`), `POST /api/conversations/:id/prompts`, `GET /api/conversations/:id/stream` for the open one, `POST /api/conversations/:id/terminate` to close |
 | Runners | `GET /api/runners`, `DELETE /api/runners/:id`; `sandbox.runner` + `machine_offline` presence on the roster |
 | Email & phone | `GET /api/team/comms`; `POST` / `PATCH /api/team/:agent_id/contact` (`{prompt_from_number}`), `DELETE /api/team/:agent_id/contact`; `contact` (incl. `prompt_opted_out_at`) on the roster |
 
