@@ -667,7 +667,9 @@ button.icon.small-icon:disabled { opacity: 0.4; }
 .sidebar-item { margin: 2px 0 8px; border-radius: 10px; padding: 2px 0 2px; }
 .sidebar-item.current { background: color-mix(in srgb, var(--brand) 7%, transparent); }
 .sidebar-item-head { display: flex; align-items: center; gap: 6px; padding: 4px 6px 2px 8px; }
-.sidebar-item-title { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; text-decoration: none; color: var(--text-2); text-transform: uppercase; letter-spacing: .03em; display: flex; align-items: center; gap: 6px; }
+.sidebar-item-title { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; text-decoration: none; color: var(--text-2); text-transform: uppercase; letter-spacing: .03em; }
+/* two lines, then cut: a title cut mid-clause at one line is not a title */
+.sidebar-item-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; line-height: 1.3; }
 .sidebar-item-title:hover { color: var(--text); }
 /* each computer is a card in its own colour, so two on one item read as two */
 .sidebar-item details.computer-card { margin: 4px 4px 6px 8px; border: 1px solid var(--border); border-left: 3px solid var(--accent, var(--border)); border-radius: 10px; background: var(--bg-0); padding: 2px 4px 4px; }
@@ -811,6 +813,38 @@ body.resizing-col { cursor: col-resize; user-select: none; }
 .tree-count { flex-shrink: 0; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; padding: 0 3px; }
 .tree-empty { font-size: 11px; padding: 2px 6px 4px 30px; }
 
+/* the shelves: one fold per state, the ones that need you at the top */
+.sidebar-shelf { margin: 0 0 6px; }
+.sidebar-shelf > .sidebar-group { padding: 6px 6px 3px 4px; font-size: 10px; letter-spacing: .08em; }
+.sidebar-shelf.waiting > .sidebar-group span:first-child { color: var(--brand); }
+.sidebar-shelf.working > .sidebar-group span:first-child { color: var(--ok); }
+.sidebar-shelf.folded { margin-bottom: 2px; }
+
+/* the gutter: one glyph per row, the same story the shelf tells, so a
+ * resting list scans down its left edge without reading a word */
+.item-glyph { flex-shrink: 0; width: 12px; height: 18px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; line-height: 1; color: var(--muted); font-variant-numeric: tabular-nums; cursor: default; }
+.item-glyph.working { color: var(--ok); animation: pulse 1.2s infinite; }
+.item-glyph.waiting { color: var(--brand); font-weight: 700; font-size: 12px; }
+.item-glyph.up { color: var(--ok); }
+.item-glyph.todo { color: var(--muted); }
+.item-glyph.closed { color: var(--muted); opacity: .6; }
+/* a title row is up to two lines: the controls sit on its first */
+.app.ide .sidebar-item-head { align-items: flex-start; }
+.app.ide .sidebar-item-head .tree-twisty, .app.ide .sidebar-item-head .item-glyph { margin-top: 2px; }
+.app.ide .sidebar-item-head .tree-count { line-height: 18px; margin-top: 2px; }
+.app.ide .sidebar-item-head .icon.small-icon { width: 18px; height: 18px; font-size: 12px; margin-top: 2px; }
+.app.ide .sidebar-item-head .pill.tiny { margin-top: 3px; }
+/* a checklist line: the item nobody is on yet has nothing under it, so no twisty to press */
+.app.ide .sidebar-item.leaf .sidebar-item-title { font-weight: 500; }
+.app.ide .sidebar-item.closed .sidebar-item-title { color: var(--muted); }
+
+/* the filter: every shelf narrowed at once */
+.explorer-filter { display: flex; align-items: center; gap: 6px; padding: 2px 6px 4px; }
+.explorer-filter-input { flex: 1; min-width: 0; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-0); color: var(--text); font: inherit; font-size: 11.5px; }
+.explorer-filter-input::placeholder { color: var(--muted); }
+.explorer-filter-input:focus { outline: none; border-color: var(--brand); }
+.explorer-filter-count { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+
 /* adding a work item: the same row shape as one, at the top of the tree —
  * a quiet line until you point at it, then the item's own field in its
  * place, so a new item appears where you were already reading it. */
@@ -859,6 +893,9 @@ body.resizing-col { cursor: col-resize; user-select: none; }
 .app.ide .conv-link.current .conv-link-title { color: var(--text); font-weight: 500; }
 .app.ide .conv-link.unread .conv-link-title { color: var(--text); font-weight: 600; }
 .app.ide .conv-link.retired .conv-link-title { color: var(--muted); }
+/* a thread that repeats its item's title says its number instead */
+.app.ide .conv-link-title.conv-link-ordinal { color: var(--muted); font-variant-numeric: tabular-nums; }
+.app.ide .conv-link.unread .conv-link-title.conv-link-ordinal, .app.ide .conv-link.current .conv-link-title.conv-link-ordinal { color: var(--text-2); }
 .conv-link-when { flex-shrink: 0; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .conv-flag.failed { flex-shrink: 0; font-size: 10px; color: var(--danger); }
 
@@ -866,7 +903,8 @@ body.resizing-col { cursor: col-resize; user-select: none; }
  * The twisties are structure, so they stay — a resting sidebar still shows
  * which items open and which one is open. */
 .app.ide .sidebar-list .icon.small-icon { opacity: 0; transition: opacity .1s ease; }
-.app.ide .sidebar:hover .sidebar-list .icon.small-icon,
+.app.ide .sidebar-item-head:hover .icon.small-icon,
+.app.ide summary.computer-head:hover .icon.small-icon,
 .app.ide .sidebar-list :focus-visible.icon.small-icon { opacity: 1; }
 
 /* ── the theme menu ─────────────────────────────────────────────────────

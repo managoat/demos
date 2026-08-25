@@ -241,3 +241,117 @@ export function saveSidebarWidth(px: number): void {
     // no storage: the width lives for the page
   }
 }
+
+// ── the explorer's shelves ────────────────────────────────────────────
+//
+// Every open item once rendered as the same row — same weight, same
+// truncation, a `1/1` in the corner — and thirty of them read as a
+// paragraph. What tells the work you care about from the rest is its
+// *state*, and the tree already knows it: whether a turn is running, whether
+// something is waiting on you, whether a computer is up at all. So the list
+// is shelved by that state, each shelf a fold with a count, and inside a
+// shelf the rows keep the still order of `groupByItem`. A row moves shelf
+// only when its state changes, which is news worth a move.
+
+export type ItemState = "waiting" | "working" | "up" | "todo" | "closed";
+
+export const ITEM_STATES: readonly ItemState[] = ["waiting", "working", "up", "todo", "closed"];
+
+export const STATE_LABEL: Record<ItemState, string> = {
+  waiting: "waiting on you",
+  working: "working",
+  up: "up",
+  todo: "to do",
+  closed: "closed",
+};
+
+/** One character in the gutter, so a resting list scans by its left edge. */
+export const STATE_GLYPH: Record<ItemState, string> = {
+  waiting: "!",
+  working: "●",
+  up: "◐",
+  todo: "○",
+  closed: "✓",
+};
+
+/**
+ * Which shelf an item sits on. A proposal outranks everything: a person has
+ * to decide it, and nothing else on the row can happen until they do. New
+ * output you have not seen is waiting too — unless the agent is still
+ * talking, in which case it is working and the dot says so.
+ */
+export function stateOf(g: ItemGroup<{ id: string; title: string; status: string; createdAt: string; proposal?: unknown }>): ItemState {
+  if (isClosed(g.item.status)) return "closed";
+  if (g.item.proposal) return "waiting";
+  if (g.busy) return "working";
+  if (g.unread) return "waiting";
+  if (g.live) return "up";
+  return "todo";
+}
+
+export interface Shelf<I extends { id: string; title: string; status: string; createdAt: string }> {
+  state: ItemState;
+  groups: ItemGroup<I>[];
+}
+
+/** The groups shelved, in shelf order; empty shelves are left out. */
+export function shelve<I extends { id: string; title: string; status: string; createdAt: string; proposal?: unknown }>(groups: ItemGroup<I>[]): Shelf<I>[] {
+  const by = new Map<ItemState, ItemGroup<I>[]>();
+  for (const g of groups) {
+    const s = stateOf(g);
+    const arr = by.get(s);
+    if (arr) arr.push(g);
+    else by.set(s, [g]);
+  }
+  return ITEM_STATES.filter((s) => by.has(s)).map((state) => ({ state, groups: by.get(state)! }));
+}
+
+/** Case- and whitespace-insensitive: every word typed is somewhere in the title. */
+export function matchesFilter(title: string, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const t = title.toLowerCase();
+  return words.every((w) => t.includes(w));
+}
+
+/**
+ * What a conversation row says, given that the rows above it already say
+ * the item and the teammate. A started conversation is titled
+ * `<teammate>: <item title>` (shared/channel), so under that item and that
+ * teammate the title is pure repetition: null, and the row falls back to
+ * something distinct. A renamed or foreign title shows, minus the
+ * teammate's prefix when it carries one.
+ */
+export function threadLabel(title: string | null | undefined, itemTitle: string, agentName: string | null | undefined): string | null {
+  if (!title) return null;
+  const prefix = agentName ? `${agentName}: ` : null;
+  const body = prefix && title.startsWith(prefix) ? title.slice(prefix.length) : title;
+  if (body === itemTitle) return null;
+  // conversationTitle cuts at 119 and appends an ellipsis: a cut copy is still a copy.
+  if (body.endsWith("…") && body.length > 1 && itemTitle.startsWith(body.slice(0, -1))) return null;
+  return body;
+}
+
+// ── which shelves are folded, remembered ──────────────────────────────
+
+const FOLDS_KEY = "fountain-workbench.explorerFolds";
+
+/** Closed starts folded: it is the shelf you look at least. */
+export function loadFolds(): Set<ItemState> {
+  try {
+    const raw = localStorage.getItem(FOLDS_KEY);
+    if (raw === null) return new Set(["closed"]);
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr.filter((s): s is ItemState => (ITEM_STATES as readonly string[]).includes(s)) : ["closed"]);
+  } catch {
+    return new Set(["closed"]);
+  }
+}
+
+export function saveFolds(folds: ReadonlySet<ItemState>): void {
+  try {
+    localStorage.setItem(FOLDS_KEY, JSON.stringify([...folds]));
+  } catch {
+    // no storage: the folds live for the page
+  }
+}

@@ -7,9 +7,17 @@
  * closed items — done and won't do alike — folded away, each still saying
  * which of the two it was.
  *
+ * The items sit on shelves by state — waiting on you, working, up, to do,
+ * closed — each a fold with a count, so the work that needs you is at the
+ * top and the backlog is one fold below it. A glyph in the gutter says the
+ * same thing per row, so the list scans by its left edge. An item with no
+ * computer is a checklist line, not a tree node: there is nothing under it
+ * to open. A filter box at the top narrows every shelf at once.
+ *
  * Nothing here reorders itself while you read it: the order comes from
  * lib/sidebar, which ranks on start times, not on activity. Work in flight
- * shows as a dot on the row it belongs to.
+ * shows as a dot on the row it belongs to, and a row changes shelf only
+ * when its state does.
  *
  * The row at the top of the tree adds a work item where you read them: type
  * what needs doing, Enter, and it is there. With a default teammate set on
@@ -20,8 +28,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useProject } from "../store";
 import { href, navigate, useRoute } from "../router";
-import { attachable, clampWidth, coarseTime, computerLabel, groupByItem, hueOf, loadSidebarWidth, saveSidebarWidth, type Computer, type ItemGroup } from "../lib/sidebar";
-import { defaultTeammate, isClosed, type WorkItem } from "../lib/workbench";
+import { attachable, clampWidth, coarseTime, computerLabel, groupByItem, hueOf, loadFolds, loadSidebarWidth, matchesFilter, saveFolds, saveSidebarWidth, shelve, stateOf, STATE_GLYPH, STATE_LABEL, threadLabel, type Computer, type ItemGroup, type ItemState } from "../lib/sidebar";
+import { defaultTeammate, isClosed, proposerName, type WorkItem } from "../lib/workbench";
 import { itemAsPrompt, splitAsk, type JoinTarget } from "../lib/start";
 import { describeError } from "../lib/errors";
 import { ItemStatusPill } from "./ItemStatus";
@@ -32,7 +40,8 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
   const { project, items, conversations, agents, sandboxes, createItem, startConversation, toast } = useProject();
   const route = useRoute();
   const [dialog, setDialog] = useState<{ join: JoinTarget | null; agentId: string | null; itemId: string | null } | null>(null);
-  const [showClosed, setShowClosed] = useState(false);
+  const [folds, setFolds] = useState<Set<ItemState>>(() => loadFolds());
+  const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [tick, setTick] = useState(0);
   const [width, setWidth] = useState(() => loadSidebarWidth());
@@ -69,8 +78,8 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
     void tick;
     return groupByItem(items, conversations, sandboxes);
   }, [items, conversations, sandboxes, tick]);
-  const openGroups = groups.filter((g) => !isClosed(g.item.status));
-  const closedGroups = groups.filter((g) => isClosed(g.item.status));
+  const shelves = useMemo(() => shelve(groups), [groups]);
+  const found = query.trim() ? groups.filter((g) => matchesFilter(g.item.title, query)) : null;
   const liveCount = groups.reduce((n, g) => n + g.computers.filter((c) => c.live).length, 0);
   const busyCount = groups.reduce((n, g) => n + g.computers.filter((c) => c.busy).length, 0);
   const currentId = route.page === "conversation" ? route.conversationId : null;
@@ -125,6 +134,15 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
     newInput.current?.focus();
   };
 
+  const fold = (state: ItemState) =>
+    setFolds((s) => {
+      const n = new Set(s);
+      if (n.has(state)) n.delete(state);
+      else n.add(state);
+      saveFolds(n);
+      return n;
+    });
+
   const toggle = (key: string, isOpen: boolean) =>
     setCollapsed((s) => {
       const n = new Set(s);
@@ -174,35 +192,58 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
             </button>
           )}
         </summary>
-        {comp.conversations.map((c) => (
-          <ConvLink key={c.id} c={c} current={c.id === currentId} onNavigate={onNavigate} />
+        {comp.conversations.map((c, i) => (
+          <ConvLink key={c.id} c={c} ordinal={comp.conversations.length - i} item={item} agentName={agent?.name ?? null} current={c.id === currentId} onNavigate={onNavigate} />
         ))}
       </details>
     );
   };
 
   const group = (g: ItemGroup<WorkItem>) => {
-    const isOpen = expanded === g.item.id;
+    const state = stateOf(g);
+    const hasComputers = g.computers.length > 0;
+    const isOpen = hasComputers && expanded === g.item.id;
     const up = g.computers.filter((c) => c.live).length;
     const convs = g.computers.reduce((n, c) => n + c.conversations.length, 0);
+    const why =
+      state === "waiting" && g.item.proposal
+        ? `${proposerName(g.item.proposal, agents)} proposes: ${g.item.proposal.status === "wont" ? "won't do" : "done"}`
+        : state === "waiting"
+          ? "new output since you looked"
+          : state === "working"
+            ? "a turn is running"
+            : state === "up"
+              ? `${up} computer${up === 1 ? "" : "s"} up, idle`
+              : state === "todo"
+                ? hasComputers
+                  ? "no computer up"
+                  : "nobody on it yet"
+                : g.item.status === "wont"
+                  ? "won't do"
+                  : "done";
     return (
-      <section key={g.item.id} className={`sidebar-item ${g.item.id === currentItem ? "current" : ""} ${isOpen ? "open" : ""}`}>
+      <section key={g.item.id} className={`sidebar-item ${state} ${g.item.id === currentItem ? "current" : ""} ${isOpen ? "open" : ""} ${hasComputers ? "" : "leaf"}`}>
         <div className="sidebar-item-head tree-row">
-          <button
-            type="button"
-            className="tree-twisty"
-            aria-expanded={isOpen}
-            aria-label={isOpen ? `Collapse ${g.item.title}` : `Expand ${g.item.title}`}
-            onClick={() => setExpanded(isOpen ? null : g.item.id)}
-          >
-            {isOpen ? "▾" : "▸"}
-          </button>
-          <a href={href.item(project.id, g.item.id)} className="sidebar-item-title ellipsis" onClick={onNavigate} title={g.item.title}>
+          <span className={`item-glyph ${state}`} title={why} aria-label={why}>
+            {state === "closed" && g.item.status === "wont" ? "–" : STATE_GLYPH[state]}
+          </span>
+          {hasComputers ? (
+            <button
+              type="button"
+              className="tree-twisty"
+              aria-expanded={isOpen}
+              aria-label={isOpen ? `Collapse ${g.item.title}` : `Expand ${g.item.title}`}
+              onClick={() => setExpanded(isOpen ? null : g.item.id)}
+            >
+              {isOpen ? "▾" : "▸"}
+            </button>
+          ) : (
+            <span className="tree-twisty" aria-hidden="true" />
+          )}
+          <a href={href.item(project.id, g.item.id)} className="sidebar-item-title" onClick={onNavigate} title={g.item.title}>
             {g.item.title}
           </a>
           {isClosed(g.item.status) && <ItemStatusPill status={g.item.status} tiny />}
-          {g.unread && <span className="unread-dot" />}
-          {g.busy && <span className="live-dot" title="a turn is running" />}
           {!isOpen && convs > 0 && (
             <span className="tree-count" title={`${convs} conversation${convs === 1 ? "" : "s"}${up ? `, ${up} computer${up === 1 ? "" : "s"} up` : ""}`}>
               {up ? `${up}/${convs}` : convs}
@@ -211,7 +252,7 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
           <button
             type="button"
             className="icon small-icon"
-            title={`New conversation on "${g.item.title}" — a new computer`}
+            title={hasComputers ? `New conversation on "${g.item.title}" — a new computer` : `Start someone on "${g.item.title}"`}
             disabled={agents.size === 0}
             onClick={() => {
               setExpanded(g.item.id);
@@ -221,8 +262,26 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
             +
           </button>
         </div>
-        {isOpen && (g.computers.length > 0 ? g.computers.map((comp) => computer(g.item, comp)) : <div className="tree-empty muted">no computer yet</div>)}
+        {isOpen && g.computers.map((comp) => computer(g.item, comp))}
       </section>
+    );
+  };
+
+  const shelf = (state: ItemState, gs: ItemGroup<WorkItem>[]) => {
+    const folded = folds.has(state);
+    const busy = gs.filter((g) => g.busy).length;
+    return (
+      <div key={state} className={`sidebar-shelf ${state} ${folded ? "folded" : ""}`}>
+        <button type="button" className="sidebar-group linklike-group" aria-expanded={!folded} onClick={() => fold(state)}>
+          <span>
+            {folded ? "▸" : "▾"} {STATE_LABEL[state]}
+          </span>
+          <span className="muted" title={`${gs.length} item${gs.length === 1 ? "" : "s"}${busy ? `, ${busy} with a turn running` : ""}`}>
+            {gs.length}
+          </span>
+        </button>
+        {!folded && gs.map(group)}
+      </div>
     );
   };
 
@@ -243,6 +302,26 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
           +
         </button>
       </div>
+      {items.length > 0 && (
+        <div className="explorer-filter">
+          <input
+            type="search"
+            className="explorer-filter-input"
+            value={query}
+            placeholder="filter work items"
+            aria-label="Filter work items by title"
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setQuery("");
+            }}
+          />
+          {found && (
+            <span className="muted small explorer-filter-count">
+              {found.length}/{groups.length}
+            </span>
+          )}
+        </div>
+      )}
       <div className="sidebar-list">
         {adding ? (
           <form className="new-item-form" onSubmit={addItem}>
@@ -292,15 +371,14 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
             , or open <a href={href.project(project.id)}>the project</a>.
           </div>
         )}
-        {openGroups.map(group)}
-        {closedGroups.length > 0 && (
-          <>
-            <button type="button" className="sidebar-group linklike-group" onClick={() => setShowClosed((v) => !v)}>
-              <span>{showClosed ? "▾" : "▸"} Closed</span>
-              <span className="muted">{closedGroups.length}</span>
-            </button>
-            {showClosed && closedGroups.map(group)}
-          </>
+        {found ? (
+          found.length > 0 ? (
+            found.map(group)
+          ) : (
+            <div className="muted small sidebar-empty">Nothing titled like that.</div>
+          )
+        ) : (
+          shelves.map((sh) => shelf(sh.state, sh.groups))
         )}
       </div>
       {dialog && <StartDialog itemId={dialog.itemId} join={dialog.join} initialAgentId={dialog.agentId} onClose={() => setDialog(null)} />}
@@ -309,17 +387,21 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
   );
 }
 
-function ConvLink({ c, current, onNavigate }: { c: Conversation; current: boolean; onNavigate: () => void }) {
+function ConvLink({ c, ordinal, item, agentName, current, onNavigate }: { c: Conversation; ordinal: number; item: WorkItem; agentName: string | null; current: boolean; onNavigate: () => void }) {
   const { project } = useProject();
   const title = c.title ?? (c.first_prompt ? c.first_prompt.replace(/\s+/g, " ").slice(0, 60) : null);
+  // The item and the teammate are the two rows above; this one says what is left.
+  const label = threadLabel(title, item.title, agentName);
+  const turns = c.turn_count ?? 0;
+  const fallback = title ? `#${ordinal} · ${turns} turn${turns === 1 ? "" : "s"}` : null;
   return (
     <a
       href={href.conversation(project.id, c.id)}
       className={`conv-link ${current ? "current" : ""} ${c.unread ? "unread" : ""} ${c.status === "terminated" ? "retired" : ""}`}
       onClick={onNavigate}
-      title={`${title ?? "(no prompt yet)"}\n${c.turn_count ?? 0} turn${c.turn_count === 1 ? "" : "s"} · ${c.status}`}
+      title={`${title ?? "(no prompt yet)"}\n${turns} turn${turns === 1 ? "" : "s"} · ${c.status}`}
     >
-      <span className="conv-link-title ellipsis">{title ?? <em className="muted">(no prompt yet)</em>}</span>
+      <span className={`conv-link-title ellipsis${label ? "" : " conv-link-ordinal"}`}>{label ?? fallback ?? <em className="muted">(no prompt yet)</em>}</span>
       {c.status === "running" || c.status === "pending" ? (
         <span className="live-dot" title={c.status} />
       ) : c.status === "failed" ? (

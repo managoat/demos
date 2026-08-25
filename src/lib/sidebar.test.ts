@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Conversation, SandboxRecord } from "../types";
-import { attachable, clampWidth, coarseTime, computerLabel, computersOf, groupByItem, hueOf, itemIdOf, relativeTime, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from "./sidebar";
+import { attachable, clampWidth, coarseTime, computerLabel, computersOf, groupByItem, hueOf, itemIdOf, matchesFilter, relativeTime, shelve, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, stateOf, threadLabel } from "./sidebar";
 
 function conv(over: Partial<Conversation>): Conversation {
   return { id: "c", status: "idle", runtime: "claude", inserted_at: "2026-08-24T00:00:00Z", ...over } as Conversation;
@@ -194,4 +194,44 @@ test("clampWidth keeps the explorer usable", () => {
   expect(clampWidth(9000)).toBe(SIDEBAR_MAX);
   expect(clampWidth(Number.NaN)).toBe(SIDEBAR_DEFAULT);
   expect(clampWidth(300.6)).toBe(301);
+});
+
+describe("shelves", () => {
+  const item = (id: string, over: Partial<{ status: string; proposal: unknown; createdAt: string }> = {}) => ({ id, title: id, status: "open", createdAt: "2026-08-24T00:00:00Z", ...over });
+  const sb = new Map<string, SandboxRecord>();
+
+  test("stateOf: proposal, then a running turn, then unread, then a live computer, then nothing", () => {
+    const at = (id: string, convs: Conversation[], over: Partial<{ status: string; proposal: unknown }> = {}) =>
+      stateOf(groupByItem([item(id, over)], convs.map((c) => ({ ...c, channel_id: `workbench:p/${id}` })), sb)[0]!);
+    expect(at("closed", [], { status: "done" })).toBe("closed");
+    expect(at("prop", [conv({ id: "r", sandbox_id: "s", status: "running" })], { proposal: { status: "wont" } })).toBe("waiting");
+    expect(at("busy", [conv({ id: "r", sandbox_id: "s", status: "running", unread: true })])).toBe("working");
+    expect(at("unread", [conv({ id: "r", sandbox_id: "s", status: "idle", unread: true })])).toBe("waiting");
+    expect(at("up", [conv({ id: "r", sandbox_id: "s", status: "idle" })])).toBe("up");
+    expect(at("gone", [conv({ id: "r", sandbox_id: "s", status: "terminated" })])).toBe("todo");
+    expect(at("bare", [])).toBe("todo");
+  });
+
+  test("shelve keeps shelf order, drops empty shelves, and keeps the row order inside", () => {
+    const groups = groupByItem([item("b", { status: "done" }), item("a"), item("c", { createdAt: "2026-08-25T00:00:00Z" })], [], sb);
+    const shelves = shelve(groups);
+    expect(shelves.map((s) => s.state)).toEqual(["todo", "closed"]);
+    expect(shelves[0]!.groups.map((g) => g.item.id)).toEqual(["c", "a"]);
+  });
+});
+
+test("matchesFilter: every word, any case, anywhere", () => {
+  expect(matchesFilter("Desktop notifications die with the tab", "  ")).toBe(true);
+  expect(matchesFilter("Desktop notifications die with the tab", "TAB desk")).toBe(true);
+  expect(matchesFilter("Desktop notifications die with the tab", "tab push")).toBe(false);
+});
+
+test("threadLabel: a started conversation repeats the item; anything else shows", () => {
+  expect(threadLabel("kai: fix the build", "fix the build", "kai")).toBeNull();
+  expect(threadLabel("kai: fix the bu…", "fix the build", "kai")).toBeNull();
+  expect(threadLabel("fix the build", "fix the build", null)).toBeNull();
+  expect(threadLabel("kai: the flaky one", "fix the build", "kai")).toBe("the flaky one");
+  expect(threadLabel("kai: fix the build, again", "fix the build", "kai")).toBe("fix the build, again");
+  expect(threadLabel("bo: fix the build", "fix the build", "kai")).toBe("bo: fix the build");
+  expect(threadLabel(null, "fix the build", "kai")).toBeNull();
 });
