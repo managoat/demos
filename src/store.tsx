@@ -10,8 +10,6 @@ import type { Settings } from "./lib/settings";
 
 export type EventHandler = (ev: UserEvent) => void;
 
-/** Statuses that let a tenant spend: the server's own list (ee/lib/fountain/billing.ex). */
-const ACTIVE_STATUSES = ["trialing", "active", "comped"];
 
 export interface Store {
   client: FountainClient;
@@ -21,7 +19,7 @@ export interface Store {
   error: string | null;
   /** Billing state, or null where the server has billing disabled (self-hosted). */
   billing: Billing | null;
-  /** False only when billing is on and the subscription has lapsed — prompts are refused. */
+  /** False only when credits are on and the balance is spent — prompts are refused with 402. */
   canPrompt: boolean;
   refresh: () => Promise<Conversation[] | null>;
   /** Events for one conversation, live. Returns the unsubscribe. */
@@ -163,9 +161,11 @@ export function StoreProvider({ settings, children }: { settings: Settings; chil
     };
   }, [client, refresh, scheduleRefresh]);
 
-  // Billing absent means the server does not gate on it; a status outside the
-  // active set means the account is read-only until it is resolved.
-  const canPrompt = billing === null || ACTIVE_STATUSES.includes(billing.status);
+  // The server's own gate (ee/lib/fountain/credits.ex check_balance/2): credits
+  // off → ok, comped → ok, otherwise the balance must be positive. Billing
+  // absent (404/403) means the server does not gate on it at all.
+  const canPrompt =
+    billing === null || billing.credits === null || billing.comped === true || billing.credits.balance_cents > 0;
 
   const value = useMemo<Store>(
     () => ({ client, conversations, agents, connected, error, billing, canPrompt, refresh, subscribe, toast }),

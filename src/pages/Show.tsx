@@ -359,9 +359,9 @@ export function ShowPage({ id }: { id: string }) {
 
       {!canPrompt ? (
         <div className="readonly-banner">
-          Read-only: your subscription is inactive, so you can view this conversation and stop running work but not send prompts.{" "}
+          Read-only: your credit balance is spent, so you can view this conversation and stop running work but not send prompts.{" "}
           <a href={`${client.baseUrl}/account/billing`} target="_blank" rel="noreferrer noopener">
-            Update billing ↗
+            Buy credits ↗
           </a>
         </div>
       ) : (

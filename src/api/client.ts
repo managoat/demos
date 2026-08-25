@@ -339,8 +339,8 @@ export function describeError(err: unknown): string {
         return "A turn is already running — wait for it, or interrupt.";
       case "provisioning":
         return "The conversation is still provisioning — try again shortly.";
-      case "subscription_required":
-        return "An active subscription is required to send a prompt.";
+      case "insufficient_credits":
+        return "Your credit balance is spent — buy credits to send a prompt.";
       case "sandbox_quota_exceeded":
         return err.message || "You are at your concurrent sandbox limit. Terminate a conversation before starting another.";
       case "conversation_terminated":

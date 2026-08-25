@@ -75,13 +75,27 @@ export interface Conversation {
   updated_at: string;
 }
 
-/** `GET /api/account/billing` — null when the server runs with billing disabled. */
+/**
+ * `GET /api/account/billing` — null when the server runs with billing disabled.
+ * Credits are the product (ADR 0031): there is no subscription status any more.
+ */
 export interface Billing {
-  status: string;
-  trial_ends_at: string | null;
-  current_period_end: string | null;
-  cancel_at_period_end: boolean;
+  /** True for an account an operator made free; it spends regardless of balance. */
+  comped: boolean | null;
   has_stripe_customer: boolean;
+  sandbox_cap: number | null;
+  /** Null when this deployment has credits off; nothing gates prompts then. */
+  credits: Credits | null;
+}
+
+export interface Credits {
+  /** May be negative: an in-flight turn that crosses zero finishes. */
+  balance_cents: number;
+  expiring_cents: number;
+  expires_at: string | null;
+  purchased_cents: number;
+  turn_hour_cents: number;
+  packs_cents: number[];
 }
 
 export interface Agent {
