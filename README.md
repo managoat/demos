@@ -176,10 +176,7 @@ a panel that lists what is plugged in is what made an already-crossed line
 visible. The proxy now replaces the values of every server's `env` and
 `headers` on the way out, for the owner as much as for a member, and keeps the
 names. The names are the question — what is this teammate plugged into — and
-the values are the answer to nobody's. The create-project form needs that same
-list before there is a project to ask through, so `GET /api/me/resources`
-carries the caller's own agents beside their environments and vaults — through
-the same function, so the rule is one rule and not one per route.
+the values are the answer to nobody's.
 
 Two more fields go the same way, for two different reasons, and the reasons are
 worth keeping apart. An inline skill's `content` is the whole SKILL.md body:
@@ -199,6 +196,16 @@ environments and vaults. The role in that rule is not a softening of the MCP
 rule's refusal to have one: a credential is a secret from everybody and the
 owner reading it back changes nothing, while a system prompt is the owner's own
 writing and her key would fetch it from Fountain anyway.
+
+Which leaves two rules that hold whoever is asking and one that does not, and
+that split is a function rather than a habit. The proxy is no longer the only
+way an agent leaves this server: the create-project form needs the same list
+before there is a project to ask through, so `GET /api/me/resources` carries
+the caller's own agents beside their environments and vaults. It went out under
+the MCP rule alone at first and shipped every skill body with it for a day —
+which is the argument for naming the roleless set (`agentForEveryone` in
+`server/proxy.ts`) and having both routes start from it. A rule spread across
+two call sites is a rule one of them can be missing.
 
 **What happened while you were away.** A work item opens on a digest of
 itself: turns finished, turns that failed, computers that went away, and —

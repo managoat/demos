@@ -14,7 +14,7 @@ import { authenticate, userClient, type AppContext } from "./context";
 import { randomToken, sha256 } from "./crypto";
 import { FountainClient, FountainHttpError } from "./fountain";
 import { HttpError, clearedSessionCookie, cookieValue, json, readJson, SESSION_COOKIE, sessionCookie, str } from "./http";
-import { withoutMcpSecrets } from "./proxy";
+import { agentForEveryone } from "./proxy";
 
 export function config(ctx: AppContext): Response {
   return json({ fountainUrl: ctx.config.fountainUrl });
@@ -61,10 +61,17 @@ export async function signOut(ctx: AppContext, req: Request): Promise<Response> 
  *
  * The agents are here for the same reason the other two are: the create-project
  * form asks who new work starts with, and until the project is made there is no
- * `/f/<project>/api/agents` to ask. They go out with every MCP server's `env`
- * and `headers` blanked, exactly as the proxy sends them — the caller's own key
- * would read the values from Fountain directly, so withholding them costs
- * nothing and keeps one rule rather than one per route.
+ * `/f/<project>/api/agents` to ask.
+ *
+ * They are shaped by `agentForEveryone` (`server/proxy.ts`) — the rules that
+ * hold whoever is asking: no MCP `env` or `headers` values, and no inline skill
+ * bodies. This is the caller's own key and their own account, so neither is a
+ * disclosure; both are still right here. The first because withholding a
+ * secret from the one person who could fetch it anyway costs nothing and keeps
+ * the rule roleless, and the second because a SKILL.md body has no reader on
+ * either route — this page renders a `<select>` of names — and the projects
+ * page loads on every visit. What *is* a role's business, the owner's `system`
+ * and `metadata`, stays: the caller is the owner of everything in this answer.
  */
 export async function myResources(ctx: AppContext, req: Request): Promise<Response> {
   const user = await authenticate(ctx, req);
@@ -76,5 +83,5 @@ export async function myResources(ctx: AppContext, req: Request): Promise<Respon
   const e = (await envs.json()) as { data?: unknown[] };
   const v = (await vaults.json()) as { data?: unknown[] };
   const a = (await agents.json()) as { data?: unknown[] };
-  return json({ data: { environments: e.data ?? [], vaults: v.data ?? [], agents: (a.data ?? []).map(withoutMcpSecrets) } });
+  return json({ data: { environments: e.data ?? [], vaults: v.data ?? [], agents: (a.data ?? []).map(agentForEveryone) } });
 }

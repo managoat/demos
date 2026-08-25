@@ -139,22 +139,41 @@ export async function handleProxy(ctx: AppContext, req: Request, projectId: stri
 const WITHHELD = "[withheld by the workbench]";
 
 /**
- * An agent as this reader may see it. Two rules, and they are answers to two
- * different questions, which is why one of them has a role in it and the other
- * does not.
+ * An agent shaped by the rules that have **no role in them** — what nobody
+ * gets out of this workbench, whoever is asking. Two questions, two answers:
  *
  *   *Is this a secret?* — `mcp_servers[*].env` and `.headers`. Nobody sees the
  *   values, owner included; see `withoutMcpSecrets`.
  *
- *   *Does this page need it?* — `skills[*].content`, the whole SKILL.md body of
+ *   *Does any page need it?* — `skills[*].content`, the whole SKILL.md body of
  *   every inline skill. Nothing renders it: the panel lists a skill by name
  *   (`skillsOf` in `src/lib/details.ts` reads `name`, `source` and `ref`), and
  *   this list is refetched on every project mount (`refreshResources`). A few
  *   kilobytes per skill per agent per page load, for a field with no reader, is
- *   not a payload the workbench should be moving. It goes for everyone. If the
- *   panel later wants to show a body — it is a fair thing to want — it should
- *   come back on a route of its own, asked for when a skill is expanded, and
- *   that route gets to decide who may read it on its own terms.
+ *   not a payload the workbench should be moving. If the panel later wants to
+ *   show a body — it is a fair thing to want — it should come back on a route
+ *   of its own, asked for when a skill is expanded, and that route gets to
+ *   decide who may read it on its own terms.
+ *
+ * This is a function of its own, and exported, because these two are not the
+ * proxy's to keep. `GET /api/me/resources` (`server/auth.ts`) is the second way
+ * out of Fountain's agent rendering — the create-project form needs the
+ * caller's own agents before there is a project to ask through — and it is the
+ * caller's own key, so `visibleAgent`'s role rule does not apply to it while
+ * both of these do. That route was written as `withoutMcpSecrets` alone and
+ * therefore shipped every skill body for a day: a rule spread over two call
+ * sites is a rule one of them can be missing. Naming the set is what makes a
+ * third route inherit it rather than reassemble it.
+ */
+export function agentForEveryone(agent: unknown): unknown {
+  const out = withoutMcpSecrets(agent);
+  if (!isRecord(out)) return out;
+  return { ...out, ...withoutSkillBodies(out.skills) };
+}
+
+/**
+ * An agent as *this reader* may see it: the rules above, plus the one that
+ * does turn on who is asking.
  *
  *   *Is this the owner's to hand out?* — `system` and `metadata`. A member is
  *   a member of one *project*, but this route is the owner's whole account:
@@ -167,19 +186,18 @@ const WITHHELD = "[withheld by the workbench]";
  *   prose. The owner sees their own account whole, exactly as the environments
  *   and vaults rule below already has it.
  *
- * The role in that last rule is deliberate and is not a softening of the MCP
- * rule's refusal to have one. A credential in `headers` is a secret from
- * everyone and the owner reading it back changes nothing; a system prompt is
- * the owner's own writing, and withholding it from the person who wrote it
- * would buy nothing they could not get from Fountain with their own key.
+ * The role here is deliberate and is not a softening of the other two rules'
+ * refusal to have one. A credential in `headers` is a secret from everyone and
+ * the owner reading it back changes nothing; a system prompt is the owner's own
+ * writing, and withholding it from the person who wrote it would buy nothing
+ * they could not get from Fountain with their own key.
  */
 function visibleAgent(agent: unknown, role: Role): unknown {
-  const out = withoutMcpSecrets(agent);
-  if (!isRecord(out)) return out;
-  const shaped: Record<string, unknown> = { ...out, ...withoutSkillBodies(out.skills) };
-  if (role === "owner") return shaped;
-  for (const field of ["system", "metadata"]) if (field in shaped) shaped[field] = WITHHELD;
-  return shaped;
+  const shaped = agentForEveryone(agent);
+  if (role === "owner" || !isRecord(shaped)) return shaped;
+  const out: Record<string, unknown> = { ...shaped };
+  for (const field of ["system", "metadata"]) if (field in out) out[field] = WITHHELD;
+  return out;
 }
 
 /**
@@ -217,10 +235,8 @@ function withoutSkillBodies(skills: unknown): { skills?: unknown } {
  * the rules in `visibleAgent` does have a role in it, for a reason said
  * there: it is answering a different question than this one.)
  *
- * Which is why it is exported: `GET /api/me/resources` (`server/auth.ts`)
- * hands the caller their own agents so the create-project form can offer a
- * default teammate, and that is a second route out of Fountain's agent
- * rendering. Nobody's browser needs the values, so neither route sends them.
+ * Every route that hands an agent out reaches this through `agentForEveryone`
+ * rather than calling it directly, so that "what nobody gets" stays one set.
  *
  * What this does **not** claim: a credential written into an `args` entry or
  * a query string on a `url` still passes, because those fields are the
@@ -228,7 +244,7 @@ function withoutSkillBodies(skills: unknown): { skills?: unknown } {
  * what is plugged in at all. The two fields cut here are the two that exist
  * to hold secrets; the rest is a config a reader has to be able to read.
  */
-export function withoutMcpSecrets(agent: unknown): unknown {
+function withoutMcpSecrets(agent: unknown): unknown {
   if (!isRecord(agent) || !isRecord(agent.mcp_servers)) return agent;
   const servers: Record<string, unknown> = {};
   for (const [name, entry] of Object.entries(agent.mcp_servers)) {

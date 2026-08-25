@@ -443,19 +443,39 @@ describe("projects and sharing", () => {
     for (const id of [created.id, without.id, blank.id]) await call("alice", "DELETE", `/api/projects/${id}`);
   });
 
-  test("your own resources include your agents, without their MCP credentials", async () => {
+  test("your own resources include your agents, under the rules that hold for everyone", async () => {
     // The create form has no project to ask `/f/<project>/api/agents` through,
-    // so the agents come out on this route — under the same rule as the proxy's.
+    // so the agents come out on this route — and it is the second route out of
+    // Fountain's agent rendering, so it gets the same roleless rules and not a
+    // subset of them.
     const res = await call("alice", "GET", "/api/me/resources");
     expect(res.status).toBe(200);
     const text = await res.text();
     expect(text).not.toContain("supersecret");
-    const r = JSON.parse(text).data as { environments: { id: string }[]; vaults: { id: string }[]; agents: { id: string; mcp_servers: Record<string, { env?: unknown; headers?: unknown }> }[] };
+    // Nor the SKILL.md body: nothing on either route renders one, and this
+    // page is a list of names that reloads on every visit.
+    expect(text).not.toContain("# House style");
+    type Skill = { name: string; content?: unknown; source?: string; ref?: string };
+    const r = JSON.parse(text).data as {
+      environments: { id: string }[];
+      vaults: { id: string }[];
+      agents: { id: string; mcp_servers: Record<string, { env?: unknown; headers?: unknown }>; skills: Skill[]; system?: unknown; metadata?: unknown }[];
+    };
     expect(r.environments.map((e) => e.id)).toEqual(["e1", "e2"]);
     expect(r.vaults.map((v) => v.id)).toEqual(["v1", "v2"]);
     expect(r.agents.map((a) => a.id)).toEqual(["a1"]);
-    expect(r.agents[0]!.mcp_servers.gh!.env).toEqual({ GITHUB_TOKEN: "[withheld by the workbench]", GH_HOST: "[withheld by the workbench]" });
-    expect(r.agents[0]!.mcp_servers.workbench!.headers).toEqual({ Authorization: "[withheld by the workbench]" });
+    const a = r.agents[0]!;
+    expect(a.mcp_servers.gh!.env).toEqual({ GITHUB_TOKEN: "[withheld by the workbench]", GH_HOST: "[withheld by the workbench]" });
+    expect(a.mcp_servers.workbench!.headers).toEqual({ Authorization: "[withheld by the workbench]" });
+    // The names stay, and so does what tells an inline skill from a github one.
+    expect(a.skills).toEqual([
+      { name: "house-style", content: "[withheld by the workbench]" },
+      { name: "deploy", source: "acme/skills", ref: "v2" },
+    ]);
+    // The third rule is the one with a role in it, and this is the owner
+    // asking about their own account: their prose is theirs.
+    expect(a.system).toBe("You are Coder. The staging password is hunter2.");
+    expect(a.metadata).toEqual({ team: "platform" });
   });
 
   test("a member creates items the owner sees", async () => {
