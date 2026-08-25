@@ -30,8 +30,15 @@ describe("the egress section", () => {
     expect(render({ rows: [] })).toContain("saw no requests");
   });
 
-  test("rows: per host, then each request, naming the credential and the refusal", () => {
-    const html = render({ rows, next: 1, stage: { keys: ["STRIPE_SECRET_KEY"], vault: "c-1", expiresAt: null, failed: null, done: true } });
+  test("rows: per host up front, the request list folded until asked for", () => {
+    const html = render({ rows, next: 1 });
+    expect(html).toContain("api.stripe.com:443");
+    expect(html).toContain("Show 2+ requests");
+    expect(html).not.toContain("310 ms");
+  });
+
+  test("rows opened: each request, naming the credential and the refusal", () => {
+    const html = render({ rows, next: 1, showRows: true, stage: { keys: ["STRIPE_SECRET_KEY"], vault: "c-1", expiresAt: null, failed: null, done: true } });
     expect(html).toContain("withheld from the sandbox");
     expect(html).toContain("STRIPE_SECRET_KEY");
     expect(html).toContain("api.stripe.com:443");

@@ -291,7 +291,7 @@ export function DetailsPanel({ conversationId, onClose }: { conversationId: stri
             <p className="details-note">{mcpCaveat}</p>
           </Section>
 
-          <EgressSection conversationId={conversation.id} lastActiveAt={conversation.last_active_at ?? conversation.updated_at} feed={stages} />
+          <EgressSection key={conversation.id} conversationId={conversation.id} lastActiveAt={conversation.last_active_at ?? conversation.updated_at} feed={stages} />
 
           <Section title="permissions">
             {!policyBites(policy) ? (

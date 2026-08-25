@@ -1062,6 +1062,7 @@ body.resizing-col { cursor: col-resize; user-select: none; }
 .egress-req .ellipsis { min-width: 0; }
 .egress-what { grid-column: 2; color: var(--text-2); }
 .egress-row.refused .egress-refused { color: var(--bad); }
+.egress-toggle { margin-top: 6px; }
 .egress-rows + button { margin-top: 6px; }
 
 /* the owner's brokering settings */

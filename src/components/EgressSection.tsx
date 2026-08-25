@@ -17,6 +17,12 @@
  * moves, not streamed — the broker's log is not on the SSE feed, and one
  * request per turn is the right price for something read on demand.
  *
+ * A refresh replaces the rows in place rather than clearing them first, so
+ * the section does not blank and repaint on every turn; the component is
+ * keyed by conversation in the panel, so switching threads starts it fresh.
+ * The per-host summary is always shown; the row-by-row log is folded away
+ * until asked for, since it is long and only sometimes the point.
+ *
  * `EgressList` is the pure half, rendered from a page; `EgressSection` owns
  * the fetching. Names of secrets appear here, never values: the broker's log
  * carries `credential_keys`, not what was in them.
@@ -58,11 +64,9 @@ export function EgressSection({ conversationId, lastActiveAt, feed }: { conversa
   );
 
   // First page on open, and again whenever the conversation moves: a turn
-  // that just ran is exactly the one whose requests you came to see.
+  // that just ran is exactly the one whose requests you came to see. The
+  // old page stays up until the new one lands.
   useEffect(() => {
-    setRows([]);
-    setNext(null);
-    setBrokered(null);
     void load(null);
   }, [load, lastActiveAt]);
 
@@ -78,6 +82,7 @@ export function EgressList({
   stage,
   onMore,
   onRetry,
+  showRows: initiallyShowRows = false,
 }: {
   rows: EgressEvent[];
   next: number | null;
@@ -87,8 +92,10 @@ export function EgressList({
   stage: BrokerStage | null;
   onMore: () => void;
   onRetry: () => void;
+  showRows?: boolean;
 }) {
   const hosts = summarize(rows);
+  const [showRows, setShowRows] = useState(initiallyShowRows);
   return (
     <section className="details-section">
       <h3>
@@ -135,38 +142,45 @@ export function EgressList({
               </li>
             ))}
           </ul>
-          <ul className="details-list egress-rows">
-            {rows.map((ev) => {
-              const outcome = outcomeOf(ev);
-              return (
-                <li key={ev.id} className={`egress-row ${outcome}`}>
-                  <span className="muted egress-at">{formatClock(ev.at)}</span>
-                  <span className="egress-req">
-                    <code>{ev.method}</code> <span className="ellipsis">{ev.host}{ev.path}</span>
-                  </span>
-                  <span className="egress-what">
-                    {outcome === "refused" ? (
-                      <span className="egress-refused" title={ev.error ?? undefined}>
-                        {ev.status ?? "—"} · {refusalOf(ev.error ?? "")}
+          <button type="button" className="secondary small egress-toggle" onClick={() => setShowRows((v) => !v)}>
+            {showRows ? "Hide requests" : `Show ${rows.length}${next !== null ? "+" : ""} requests`}
+          </button>
+          {showRows && (
+            <>
+              <ul className="details-list egress-rows">
+                {rows.map((ev) => {
+                  const outcome = outcomeOf(ev);
+                  return (
+                    <li key={ev.id} className={`egress-row ${outcome}`}>
+                      <span className="muted egress-at">{formatClock(ev.at)}</span>
+                      <span className="egress-req">
+                        <code>{ev.method}</code> <span className="ellipsis">{ev.host}{ev.path}</span>
                       </span>
-                    ) : (
-                      <>
-                        <span>{ev.status ?? "—"}</span>
-                        {ev.latency_ms != null && <span className="muted"> · {ev.latency_ms} ms</span>}
-                        {outcome === "brokered" ? <span className="egress-keys"> · {ev.credential_keys.length ? ev.credential_keys.join(", ") : ev.service}</span> : <span className="muted"> · no credential</span>}
-                      </>
-                    )}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-          {next !== null && (
-            <button type="button" className="secondary small" disabled={busy} onClick={onMore}>
-              {busy ? "Reading…" : "Earlier requests"}
-            </button>
+                      <span className="egress-what">
+                        {outcome === "refused" ? (
+                          <span className="egress-refused" title={ev.error ?? undefined}>
+                            {ev.status ?? "—"} · {refusalOf(ev.error ?? "")}
+                          </span>
+                        ) : (
+                          <>
+                            <span>{ev.status ?? "—"}</span>
+                            {ev.latency_ms != null && <span className="muted"> · {ev.latency_ms} ms</span>}
+                            {outcome === "brokered" ? <span className="egress-keys"> · {ev.credential_keys.length ? ev.credential_keys.join(", ") : ev.service}</span> : <span className="muted"> · no credential</span>}
+                          </>
+                        )}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+              {next !== null && (
+                <button type="button" className="secondary small" disabled={busy} onClick={onMore}>
+                  {busy ? "Reading…" : "Earlier requests"}
+                </button>
+              )}
+              <p className="details-note">Every request the sandbox made, as the broker saw it. A credential named here went on the wire at the broker; the sandbox never held it.</p>
+            </>
           )}
-          <p className="details-note">Every request the sandbox made, as the broker saw it. A credential named here went on the wire at the broker; the sandbox never held it.</p>
         </>
       )}
     </section>
