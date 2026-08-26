@@ -1,26 +1,35 @@
-# fountain-demos
+# fountain-demos (retired)
 
-The landing page at [demos.inevitable.fyi](https://demos.inevitable.fyi): an
-index of applications built on the
-[Fountain](https://github.com/BinaryBourbon/fountain) API — agents on
-sandboxes, driven over HTTP.
+**[demos.inevitable.fyi](https://demos.inevitable.fyi) now redirects to
+[managoat.com/built-with](https://managoat.com/built-with).**
 
-| App | For | Where |
-|---|---|---|
-| Briefing Room | everyone | [briefs.inevitable.fyi](https://briefs.inevitable.fyi) |
-| Table Talk | everyone | [tables.inevitable.fyi](https://tables.inevitable.fyi) |
-| Fountain Team | everyone | [github.com/jhgaylor/fountain-team](https://github.com/jhgaylor/fountain-team) |
-| Repo Sage | engineers | [reposage.inevitable.fyi](https://reposage.inevitable.fyi) |
-| Mission Control | engineers | [mission.inevitable.fyi](https://mission.inevitable.fyi) |
-| Watchtower | infrastructure | [watchtower.inevitable.fyi](https://watchtower.inevitable.fyi) |
-| Mend | infrastructure | [mend.inevitable.fyi](https://mend.inevitable.fyi) |
-| Rounds | infrastructure | [rounds.inevitable.fyi](https://rounds.inevitable.fyi) |
-| DNS Desk | infrastructure | [github.com/jhgaylor/dns-desk](https://github.com/jhgaylor/dns-desk) |
-| Arena | AI engineers | [arena.inevitable.fyi](https://arena.inevitable.fyi) |
+This repository served a hand-written landing page indexing the applications
+built on the [Fountain](https://github.com/BinaryBourbon/fountain) API. That
+index now lives on the product site itself, where the roster is a list in code
+(`FountainWeb.MarketingHTML.built_apps/0`) with tests that require every entry
+to name a reachable URL and a real repository.
 
-Static HTML in `site/`, served by nginx; built to
-`ghcr.io/jhgaylor/fountain-demos` by `.github/workflows/build.yml` and rolled
-out by Flux from `k8s/` (home-cloud).
+Keeping a second copy by hand did not work: this page ended three apps behind
+(Workbench, Reflex and Conversations were missing) and still told readers to
+point their client at `fountain.inevitable.fyi`, an address the server moved
+off of. One list, checked by a suite, beats two lists that disagree.
+
+## What is left here
+
+Only the Kubernetes manifests in `k8s/`, and they no longer run anything. The
+host keeps its DNS record and its certificate; a Traefik middleware answers
+every path with a 308 to the new page. There is no Deployment, no Service, no
+image and no build workflow.
+
+The page's source is in this repository's history, at the commit before this
+one.
+
+## Adding an app to the index
+
+Edit `built_apps/0` in
+[BinaryBourbon/fountain](https://github.com/BinaryBourbon/fountain)
+(`apps/fountain/lib/fountain_web/controllers/marketing_html.ex`). Nothing here
+needs to change, ever again.
 
 ## License
 
