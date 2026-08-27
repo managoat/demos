@@ -21,8 +21,8 @@ import { markedAs, parseItemStatus, type ItemStatus, type Proposal } from "../..
 import type { RetiredDto } from "./api";
 
 export { channelFor, channelIsItem, channelPrefix, conversationTitle, newId, parseChannel } from "../../shared/channel";
-export { isClosed, ITEM_STATUSES, statusLabel } from "../../shared/status";
-export type { ItemStatus, Proposal } from "../../shared/status";
+export { CLOSED_STATUSES, CLOSE_LABEL, isClosed, ITEM_STATUSES, statusLabel } from "../../shared/status";
+export type { ClosedStatus, ItemStatus, Proposal } from "../../shared/status";
 export type { ItemDto as WorkItem, ProjectDto as Project } from "./api";
 
 /**
@@ -36,8 +36,9 @@ export function proposerName(proposal: Proposal, agents: Map<string, { name: str
 }
 
 /**
- * What to say after an item was closed — done or won't do — and the server
- * retired its computers. Nothing to report when there was nothing running on it.
+ * What to say after the work on an item stopped — done, won't do or on ice —
+ * and the server retired its computers. Nothing to report when there was
+ * nothing running on it.
  */
 export function retiredMessage(r: RetiredDto, status: ItemStatus = "done"): { text: string; kind: "info" | "error" } | null {
   if (r.failed > 0 || r.error) {

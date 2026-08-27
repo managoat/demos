@@ -6,8 +6,8 @@
  * Pure functions; the component is components/Board.tsx.
  *
  * **The columns are derived, not a field.** An item carries one thing the
- * board could sort on — its status, and there are only three (shared/status.ts).
- * A three-column board is a list with gaps in it. So the open half is split by
+ * board could sort on — its status, and there are only four (shared/status.ts).
+ * A four-column board is a list with gaps in it. So the open half is split by
  * what the app already knows about the item from the conversation list and the
  * item's own proposal:
  *
@@ -16,6 +16,11 @@
  *   Needs you    open, and a teammate has proposed a verdict nobody answered
  *   Done         we did this
  *   Won't do     we decided not to do this
+ *   Icebox       we looked at it, and not now
+ *
+ * Icebox sits last because it is the one column nobody is asked to read: it
+ * is where work goes to stop being read, and the board is still the honest
+ * place to see how much of it there is.
  *
  * An item with a proposal *and* something running is in Needs you, because
  * that column is a queue of things that stop without a person, and the card
@@ -31,21 +36,27 @@
  * and spend the owner's money, and dragging one out of it would have to retire
  * one. So `dropOn` returns what a drag actually is:
  *
- *   → Done / Won't do        set that status. This closes the item, which
- *                            retires every conversation on it and takes its
+ *   → Done / Won't do        set that status. This stops the work, which
+ *      / Icebox              retires every conversation on it and takes its
  *                            computers down — so the caller confirms first,
  *                            exactly as the button does (components/ItemStatus.tsx).
- *   Done/Won't do → To do    reopen. It lands where its facts put it.
+ *                            Between those three it is a rename: the machines
+ *                            went the first time.
+ *   any of those → To do     reopen. It lands where its facts put it.
  *   Needs you → To do        dismiss the proposal — the Dismiss button, dragged.
  *      or In progress        Nothing is retired; the item stays open.
  *   anything else            refused, with the reason, rather than a card that
  *                            slides back with no explanation.
  */
-import { isClosed, type ItemStatus, type Proposal } from "../../shared/status";
+import { CLOSE_LABEL, isClosed, type ClosedStatus, type ItemStatus, type Proposal } from "../../shared/status";
 import { channelIsItem } from "../../shared/channel";
 import type { Conversation } from "../types";
 
-export type ColumnId = "todo" | "doing" | "waiting" | "done" | "wont";
+/**
+ * The closed columns are named for the status they write, so a drop onto one
+ * is the status itself and no table has to agree with another.
+ */
+export type ColumnId = "todo" | "doing" | "waiting" | ClosedStatus;
 
 export interface Column {
   id: ColumnId;
@@ -59,8 +70,9 @@ export const BOARD_COLUMNS: readonly Column[] = [
   { id: "todo", title: "To do", meaning: "Open, with nothing running on it." },
   { id: "doing", title: "In progress", meaning: "A conversation is still live on it." },
   { id: "waiting", title: "Needs you", meaning: "A teammate has proposed a verdict. Confirm it or dismiss it." },
-  { id: "done", title: "Done", meaning: "We did this. Its computers went when it closed." },
-  { id: "wont", title: "Won't do", meaning: "We decided not to do this. The same close, the other answer." },
+  { id: "done", title: CLOSE_LABEL.done, meaning: "We did this. Its computers went when it closed." },
+  { id: "wont", title: CLOSE_LABEL.wont, meaning: "We decided not to do this. The same close, the other answer." },
+  { id: "icebox", title: CLOSE_LABEL.icebox, meaning: "Looked at, and not now. Not done and not refused — reopening one is how it ends." },
 ];
 
 /** As much of a work item as the board reads. */
@@ -91,7 +103,7 @@ export interface Card<I extends BoardItem = BoardItem> {
 
 /** Which column an item belongs in, given what is running on it. */
 export function columnOf(item: BoardItem, live: number): ColumnId {
-  if (isClosed(item.status)) return item.status === "wont" ? "wont" : "done";
+  if (isClosed(item.status)) return item.status;
   if (item.proposal) return "waiting";
   return live > 0 ? "doing" : "todo";
 }
@@ -155,9 +167,10 @@ export type Drop =
 const REFUSALS: Record<ColumnId, string> = {
   todo: "Nothing takes an item out of In progress but its work ending — retire its conversations on the item, or close it.",
   doing: "In progress is not a field: an item is there while a conversation is live on it. Start a teammate on it and it moves itself.",
-  waiting: "Needs you is a teammate's verdict, not a state you can put an item in — it appears when one proposes done or won't do.",
+  waiting: "Needs you is a teammate's verdict, not a state you can put an item in — it appears when one proposes done, won't do or the icebox.",
   done: "",
   wont: "",
+  icebox: "",
 };
 
 /** Where a card lands once it is open again, or once its proposal is gone. */
@@ -176,13 +189,15 @@ function landingNote(card: Pick<Card, "live">, to: ColumnId, what: string): stri
 export function dropOn(card: Card, to: ColumnId): Drop {
   if (card.column === to) return { kind: "same" };
 
-  // Closing is the one move that works from anywhere, because it is the one
-  // move that is a field. It is also the expensive one: the caller confirms.
-  if (to === "done" || to === "wont") return { kind: "set", status: to };
+  // Stopping the work is the one move that works from anywhere, because it is
+  // the one move that is a field. It is also the expensive one: the caller
+  // confirms — unless the card is already in one of these columns, where the
+  // machines went the first time and this is only a change of answer.
+  if (isClosed(to)) return { kind: "set", status: to };
 
   // A closed card dragged back into the open half is Reopen. It brings
   // nothing back, so it lands wherever its (absent) conversations put it.
-  if (card.column === "done" || card.column === "wont") {
+  if (isClosed(card.column)) {
     if (to === "waiting") return { kind: "refused", reason: REFUSALS.waiting };
     return { kind: "set", status: "open", note: landingNote(card, to, "Reopened.") };
   }

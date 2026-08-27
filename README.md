@@ -365,26 +365,43 @@ running where nobody can see it — the retire happens first, and if Fountain
 refuses, the app says so rather than implying the computer went with the row.
 
 **Not everything gets done, and the list has to say so.** An item closes one
-of two ways: **done**, "we did this", or **won't do**, "we decided not to do
-this". A list that spells the second like the first cannot be read — "12
-done" means nothing if some of the twelve were abandoned — so the two are
-separate states (`shared/status.ts`), the project list counts them apart,
-and a closed item carries which one it was wherever it appears. Otherwise
-they are the same act: won't do ends the work, so it retires the item's
-conversations and takes its computers down exactly as done does, asks the
-same question first, and reopens the same way. Switching a closed item from
-one to the other costs nothing — the machines went when it was first closed.
+of three ways: **done**, "we did this", **won't do**, "we decided not to do
+this", or **icebox**, "we looked at it, and not now". A list that spells any
+of them like another cannot be read — "12 done" means nothing if some of the
+twelve were abandoned — so they are separate states (`shared/status.ts`), the
+project list counts them apart, and a closed item carries which one it was
+wherever it appears. Otherwise they are the same act: each ends the work, so
+each retires the item's conversations and takes its computers down exactly as
+done does, asks the same question first, and reopens the same way. Switching a
+closed item from one to another costs nothing — the machines went when it was
+first closed.
+
+**The icebox is for the item you keep reading and keep leaving.** It is real
+work, so `done` is a lie; nobody decided against it, so `won't do` is a verdict
+that was never reached; and left `open` it sits in the list for a year and
+takes the list's meaning with it. So there is a state for having looked: the
+row reads **on ice**, the project's fold counts it beside the other two, the
+board gives it a column of its own, and `list_work_items` filters on it — which
+is how an agent answers "is this already known about" without the item being
+open work. What it is *not* is the cheap door out. Parking an item retires its
+conversations and takes its computers down exactly as the other two do, and
+asks first when there is something to lose, because a machine kept up for work
+nobody is doing is the bill this app exists to keep off the owner. The
+difference is in what it says, not what it costs: on ice is the one closed
+state that expects to be reopened, and reopening it is how it ends rather than
+an admission that closing it was wrong.
 
 **The one who finds out is not the one who can close it.** An agent is usually
-what discovers an item should not be done: it reads the code, the premise is
-wrong, and the verdict is real work already done. It is also the one thing it
-cannot record — closing an item retires every conversation on it, its own
-included — so it used to end up as "we should not do this, because…" in the
-notes, sitting there until a person read it: prose nothing counts and nothing
-sorts, which is the problem `won't do` exists to fix, one level up. So a
-verdict is a state the item carries before anyone acts on it.
-`update_work_item` takes `propose: "done" | "wont"` (and `"none"` to withdraw
-one), the row reads **"Coder says: won't do"**, and a person answers it —
+what discovers an item should not be done — or should not be done *now*: it
+reads the code, the premise is wrong or the thing it depends on has not landed,
+and the verdict is real work already done. It is also the one thing it cannot
+record — closing an item retires every conversation on it, its own included —
+so it used to end up as "we should not do this, because…" in the notes, sitting
+there until a person read it: prose nothing counts and nothing sorts, which is
+the problem `won't do` and `icebox` exist to fix, one level up. So a verdict is
+a state the item carries before anyone acts on it. `update_work_item` takes
+`propose: "done" | "wont" | "icebox"` (and `"none"` to withdraw one), the row
+reads **"Coder says: won't do"**, and a person answers it —
 **Confirm**, which is the ordinary close and asks first when something is
 running, or **Dismiss**, which clears it and leaves the item open. Deciding
 the status either way settles the proposal, because the question has been
@@ -398,14 +415,16 @@ promise.
 **The board answers where the work stands.** The list says what is there;
 **Board**, the other half of the toggle on a project, says where each item has
 got to — one column per state, cards you can drag between them. The columns
-are the point, because an item carries only three statuses and a board with
-three columns is a list with gaps in it. So the open half is split by what the
+are the point, because an item carries only four statuses and a board with
+four columns is a list with gaps in it. So the open half is split by what the
 app already knows from the conversation list and the item's own proposal
 (`src/lib/board.ts`): **To do**, open with nothing running on it · **In
 progress**, a conversation still live · **Needs you**, a teammate has proposed
-a verdict nobody has answered · **Done** · **Won't do**. That third column is
-what the board is for: a proposal is a question standing on an item, and until
-now the only place it was counted was the row it was written on. To do holds
+a verdict nobody has answered · **Done** · **Won't do** · **Icebox**. That
+third column is what the board is for: a proposal is a question standing on an
+item, and until now the only place it was counted was the row it was written
+on. The last one is where work goes to stop being read, and the board is the
+honest place to see how much of it there is. To do holds
 two different things — never started, and started and stopped without anyone
 closing it — so each card says which, because its column cannot.
 
@@ -442,10 +461,11 @@ whose email has never signed in here is refused. Send
 `X-Fountain-Conversation-Id` as well and the session is pinned to that
 conversation's project — read off its `channel_id` — so a sandbox reaches only
 the work it is on and no tool has to be told which project it means. Closing
-an item — **done** or **won't do** — is deliberately not a tool: either
-retires the item's conversations and takes its computers down, quite possibly
-the caller's own. An agent that concludes an item should not be done proposes
-that (`propose`, above) and says why in the notes; a person confirms it.
+an item — **done**, **won't do** or **icebox** — is deliberately not a tool:
+every one of them retires the item's conversations and takes its computers
+down, quite possibly the caller's own. An agent that concludes an item should
+not be done, or not be done now, proposes that (`propose`, above) and says why
+in the notes; a person confirms it.
 
 **⌘K finds anything said in the project.** A workbench whose shape is many
 conversations needs one box that reaches across them, and this is it:
@@ -643,7 +663,7 @@ server/
 shared/
   channel.ts         workbench:<project>/<item> — read and written by both sides
   images.ts          an image on a prompt: the four media types, the 10 MB ceiling, the size worth re-encoding at
-  status.ts          a work item's state: open, done, won't do — and the verdict a teammate proposes
+  status.ts          a work item's state: open, done, won't do, on ice — and the verdict a teammate proposes
 src/
   App.tsx            sign-in gate, OAuth callback, route switch
   store.tsx          WorkbenchProvider (me, projects) and ProjectProvider (one project's Fountain view + stream)

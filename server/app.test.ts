@@ -518,7 +518,7 @@ describe("projects and sharing", () => {
     itemId = (await res.json()).data.id;
     const shown = (await (await call("alice", "GET", `/api/projects/${projectId}`)).json()).data;
     expect(shown.items.map((w: { id: string }) => w.id)).toEqual([itemId]);
-    expect(shown.project.counts).toEqual({ open: 1, done: 0, wont: 0 });
+    expect(shown.project.counts).toEqual({ open: 1, done: 0, wont: 0, icebox: 0 });
   });
 
   test("changes are pushed to the project's streams", async () => {
@@ -1106,12 +1106,14 @@ describe("closing an item retires its computers", () => {
   let doneItem = "";
   let otherItem = "";
   let wontItem = "";
+  let iceItem = "";
 
   beforeAll(async () => {
     const make = async (title: string) => (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title })).json()).data.id as string;
     doneItem = await make("ship it");
     otherItem = await make("still going");
     wontItem = await make("not worth it");
+    iceItem = await make("worth doing, but not this quarter");
     const conv = (id: string, channel: string | null, sandbox: string | null, status: string): FakeConv => ({
       id,
       channel_id: channel,
@@ -1131,6 +1133,7 @@ describe("closing an item retires its computers", () => {
       conv("x1", "workbench:otherproj/item9", "sbD", "running"), // another project
       conv("p1", "fountain:team", "sbE", "running"), // not the workbench's at all
       conv("w1", `workbench:${projectId}/${wontItem}/ffffffffffff`, "sbG", "running"), // the one we will decide against
+      conv("i1", `workbench:${projectId}/${iceItem}/gggggggggggg`, "sbH", "running"), // the one we will park
     ];
     terminated.length = 0;
   });
@@ -1166,9 +1169,20 @@ describe("closing an item retires its computers", () => {
     expect(terminated).toEqual(["w1"]);
   });
 
-  test("swapping one closed state for the other retires nothing — the computers already went", async () => {
+  test("on ice ends the work like the other two: a parked item does not keep a computer up", async () => {
     terminated.length = 0;
-    for (const status of ["done", "wont"]) {
+    const res = await call("bob", "PATCH", `/api/projects/${projectId}/items/${iceItem}`, { status: "icebox" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { status: string }; retired: unknown };
+    expect(body.data.status).toBe("icebox");
+    expect(body.retired).toEqual({ conversations: 1, computers: 1, failed: 0 });
+    expect(terminated).toEqual(["i1"]);
+  });
+
+  test("swapping one closed state for another retires nothing — the computers already went", async () => {
+    terminated.length = 0;
+    // Ends on wont, which is where the counts below expect to find it.
+    for (const status of ["done", "icebox", "wont"]) {
       const res = await call("bob", "PATCH", `/api/projects/${projectId}/items/${wontItem}`, { status });
       const body = (await res.json()) as { data: { status: string }; retired?: unknown };
       expect(body.data.status).toBe(status);
@@ -1206,11 +1220,13 @@ describe("closing an item retires its computers", () => {
     expect(body.retired.error).toContain("500");
   });
 
-  test("the counts tell the two apart", async () => {
-    // By now: doneItem was reopened, otherItem is done, wontItem is won't do.
+  test("the counts tell the three apart", async () => {
+    // By now: doneItem was reopened, otherItem is done, wontItem is won't do,
+    // iceItem is on ice. One number over all of them would say none of it.
     const { counts } = (await (await call("bob", "GET", `/api/projects/${projectId}`)).json()).data.project;
     expect(counts.done).toBe(1);
     expect(counts.wont).toBe(1);
+    expect(counts.icebox).toBe(1);
     expect(counts.open).toBeGreaterThan(0);
   });
 });
@@ -1850,8 +1866,9 @@ describe("the MCP server", () => {
     expect(db.getItem(itemId)!.title).toBe("fix foo properly");
     expect(db.getItem(itemId)!.notes).toBe("found it");
     // Closing retires the item's computers, so it stays a person's call in the
-    // workbench — an agent that concludes "we should not do this" proposes it.
-    for (const status of ["done", "wont"]) {
+    // workbench — an agent that concludes "we should not do this", or "not
+    // now", proposes it. On ice is no cheaper: it takes the machines too.
+    for (const status of ["done", "wont", "icebox"]) {
       const closed = await tool("key-bob", "update_work_item", { item: itemId, status });
       expect(closed.failed).toBe(true);
       expect(closed.text).toContain("`propose:");
@@ -1860,15 +1877,18 @@ describe("the MCP server", () => {
     expect(db.getItem(itemId)!.proposed_status).toBe("");
   });
 
-  test("work items can be listed by any of the three states", async () => {
+  test("work items can be listed by any of the four states", async () => {
     const listed = async (status?: string) =>
       ((await tool("key-bob", "list_work_items", { project: projectId, ...(status ? { status } : {}) })).value as { items: { id: string; status: string }[] }).items;
     expect((await listed("wont")).map((w) => w.status)).toEqual(["wont"]);
     expect((await listed("done")).map((w) => w.status)).toEqual(["done"]);
+    // Parked work an agent must be able to find on purpose: it is the answer
+    // to "is this already known about", and it is not in the open list.
+    expect((await listed("icebox")).map((w) => w.status)).toEqual(["icebox"]);
     expect((await listed("open")).every((w) => w.status === "open")).toBe(true);
     // Unfiltered is all of them, and a status nobody has is not a filter.
     const all = await listed();
-    expect(all.length).toBe((await listed("open")).length + 2);
+    expect(all.length).toBe((await listed("open")).length + 3);
     expect((await listed("abandoned")).length).toBe(all.length);
   });
 
@@ -1944,12 +1964,51 @@ describe("the MCP server", () => {
       expect(listed.find((w) => w.id === itemId)!.proposal!.status).toBe("wont");
     });
 
-    test("propose takes the two ways an item closes and nothing else", async () => {
-      const bad = await tool("key-alice", "update_work_item", { item: itemId, propose: "maybe" }, pin);
-      expect(bad.failed).toBe(true);
-      expect(bad.text).toContain("propose takes");
-      // Refused whole: the standing proposal is not clobbered by a bad argument.
-      expect(db.getItem(itemId)!.proposed_status).toBe("wont");
+    test("propose takes every way an item closes and nothing else", async () => {
+      for (const bad of ["maybe", "open", "on ice"]) {
+        const res = await tool("key-alice", "update_work_item", { item: itemId, propose: bad }, pin);
+        expect(res.failed).toBe(true);
+        expect(res.text).toContain("propose takes");
+        // Refused whole: the standing proposal is not clobbered by a bad argument.
+        expect(db.getItem(itemId)!.proposed_status).toBe("wont");
+      }
+      // The list the message offers is the list the tool takes.
+      const listed = (await tool("key-alice", "update_work_item", { item: itemId, propose: "maybe" }, pin)).text;
+      for (const s of ["done", "wont", "icebox"]) expect(listed).toContain(`"${s}"`);
+    });
+
+    // "This is real work, and not now" is a finding an agent reaches by
+    // reading, exactly like "the premise is wrong" — and until there was a
+    // state for it, it was prose in the notes that nothing counted.
+    test("an agent can propose the icebox, and it is still open work until a person agrees", async () => {
+      terminated.length = 0;
+      const parked = (await tool("key-alice", "update_work_item", { item: itemId, notes: "worth doing after the migration lands", propose: "icebox" }, pin)).value as {
+        item: { status: string; proposal: { status: string; agentId: string } | null };
+      };
+      expect(parked.item.proposal).toMatchObject({ status: "icebox", agentId: "a1" });
+      // Proposing parks nothing: the item is still open work, and the agent's
+      // own conversation — the one that reached the finding — is still up.
+      expect(parked.item.status).toBe("open");
+      expect(terminated).toEqual([]);
+      expect(convs["key-alice"]!.find((c) => c.id === "m1")!.status).toBe("running");
+      // Leave the fixture's verdict as the rest of this block expects it.
+      await tool("key-alice", "update_work_item", { item: itemId, propose: "wont" }, pin);
+    });
+
+    test("a person confirming the icebox settles the question, and a parked item has nothing left to propose", async () => {
+      const fresh = (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title: "rewrite the importer" })).json()).data.id as string;
+      await tool("key-bob", "update_work_item", { item: fresh, propose: "icebox" });
+
+      const confirmed = (await (await call("bob", "PATCH", `/api/projects/${projectId}/items/${fresh}`, { status: "icebox" })).json()) as {
+        data: { status: string; proposal: unknown };
+      };
+      expect(confirmed.data.status).toBe("icebox");
+      expect(confirmed.data.proposal).toBeNull();
+
+      // On ice is closed, whatever else it is: the question has been answered.
+      const again = await tool("key-bob", "update_work_item", { item: fresh, propose: "done" });
+      expect(again.failed).toBe(true);
+      expect(again.text).toContain("already closed (on ice)");
     });
 
     test("without a conversation the proposal names the account; a closed item has nothing left to propose", async () => {

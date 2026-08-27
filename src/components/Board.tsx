@@ -15,11 +15,12 @@
  * release is nothing.
  *
  * **A drag can take a computer down, so it asks first.** Dropping a card on
- * Done or Won't do closes the item, which retires every conversation on it —
- * the same loss the button warns about (ItemStatus.tsx), and easier to do by
- * accident with a pointer. So a close with something live on it stops on a
- * confirm bar naming the item and the cost, and the card does not move until
- * it is answered.
+ * Done, Won't do or Icebox closes the item, which retires every conversation
+ * on it — the same loss the button warns about (ItemStatus.tsx), and easier to
+ * do by accident with a pointer. Icebox is included on purpose: parking work
+ * is the cheapest-sounding of the three and costs exactly as much. So a close
+ * with something live on it stops on a confirm bar naming the item and the
+ * cost, and the card does not move until it is answered.
  *
  * Dragging is the shortcut, never the only way: every card carries the same
  * `CloseControls` the list rows do, so the board works from a keyboard and on

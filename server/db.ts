@@ -66,7 +66,7 @@ export interface ItemRow {
   status: ItemStatus;
   agent_ids: string; // JSON array
   created_at: string;
-  /** A verdict an agent proposed but nobody has acted on: '' | 'done' | 'wont' (shared/status.ts). */
+  /** A verdict an agent proposed but nobody has acted on: '' | 'done' | 'wont' | 'icebox' (shared/status.ts). */
   proposed_status: string;
   /** Who proposed it: the agent, when it came from inside a conversation, and the account whose key it was. */
   proposed_agent_id: string;
@@ -126,13 +126,13 @@ CREATE TABLE IF NOT EXISTS items (
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   notes TEXT NOT NULL DEFAULT '',
-  -- open | done | wont; free text, so a new state needs no migration and an
-  -- old row written by an older build still reads (shared/status.ts).
+  -- open | done | wont | icebox; free text, so a new state needs no migration
+  -- and an old row written by an older build still reads (shared/status.ts).
   status TEXT NOT NULL DEFAULT 'open',
   agent_ids TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL,
-  -- '' | done | wont: what an agent says should happen to this item, which is
-  -- not the same as it happening. Nothing is retired for a proposal.
+  -- '' | done | wont | icebox: what an agent says should happen to this item,
+  -- which is not the same as it happening. Nothing is retired for a proposal.
   proposed_status TEXT NOT NULL DEFAULT '',
   proposed_agent_id TEXT NOT NULL DEFAULT '',
   proposed_email TEXT NOT NULL DEFAULT '',

@@ -26,6 +26,10 @@ test("the open half is split by what is running, not by a field", () => {
   expect(columnOf(item({ id: "w" }), 2)).toBe("doing");
   expect(columnOf(item({ id: "w", status: "done" }), 0)).toBe("done");
   expect(columnOf(item({ id: "w", status: "wont" }), 0)).toBe("wont");
+  // On ice is a field like the other two, so it holds even with work running
+  // on it — which cannot outlast the drop, but the column does not decide that.
+  expect(columnOf(item({ id: "w", status: "icebox" }), 0)).toBe("icebox");
+  expect(columnOf(item({ id: "w", status: "icebox" }), 2)).toBe("icebox");
 });
 
 test("a proposal outranks the work still running under it", () => {
@@ -53,7 +57,7 @@ test("cards carry what the conversation list says about the item", () => {
 test("the board keeps empty columns and ranks cards on when they were made", () => {
   const items = [item({ id: "w1", createdAt: "2026-01-01T00:00:00Z" }), item({ id: "w2", createdAt: "2026-03-01T00:00:00Z" })];
   const board = boardOf(items, [], PROJECT);
-  expect(board.map((c) => c.column.id)).toEqual(["todo", "doing", "waiting", "done", "wont"]);
+  expect(board.map((c) => c.column.id)).toEqual(["todo", "doing", "waiting", "done", "wont", "icebox"]);
   expect(board[0]!.cards.map((c) => c.item.id)).toEqual(["w2", "w1"]);
   expect(board[1]!.cards).toEqual([]);
 });
@@ -63,6 +67,19 @@ test("closing works from any column, and is the same field the button writes", (
   expect(dropOn(card({ column: "doing", live: 2 }), "wont")).toEqual({ kind: "set", status: "wont" });
   expect(dropOn(card({ column: "waiting" }), "done")).toEqual({ kind: "set", status: "done" });
   expect(dropOn(card({ column: "done" }), "wont")).toEqual({ kind: "set", status: "wont" });
+});
+
+test("the icebox is a column you can drop onto from anywhere, and out of the same way", () => {
+  expect(dropOn(card({ column: "todo" }), "icebox")).toEqual({ kind: "set", status: "icebox" });
+  expect(dropOn(card({ column: "doing", live: 2 }), "icebox")).toEqual({ kind: "set", status: "icebox" });
+  // A verdict dropped in the icebox is answered by parking it, not dismissed.
+  expect(dropOn(card({ column: "waiting" }), "icebox")).toEqual({ kind: "set", status: "icebox" });
+  // Between the three closed columns it is a change of answer, nothing more.
+  expect(dropOn(card({ column: "icebox" }), "done")).toEqual({ kind: "set", status: "done" });
+  expect(dropOn(card({ column: "wont" }), "icebox")).toEqual({ kind: "set", status: "icebox" });
+  // And it comes back out to the open half like anything else that is closed.
+  expect(dropOn(card({ column: "icebox" }), "todo")).toEqual({ kind: "set", status: "open" });
+  expect(dropOn(card({ column: "icebox" }), "waiting")).toMatchObject({ kind: "refused" });
 });
 
 test("dragging a closed card back into the open half reopens it, and says where it landed", () => {
@@ -94,7 +111,7 @@ test("a column with no field behind it refuses, and names what would move the ca
 });
 
 test("a card dropped where it already is does nothing", () => {
-  for (const c of ["todo", "doing", "waiting", "done", "wont"] as const) {
+  for (const c of ["todo", "doing", "waiting", "done", "wont", "icebox"] as const) {
     expect(dropOn(card({ column: c }), c)).toEqual({ kind: "same" });
   }
 });

@@ -38,17 +38,41 @@ describe("an open item with a proposal on it", () => {
 });
 
 describe("an item nobody has proposed anything on", () => {
-  test("has the two ways of closing it and nothing else", () => {
+  test("has the three ways of stopping the work and nothing else", () => {
     const html = markup(<CloseControls status="open" live={0} onSet={() => {}} />);
     expect(html).toContain("Mark done");
     expect(html).toContain("Won&#x27;t do");
+    expect(html).toContain("Icebox");
     expect(html).not.toContain("says:");
     expect(html).not.toContain("Dismiss");
   });
 
-  test("a closed one is reopened or swapped over, with no proposal in the way", () => {
+  test("the icebox says what it is for, because nothing else on the row would", () => {
+    const html = markup(<CloseControls status="open" live={0} onSet={() => {}} />);
+    expect(html).toContain("Looked at, and not now");
+  });
+
+  test("parking a live item is the same loss as closing one, and asks the same way", () => {
+    // No cheap door out: on ice retires the conversations too, so the button
+    // is the two-step one whenever there is something to lose.
+    const html = markup(<CloseControls status="open" live={2} onSet={() => {}} />);
+    expect(html.match(/Retires 2 conversations/g)).toHaveLength(3);
+  });
+
+  test("a closed one is reopened or relabelled, with no proposal in the way", () => {
     const html = markup(<CloseControls status="wont" live={0} onSet={() => {}} />);
     expect(html).toContain("Reopen");
+    // The other two answers, one click each — the machines went the first time.
     expect(html).toContain("Done");
+    expect(html).toContain("Icebox");
+    expect(html).not.toContain("Won&#x27;t do");
+  });
+
+  test("an item on ice offers the two verdicts it is not, and the way back", () => {
+    const html = markup(<CloseControls status="icebox" live={0} onSet={() => {}} />);
+    expect(html).toContain("Reopen");
+    expect(html).toContain("Done");
+    expect(html).toContain("Won&#x27;t do");
+    expect(html).not.toContain("Icebox");
   });
 });

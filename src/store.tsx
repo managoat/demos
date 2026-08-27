@@ -490,7 +490,7 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
       // Deciding the status settles any proposal standing on the item, here as
       // on the server — the question has been answered, so it stops being asked.
       setItems((ws) => ws.map((w) => (w.id === id ? { ...w, ...patch, ...(patch.status === undefined ? {} : { proposal: null }) } : w)));
-      // Closing an item — done or won't do — retires its computers (server/projects.ts):
+      // Closing an item — done, won't do or on ice — retires its computers (server/projects.ts):
       // say what went, and show the conversations as retired without waiting for Fountain's notice.
       await run(async () => {
         const { retired } = await api.patchItem(projectId, id, patch);

@@ -24,7 +24,7 @@
 import type { Conversation, SandboxRecord } from "../types";
 import { parseChannel } from "../../shared/channel";
 import { computerKey } from "../../shared/computers";
-import { isClosed } from "../../shared/status";
+import { isClosed, type ClosedStatus } from "../../shared/status";
 
 export const LIVE_STATUSES = new Set<Conversation["status"]>(["pending", "running", "idle"]);
 export const ATTACHABLE = new Set<string>(["ready", "suspended"]);
@@ -273,6 +273,18 @@ export const STATE_GLYPH: Record<ItemState, string> = {
   up: "◐",
   todo: "○",
   closed: "✓",
+};
+
+/**
+ * The closed shelf holds three different endings and a tick is only one of
+ * them, so the gutter keeps them apart: done is finished, won't do is refused,
+ * on ice is the circle of `todo` gone hollow — work that is still work, just
+ * not now.
+ */
+export const CLOSED_GLYPH: Record<ClosedStatus, string> = {
+  done: "✓",
+  wont: "–",
+  icebox: "◌",
 };
 
 /**

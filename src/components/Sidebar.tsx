@@ -5,7 +5,7 @@
  * was started for; "+" on a live one opens another conversation with the
  * same teammate there, on that item, and "×" on a dead one takes it out of
  * the item for good — the same slot, for the opposite reason. Items with a live computer first,
- * closed items — done and won't do alike — folded away, each still saying
+ * closed items — done, won't do and on ice alike — folded away, each still saying
  * which of the two it was.
  *
  * The items sit on shelves by state — waiting on you, working, up, to do,
@@ -29,8 +29,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useProject } from "../store";
 import { href, navigate, useRoute } from "../router";
-import { attachable, clampWidth, coarseTime, computerLabel, groupByItem, hueOf, loadFolds, loadSidebarWidth, matchesFilter, saveFolds, saveSidebarWidth, shelve, stateOf, STATE_GLYPH, STATE_LABEL, threadLabel, type Computer, type ItemGroup, type ItemState } from "../lib/sidebar";
-import { defaultTeammate, isClosed, proposerName, type WorkItem } from "../lib/workbench";
+import { attachable, clampWidth, CLOSED_GLYPH, coarseTime, computerLabel, groupByItem, hueOf, loadFolds, loadSidebarWidth, matchesFilter, saveFolds, saveSidebarWidth, shelve, stateOf, STATE_GLYPH, STATE_LABEL, threadLabel, type Computer, type ItemGroup, type ItemState } from "../lib/sidebar";
+import { defaultTeammate, isClosed, proposerName, statusLabel, type WorkItem } from "../lib/workbench";
 import { itemAsPrompt, splitAsk, type JoinTarget } from "../lib/start";
 import { describeError } from "../lib/errors";
 import { ItemStatusPill } from "./ItemStatus";
@@ -232,7 +232,7 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
     const convs = g.computers.reduce((n, c) => n + c.conversations.length, 0);
     const why =
       state === "waiting" && g.item.proposal
-        ? `${proposerName(g.item.proposal, agents)} proposes: ${g.item.proposal.status === "wont" ? "won't do" : "done"}`
+        ? `${proposerName(g.item.proposal, agents)} proposes: ${statusLabel(g.item.proposal.status)}`
         : state === "waiting"
           ? "new output since you looked"
           : state === "working"
@@ -243,14 +243,12 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
                 ? hasComputers
                   ? "no computer up"
                   : "nobody on it yet"
-                : g.item.status === "wont"
-                  ? "won't do"
-                  : "done";
+                : statusLabel(g.item.status);
     return (
       <section key={g.item.id} className={`sidebar-item ${state} ${g.item.id === currentItem ? "current" : ""} ${isOpen ? "open" : ""} ${hasComputers ? "" : "leaf"}`}>
         <div className="sidebar-item-head tree-row">
           <span className={`item-glyph ${state}`} title={why} aria-label={why}>
-            {state === "closed" && g.item.status === "wont" ? "–" : STATE_GLYPH[state]}
+            {isClosed(g.item.status) ? CLOSED_GLYPH[g.item.status] : STATE_GLYPH[state]}
           </span>
           {hasComputers ? (
             <button

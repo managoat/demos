@@ -426,8 +426,9 @@ export async function patchItem(ctx: AppContext, req: Request, id: string, itemI
   if (p.status !== undefined || body.proposal === null) Object.assign(p, NO_PROPOSAL);
   ctx.db.updateItem(itemId, p);
   ctx.events.emit(id, { kind: "items" });
-  // Both ways of closing an item end the work, so both take its computers
-  // down; going from one closed state to the other has nothing left to retire.
+  // Every way of closing an item ends the work — on ice as much as done or
+  // won't do — so every one takes its computers down; going from one closed
+  // state to another has nothing left to retire.
   const closing = p.status !== undefined && isClosed(p.status) && !isClosed(cur.status);
   const item = itemDto(ctx.db.getItem(itemId)!, ctx.db.removedComputers(itemId));
   return json(closing ? { data: item, retired: await retire(ctx, project, itemId) } : { data: item });
@@ -533,8 +534,8 @@ export function byItem(rows: RemovedComputerRow[]): Map<string, RemovedComputerR
 }
 
 /**
- * An item's computers, once it is closed — done or won't do alike: the work
- * is over either way, so the machines go. With `keys`, just those computers:
+ * An item's computers, once it is closed — done, won't do or on ice alike:
+ * the work has stopped, so the machines go. With `keys`, just those computers:
  * what removing them from the item has to do first (`removeComputer`).
  *
  * Fountain has no "destroy this sandbox" — a sprite is torn down with the

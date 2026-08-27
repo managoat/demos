@@ -58,6 +58,14 @@ export function resetMcpCache(): void {
 
 // ── the tools ────────────────────────────────────────────────────────────
 
+/**
+ * `"done", "wont" or "icebox"` — what `propose` takes, as a sentence reads it,
+ * built from the list itself so a fourth verdict cannot leave prose behind.
+ */
+const PROPOSE_LIST = PROPOSABLE_STATUSES.map((s) => JSON.stringify(s))
+  .join(", ")
+  .replace(/, ([^,]*)$/, " or $1");
+
 const TOOLS = [
   {
     name: "list_projects",
@@ -79,7 +87,9 @@ const TOOLS = [
         status: {
           type: "string",
           enum: ITEM_STATUSES,
-          description: "Only items in this state: 'open' still to do, 'done' finished, 'wont' decided against",
+          description:
+            "Only items in this state: 'open' still to do, 'done' finished, 'wont' decided against, " +
+            "'icebox' looked at and parked — real work, but not now",
         },
       },
     },
@@ -105,8 +115,8 @@ const TOOLS = [
     name: "update_work_item",
     description:
       "Rewrite a work item's title or notes — sharpen a title, or write up what you found — and say what " +
-      "you think should happen to it with `propose`. Closing one outright is not here on purpose: done or " +
-      "won't do retires every conversation on the item and takes its computers down, quite possibly your " +
+      "you think should happen to it with `propose`. Closing one outright is not here on purpose: every way " +
+      "of closing retires every conversation on the item and takes its computers down, quite possibly your " +
       "own, so the last click stays a person's. A proposal is the verdict without the demolition: it shows " +
       "on the item as yours until a person confirms or dismisses it, and retires nothing.",
     inputSchema: {
@@ -119,9 +129,9 @@ const TOOLS = [
           type: "string",
           enum: [...PROPOSABLE_STATUSES, "none"],
           description:
-            "What you say should happen to this item: 'done' it is finished, 'wont' it should not be done — " +
-            "put why in the notes — or 'none' to withdraw a proposal you no longer stand behind. Nothing closes " +
-            "and no computer goes down; a person decides.",
+            "What you say should happen to this item: 'done' it is finished, 'wont' it should not be done, " +
+            "'icebox' it is worth doing but not now — put why in the notes — or 'none' to withdraw a proposal " +
+            "you no longer stand behind. Nothing closes and no computer goes down; a person decides.",
         },
       },
       required: ["item"],
@@ -303,7 +313,7 @@ function updateWorkItem(ctx: AppContext, caller: Caller, args: Record<string, un
   if (args.status !== undefined) {
     throw new ToolError(
       "setting `status` is not a tool: closing an item retires every conversation on it and takes its computers down, quite possibly this one. " +
-        'Pass `propose: "done"` or `propose: "wont"` to put your verdict on the item, and say why in the notes; a person confirms it.',
+        `Pass \`propose:\` with ${PROPOSE_LIST} to put your verdict on the item, and say why in the notes; a person confirms it.`,
     );
   }
 
@@ -343,7 +353,7 @@ function proposal(caller: Caller, item: ItemRow, arg: unknown): ItemPatch {
   const want = str(arg, 20).trim();
   if (want === "none") return { ...NO_PROPOSAL };
   if (!isProposedStatus(want)) {
-    throw new ToolError(`propose takes ${PROPOSABLE_STATUSES.map((s) => JSON.stringify(s)).join(" or ")}, or "none" to withdraw — not ${JSON.stringify(want)}`);
+    throw new ToolError(`propose takes ${PROPOSE_LIST}, or "none" to withdraw — not ${JSON.stringify(want)}`);
   }
   if (isClosed(item.status)) {
     throw new ToolError(`work item ${item.id} is already closed (${statusLabel(item.status)}), so there is nothing to propose; a person reopens it if that was wrong`);

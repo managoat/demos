@@ -13,7 +13,7 @@
  */
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useProject } from "../store";
-import { agentFits, channelIsItem, defaultTeammate, isClosed, proposerName } from "../lib/workbench";
+import { agentFits, channelIsItem, CLOSED_STATUSES, defaultTeammate, isClosed, proposerName, statusLabel } from "../lib/workbench";
 import { loadProjectView, saveProjectView, type ProjectView } from "../lib/board";
 import { itemAsPrompt } from "../lib/start";
 import { describeError } from "../lib/errors";
@@ -95,15 +95,14 @@ export function Project({ view: named }: { view: ProjectView | null }) {
     }
   }
 
-  // Both ways of closing an item fold away together, but which way is still
-  // on the row: "we did this" and "we decided not to" are not the same answer.
+  // Every way the work stops folds away together, but which way is still on
+  // the row, and the fold counts them apart: "we did this", "we decided not
+  // to" and "not now" are three different answers, and a single number over
+  // the fold would be the one thing this list must never say.
   const open = items.filter((w) => !isClosed(w.status));
   const closed = items.filter((w) => isClosed(w.status));
-  const closedLabel = [
-    [closed.filter((w) => w.status === "done").length, "done"],
-    [closed.filter((w) => w.status === "wont").length, "won't do"],
-  ]
-    .filter(([n]) => (n as number) > 0)
+  const closedLabel = CLOSED_STATUSES.map((s) => [closed.filter((w) => w.status === s).length, statusLabel(s)] as const)
+    .filter(([n]) => n > 0)
     .map(([n, what]) => `${n} ${what}`)
     .join(" · ");
   const envName = project.environmentId ? environments.get(project.environmentId)?.name ?? "?" : "each agent's own";
@@ -174,7 +173,7 @@ export function Project({ view: named }: { view: ProjectView | null }) {
                 className={`button ${view === v ? "on" : ""}`}
                 href={href.projectView(project.id, v)}
                 aria-current={view === v ? "true" : undefined}
-                title={v === "list" ? "Every item, open then closed" : "A column per state: to do, in progress, needs you, done, won't do"}
+                title={v === "list" ? "Every item, open then closed" : "A column per state: to do, in progress, needs you, done, won't do, icebox"}
               >
                 {v === "list" ? "List" : "Board"}
               </a>
