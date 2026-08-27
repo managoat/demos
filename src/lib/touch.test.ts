@@ -15,17 +15,26 @@ const css = await Bun.file(new URL("../styles.css", import.meta.url)).text();
 const html = await Bun.file(new URL("../../index.html", import.meta.url)).text();
 const shell = await Bun.file(new URL("../components/Shell.tsx", import.meta.url)).text();
 
-/** The body of the first `@media <query> { … }` whose query contains `needle`. */
+/**
+ * Every `@media <needle> { … }` body in the stylesheet, joined. All of them and
+ * not the first: the phone rules are written as several blocks by subject, and
+ * a floor that only holds in the block that happens to come first is not one.
+ */
 function block(needle: string): string {
-  const at = css.indexOf(`@media ${needle}`);
-  expect(at).toBeGreaterThan(-1);
-  const open = css.indexOf("{", at);
-  let depth = 0;
-  for (let i = open; i < css.length; i++) {
-    if (css[i] === "{") depth++;
-    else if (css[i] === "}" && --depth === 0) return css.slice(open + 1, i);
+  const bodies: string[] = [];
+  for (let at = css.indexOf(`@media ${needle}`); at !== -1; at = css.indexOf(`@media ${needle}`, at + 1)) {
+    const open = css.indexOf("{", at);
+    let depth = 0;
+    for (let i = open; i < css.length; i++) {
+      if (css[i] === "{") depth++;
+      else if (css[i] === "}" && --depth === 0) {
+        bodies.push(css.slice(open + 1, i));
+        break;
+      }
+    }
   }
-  throw new Error(`unterminated @media ${needle}`);
+  expect(bodies.length).toBeGreaterThan(0);
+  return bodies.join("\n");
 }
 
 /** Every `font-size: <n>px` in a chunk of CSS. */
@@ -62,6 +71,16 @@ describe("styles.css on a phone", () => {
     for (const sel of [".palette-input", ".find-input", ".explorer-filter-input", ".new-item-input", ".composer.term textarea"]) {
       expect(coarse).toContain(sel);
     }
+  });
+
+  // The board's cards are draggable and a phone cannot drag them, which is by
+  // design (Board.tsx: "dragging is the shortcut, never the only way"). That
+  // makes `button.small` the only way to close a work item on a phone — and it
+  // takes every computer on the item down with it. A 24px target is the wrong
+  // thing to make a thumb aim at for that.
+  test("gives the destructive small buttons a target a thumb can hit", () => {
+    const coarse = block("(pointer: coarse)");
+    expect(coarse).toMatch(/button\.small[^{]*\{[^}]*min-height:\s*3[6-9]px|button\.small[^{]*\{[^}]*min-height:\s*4\dpx/);
   });
 
   // These are not decorations: the "+"s are the only way to add a computer or

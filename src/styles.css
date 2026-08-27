@@ -305,7 +305,11 @@ label.check input { width: auto; }
 code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: var(--bg-2); padding: 1px 4px; border-radius: 4px; }
 
 /* shell */
-.app { display: flex; flex-direction: column; height: 100dvh; }
+/* `100dvh` unless something knows better. On iOS the soft keyboard leaves the
+   layout viewport — and so `dvh` — at full height and covers the composer with
+   the keys; `--app-height` is the visual viewport's answer, set only while
+   that is actually happening (src/lib/viewport.ts). */
+.app { display: flex; flex-direction: column; height: var(--app-height, 100dvh); }
 .topbar { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--bg-1); }
 .brand { font-weight: 700; text-decoration: none; color: var(--text); }
 .host { max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1231,6 +1235,11 @@ body.resizing-col { cursor: col-resize; user-select: none; }
   .theme-option, .feed-row, .palette-list li, .digest-ask { min-height: 36px; }
   .tab { height: 40px; }
   .seg button, .seg .button { padding: 8px 12px; }
+  /* `small` is a 24px button, and on the board and the item rows it is the
+     button that closes a work item and takes its computers down. That is the
+     wrong thing to make a thumb aim at — and it is the *only* way to do it on
+     a phone, where the drag it shortcuts does not happen. */
+  button.small, .button.small { min-height: 36px; padding: 6px 12px; }
   /* dragging a column edge is a mouse gesture; under a finger the strip only
      swallows taps meant for the drawer it sits on the edge of */
   .sidebar-resize, .details-resize { display: none; }
