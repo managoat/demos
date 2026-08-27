@@ -21,6 +21,7 @@ const item: WorkItem = {
   agentIds: [],
   createdAt: "2026-08-01T00:00:00Z",
   proposal: null,
+  removedComputers: [],
 };
 
 function card(over: Partial<Card<WorkItem>> = {}): Card<WorkItem> {

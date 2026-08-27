@@ -1215,6 +1215,145 @@ describe("closing an item retires its computers", () => {
   });
 });
 
+/**
+ * Terminating a computer and being finished with it are two different things,
+ * and only the first of them existed. These are the second.
+ */
+describe("removing a computer from a work item", () => {
+  let itemA = "";
+  let itemB = "";
+  const conv = (id: string, channel: string | null, sandbox: string | null, status: string, unread = false): FakeConv => ({
+    id,
+    channel_id: channel,
+    title: null,
+    agent_id: "a1",
+    environment_id: "e1",
+    vault_id: "v1",
+    sandbox_id: sandbox,
+    status,
+    inserted_at: "2026-08-23T00:00:00Z",
+    last_active_at: "2026-08-23T02:00:00Z",
+    unread,
+  });
+
+  beforeAll(async () => {
+    const make = async (title: string) => (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title })).json()).data.id as string;
+    itemA = await make("the week-long one");
+    itemB = await make("next door");
+    convs["key-alice"] = [
+      // Two conversations on one computer, both still live.
+      conv("r1", `workbench:${projectId}/${itemA}/aaaaaaaaaaaa`, "sbR", "idle"),
+      conv("r2", `workbench:${projectId}/${itemA}/bbbbbbbbbbbb`, "sbR", "running"),
+      // Another computer on the same item, already dead.
+      conv("r3", `workbench:${projectId}/${itemA}/cccccccccccc`, "sbS", "terminated"),
+      // One that never got a computer at all.
+      conv("r4", `workbench:${projectId}/${itemA}/dddddddddddd`, null, "failed"),
+      // Another item's computer, with something unread on it.
+      conv("r5", `workbench:${projectId}/${itemB}/eeeeeeeeeeee`, "sbT", "idle", true),
+    ];
+    hits["key-alice"] = [
+      { kind: "reply", conversation_id: "r1", agent_id: "a1", turn_id: "t-r1-1", turn_number: 1, snippet: "haystack — on the computer we will remove", ts: "2026-08-23T01:00:00Z" },
+      { kind: "reply", conversation_id: "r3", agent_id: "a1", turn_id: "t-r3-1", turn_number: 1, snippet: "haystack — on the one that stays", ts: "2026-08-23T01:00:00Z" },
+    ];
+    terminated.length = 0;
+  });
+
+  const listed = async (who = "bob") => ((await (await call(who, "GET", `/f/${projectId}/api/conversations`)).json()).data as { id: string }[]).map((c) => c.id);
+
+  test("a computer nobody can see must not still be running: removing retires it first", async () => {
+    const res = await call("bob", "POST", `/api/projects/${projectId}/items/${itemA}/computers`, { key: "sbR" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { removedComputers: { key: string; by: string; at: string }[] }; retired: unknown };
+    // r1 and r2 share sbR, and both were live: two conversations, one computer.
+    expect(body.retired).toEqual({ conversations: 2, computers: 1, failed: 0 });
+    expect([...terminated].sort()).toEqual(["r1", "r2"]);
+    expect(body.data.removedComputers).toHaveLength(1);
+    expect(body.data.removedComputers[0]).toMatchObject({ key: "sbR", by: "bob@example.com" });
+    expect(body.data.removedComputers[0]!.at).not.toBe("");
+  });
+
+  test("its conversations leave the project's listing, and nothing else does", async () => {
+    expect(await listed()).toEqual(["r3", "r4", "r5"]);
+    // The owner sees what the member sees: it is the project's tree, not one reader's filter.
+    expect(await listed("alice")).toEqual(["r3", "r4", "r5"]);
+  });
+
+  test("removed is not deleted: the conversation's own routes still answer, so its link still opens", async () => {
+    expect((await call("bob", "GET", `/f/${projectId}/api/conversations/r1`)).status).toBe(200);
+    expect((await call("bob", "GET", `/f/${projectId}/api/conversations/r1/turns`)).status).toBe(200);
+  });
+
+  test("the palette stops offering it; find-in-page inside it still works", async () => {
+    const body = (await (await call("bob", "GET", `/f/${projectId}/api/search?q=haystack`)).json()) as { data: FakeHit[] };
+    expect(body.data.map((h) => h.conversation_id)).toEqual(["r3"]);
+    // Named outright is find-in-page in an open thread: a link that still
+    // opens has to still be searchable from inside.
+    const inside = (await (await call("bob", "GET", `/f/${projectId}/api/search?q=haystack&conversation_id=r1`)).json()) as { data: FakeHit[] };
+    expect(inside.data.map((h) => h.conversation_id)).toEqual(["r1"]);
+  });
+
+  test("a removed computer cannot be joined, whatever the browser sends", async () => {
+    const res = await call("bob", "POST", `/f/${projectId}/api/conversations`, { agent_id: "a1", channel_id: `workbench:${projectId}/${itemA}`, sandbox_id: "sbR" });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("computer_removed");
+  });
+
+  test("a computer that never got a sandbox goes by the key the tree gave it", async () => {
+    terminated.length = 0;
+    const res = await call("bob", "POST", `/api/projects/${projectId}/items/${itemA}/computers`, { key: "conv:r4" });
+    expect(res.status).toBe(200);
+    // Failed is not retired: Fountain is asked to end it like any other, which
+    // is what closing an item does too. There is no computer to count, though.
+    expect((await res.json()).retired).toEqual({ conversations: 1, computers: 0, failed: 0 });
+    expect(terminated).toEqual(["r4"]);
+    expect(await listed()).toEqual(["r3", "r5"]);
+  });
+
+  test("a removal belongs to the item, not to the key", async () => {
+    const shown = (await (await call("bob", "GET", `/api/projects/${projectId}`)).json()).data.items as { id: string; removedComputers: { key: string }[] }[];
+    expect(shown.find((w) => w.id === itemA)!.removedComputers.map((r) => r.key).sort()).toEqual(["conv:r4", "sbR"]);
+    expect(shown.find((w) => w.id === itemB)!.removedComputers).toEqual([]);
+    // So the same key under another item removes nothing of that item's.
+    expect((await call("bob", "POST", `/api/projects/${projectId}/items/${itemB}/computers`, { key: "sbR" })).status).toBe(200);
+    expect(await listed()).toEqual(["r3", "r5"]);
+    await call("bob", "DELETE", `/api/projects/${projectId}/items/${itemB}/computers/sbR`);
+  });
+
+  test("a computer taken out of an item cannot ring the bell from outside it", async () => {
+    const feed = async () => ((await (await call("bob", "GET", "/api/projects/activity")).json()).data.feed as { conversationId: string }[]).map((f) => f.conversationId);
+    expect(await feed()).toContain("r5");
+    await call("bob", "POST", `/api/projects/${projectId}/items/${itemB}/computers`, { key: "sbT" });
+    expect(await feed()).not.toContain("r5");
+    await call("bob", "DELETE", `/api/projects/${projectId}/items/${itemB}/computers/sbT`);
+  });
+
+  test("putting one back is the whole of the undo: nothing was destroyed", async () => {
+    const res = await call("bob", "DELETE", `/api/projects/${projectId}/items/${itemA}/computers/sbR`);
+    expect(res.status).toBe(200);
+    expect(((await res.json()).data.removedComputers as { key: string }[]).map((r) => r.key)).toEqual(["conv:r4"]);
+    // Back in the tree — as what they now are, which is retired.
+    expect(await listed()).toEqual(["r1", "r2", "r3", "r5"]);
+    const body = (await (await call("bob", "GET", `/f/${projectId}/api/search?q=haystack`)).json()) as { data: FakeHit[] };
+    expect(body.data.map((h) => h.conversation_id).sort()).toEqual(["r1", "r3"]);
+  });
+
+  test("a key must be named, the item must be this project's, and a stranger gets nothing", async () => {
+    expect((await call("bob", "POST", `/api/projects/${projectId}/items/${itemA}/computers`, {})).status).toBe(422);
+    expect((await call("bob", "POST", `/api/projects/${projectId}/items/${itemA}/computers`, { key: "   " })).status).toBe(422);
+    expect((await call("bob", "POST", `/api/projects/${projectId}/items/nope/computers`, { key: "sbR" })).status).toBe(404);
+    expect((await call("carol", "POST", `/api/projects/${projectId}/items/${itemA}/computers`, { key: "sbR" })).status).toBe(404);
+    expect((await call("carol", "DELETE", `/api/projects/${projectId}/items/${itemA}/computers/sbR`)).status).toBe(404);
+    expect((await call(null, "POST", `/api/projects/${projectId}/items/${itemA}/computers`, { key: "sbR" })).status).toBe(401);
+  });
+
+  test("deleting the work item takes its removals with it", async () => {
+    await call("bob", "POST", `/api/projects/${projectId}/items/${itemA}/computers`, { key: "sbR" });
+    expect(db.removedComputers(itemA)).toHaveLength(2);
+    await call("bob", "DELETE", `/api/projects/${projectId}/items/${itemA}`);
+    expect(db.removedComputers(itemA)).toEqual([]);
+  });
+});
+
 describe("recovery", () => {
   test("recover rebuilds projects from the caller's own conversations", async () => {
     convs["key-bob"] = [
@@ -1686,6 +1825,21 @@ describe("the MCP server", () => {
     const all = await listed();
     expect(all.length).toBe((await listed("open")).length + 2);
     expect((await listed("abandoned")).length).toBe(all.length);
+  });
+
+  test("which computers a person removed is not the agent's business", async () => {
+    // The tree is the workbench's view of the work, not the work. An
+    // always-empty list would be a claim; there is no list at all.
+    const item = (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title: "for the agent" })).json()).data.id as string;
+    await call("bob", "POST", `/api/projects/${projectId}/items/${item}/computers`, { key: "sbGone" });
+    expect(db.removedComputers(item)).toHaveLength(1);
+    const listing = await tool("key-alice", "list_work_items", { project: projectId });
+    expect(listing.text).not.toContain("removedComputers");
+    expect(listing.text).not.toContain("sbGone");
+    const made = await tool("key-alice", "create_work_item", { project: projectId, title: "one more" });
+    expect(made.text).not.toContain("removedComputers");
+    const changed = await tool("key-alice", "update_work_item", { item, notes: "x" });
+    expect(changed.text).not.toContain("removedComputers");
   });
 
   test("the conversation a sandbox names pins it to that project", async () => {

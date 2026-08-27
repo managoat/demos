@@ -7,7 +7,7 @@ import { describeHits, findIsOurs, matchConversations, searchMessages, threadHit
 const conv = (id: string, title: string, itemId: string, status = "idle", lastActive = "2026-08-23T00:00:00Z") =>
   ({ id, title, channel_id: `workbench:p1/${itemId}/aaaaaaaaaaaa`, agent_id: "a1", status, last_active_at: lastActive }) as unknown as Conversation;
 
-const item = (id: string, title: string) => ({ id, projectId: "p1", title, notes: "", status: "open", agentIds: [], createdAt: "", proposal: null }) as ItemDto;
+const item = (id: string, title: string) => ({ id, projectId: "p1", title, notes: "", status: "open", agentIds: [], createdAt: "", proposal: null, removedComputers: [] }) as ItemDto;
 
 const ctx: Context = {
   projectId: "p1",

@@ -23,13 +23,14 @@
  */
 import type { Conversation, SandboxRecord } from "../types";
 import { parseChannel } from "../../shared/channel";
+import { computerKey } from "../../shared/computers";
 import { isClosed } from "../../shared/status";
 
 export const LIVE_STATUSES = new Set<Conversation["status"]>(["pending", "running", "idle"]);
 export const ATTACHABLE = new Set<string>(["ready", "suspended"]);
 
 export interface Computer {
-  /** The sandbox id, or `conv:<id>` for a conversation that never got one. */
+  /** The sandbox id, or `conv:<id>` for a conversation that never got one (shared/computers.ts). */
   key: string;
   sandboxId: string | null;
   agentId: string | null;
@@ -66,7 +67,7 @@ export function byStart(convs: Conversation[]): Conversation[] {
 export function computersOf(convs: Conversation[], sandboxes: ReadonlyMap<string, SandboxRecord>): Computer[] {
   const byKey = new Map<string, Computer>();
   for (const c of byStart(convs)) {
-    const key = c.sandbox_id ?? `conv:${c.id}`;
+    const key = computerKey(c);
     let comp = byKey.get(key);
     if (!comp) {
       comp = {

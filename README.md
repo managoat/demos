@@ -344,6 +344,22 @@ bill for them do not outlive it. The button asks first when there is
 something to lose, and the app says what actually went. Reopening an item
 brings nothing back: it is new conversations from there.
 
+**Retiring a computer is not being finished with it.** Fountain keeps a
+terminated conversation for good — the transcript is the record of what was
+done, and the bill is the owner's — so an item worked on all week ends up a
+column of dead machines with the live one somewhere in it, and nothing in the
+app could say "this one is over". **Remove**, on a computer's row on the work
+item, is the other half: it retires whatever is still running on that machine
+and takes it out of the item — out of the explorer, out of the palette, out
+of the feed. Removing is not deleting, and the app never pretends otherwise:
+the conversations stay on Fountain, a link straight to one still opens (and
+⌘F still searches inside it), `/api/me/cost` still counts every token they
+spent, and the item's own **"N computers removed"** fold puts any of them
+back. It is the project's tree, not one reader's: a member removes, and
+everybody in the project sees it gone. What it will not do is leave a machine
+running where nobody can see it — the retire happens first, and if Fountain
+refuses, the app says so rather than implying the computer went with the row.
+
 **Not everything gets done, and the list has to say so.** An item closes one
 of two ways: **done**, "we did this", or **won't do**, "we decided not to do
 this". A list that spells the second like the first cannot be read — "12

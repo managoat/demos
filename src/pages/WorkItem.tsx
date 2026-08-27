@@ -9,6 +9,14 @@
  * over MCP (`list_work_items`) as much as a person here — so they are
  * markdown on the read path: a checklist, a repro block, a link to the PR.
  * The editor stays a textarea, and saves on a pause, not on a keystroke.
+ *
+ * **Retiring a computer is not finishing with it.** Fountain keeps a
+ * terminated conversation for good, so an item worked on all week ends up a
+ * column of dead machines with the live one somewhere in it. "Remove" is the
+ * other half: it retires whatever is still running on that computer and takes
+ * it out of the item — here, in the explorer, in the palette, in the feed.
+ * Nothing is deleted on Fountain, so it is a fold at the bottom of the page
+ * away from being put back, and the bill still counts every token it spent.
  */
 import { useMemo, useState } from "react";
 import { useProject } from "../store";
@@ -27,7 +35,8 @@ import { ItemDigest } from "../components/ItemDigest";
 import { shortId } from "../lib/format";
 
 export function WorkItem({ itemId }: { itemId: string }) {
-  const { project, items, conversations, agents, sandboxes, environments, vaults, fountain, toast, refresh, updateItem, addTeammate, removeTeammate } = useProject();
+  const { project, items, conversations, agents, sandboxes, environments, vaults, fountain, toast, refresh, updateItem, addTeammate, removeTeammate, removeComputer, restoreComputer } =
+    useProject();
   const item = items.find((w) => w.id === itemId);
   const [dialog, setDialog] = useState<{ agentId: string | null } | null>(null);
   const [editing, setEditing] = useState(false);
@@ -199,6 +208,16 @@ export function WorkItem({ itemId }: { itemId: string }) {
                   {comp.busy ? " · working" : ""}
                 </div>
               </div>
+              <TwoStep
+                label="Remove"
+                className="danger small"
+                title={
+                  comp.live
+                    ? `Retire this computer and take it out of "${item.title}". Its conversations stay on Fountain; put it back below.`
+                    : `Take this computer out of "${item.title}". Its conversations stay on Fountain; put it back below.`
+                }
+                onConfirm={() => void removeComputer(item.id, comp.key)}
+              />
             </div>
             <ul className="conv-list flat">
               {comp.conversations.map((c) => (
@@ -232,6 +251,33 @@ export function WorkItem({ itemId }: { itemId: string }) {
           </div>
         );
       })}
+
+      {item.removedComputers.length > 0 && (
+        <details className="removed-computers">
+          <summary>
+            {item.removedComputers.length} computer{item.removedComputers.length === 1 ? "" : "s"} removed from this item
+          </summary>
+          <p className="muted small">
+            Out of this item, not gone: their conversations are still on {project.ownerEmail}'s Fountain, and what they spent is still on the bill.
+          </p>
+          <ul className="member-list">
+            {item.removedComputers.map((r) => (
+              <li key={r.key} className="member-row">
+                <span className="computer-icon">🖥</span>
+                <div className="min0 grow">
+                  <div className="strong ellipsis">{r.key.startsWith("conv:") ? "a computer that never started" : computerLabel({ sandbox: sandboxes.get(r.key) ?? null, sandboxId: r.key })}</div>
+                  <div className="muted small ellipsis">
+                    removed by {r.by} · {relativeTime(r.at)}
+                  </div>
+                </div>
+                <button className="small" title="Show this computer on the item again" onClick={() => void restoreComputer(item.id, r.key)}>
+                  Put back
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       {dialog && <StartDialog itemId={item.id} initialAgentId={dialog.agentId} onClose={() => setDialog(null)} />}
     </div>

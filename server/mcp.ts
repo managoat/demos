@@ -39,7 +39,7 @@ import { sha256 } from "./crypto";
 import { NO_PROPOSAL, type ItemPatch, type ItemRow, type ProjectRow, type Role, type UserRow } from "./db";
 import { FountainClient, FountainHttpError } from "./fountain";
 import { HttpError, json, readJson, str } from "./http";
-import { itemDto, newItemRow, proposalFields } from "./projects";
+import { itemDto, newItemRow, proposalFields, type ItemDto } from "./projects";
 
 const PROTOCOL_VERSION = "2025-06-18";
 const SERVER_INFO = { name: "fountain-workbench", version: "1" };
@@ -258,12 +258,23 @@ function listProjects(ctx: AppContext, caller: Caller): unknown {
   }));
 }
 
+/**
+ * The item as a tool answers it. Which computers a person has taken out of
+ * the item's tree is the workbench's view of the work, not the work: an agent
+ * reading the briefing has no use for it, and an always-empty list would be a
+ * claim rather than an omission.
+ */
+function itemForAgent(w: Parameters<typeof itemDto>[0]): Omit<ItemDto, "removedComputers"> {
+  const { removedComputers: _removed, ...rest } = itemDto(w);
+  return rest;
+}
+
 function listWorkItems(ctx: AppContext, caller: Caller, args: Record<string, unknown>): unknown {
   const project = resolveProject(ctx, caller, args.project);
   const status = isItemStatus(args.status) ? args.status : null;
   const items = ctx.db
     .items(project.id)
-    .map(itemDto)
+    .map(itemForAgent)
     .filter((w) => !status || w.status === status)
     .map((w) => (caller.pinned?.itemId === w.id ? { ...w, current: true } : w));
   return { project: { id: project.id, name: project.name }, items };
@@ -278,7 +289,7 @@ function createWorkItem(ctx: AppContext, caller: Caller, args: Record<string, un
   return {
     created: true,
     project: { id: project.id, name: project.name },
-    item: itemDto(row),
+    item: itemForAgent(row),
     hint: "It is in the project's list now. Nobody is on it: a teammate is assigned by starting a conversation on it from the workbench.",
   };
 }
@@ -308,7 +319,7 @@ function updateWorkItem(ctx: AppContext, caller: Caller, args: Record<string, un
 
   ctx.db.updateItem(item.id, patch);
   ctx.events.emit(project.id, { kind: "items" });
-  const updated = itemDto(ctx.db.getItem(item.id)!);
+  const updated = itemForAgent(ctx.db.getItem(item.id)!);
   return {
     updated: true,
     project: { id: project.id, name: project.name },

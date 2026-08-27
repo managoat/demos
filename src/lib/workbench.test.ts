@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { agentFits, defaultTeammate, normalizeLegacy, retiredMessage } from "./workbench";
+import { agentFits, defaultTeammate, normalizeLegacy, removedMessage, retiredMessage } from "./workbench";
 
 describe("agentFits", () => {
   const project = { environmentId: "e1", vaultId: "v1" };
@@ -43,6 +43,25 @@ describe("retiredMessage", () => {
     );
     // What actually went is the same either way.
     expect(retiredMessage({ conversations: 2, computers: 1, failed: 0 }, "wont")).toEqual({ text: "Retired 2 conversations on 1 computer.", kind: "info" });
+  });
+});
+
+describe("removedMessage", () => {
+  test("a computer that was already down goes quietly — the row leaving says it", () => {
+    expect(removedMessage({ conversations: 0, computers: 0, failed: 0 })).toBeNull();
+  });
+  test("one that was still running says what it cost to take out", () => {
+    expect(removedMessage({ conversations: 2, computers: 1, failed: 0 })).toEqual({ text: "Removed, and retired 2 conversations on it.", kind: "info" });
+  });
+  test("the row left the item and the machine did not: the one outcome worth hearing about", () => {
+    expect(removedMessage({ conversations: 0, computers: 0, failed: 1, error: "Fountain answered 500." })).toEqual({
+      text: "Removed, but 1 conversation would not retire, so it may still be running: Fountain answered 500.",
+      kind: "error",
+    });
+    expect(removedMessage({ conversations: 0, computers: 0, failed: 0, error: "Fountain answered 401." })).toEqual({
+      text: "Removed, but it may still be running: Fountain answered 401.",
+      kind: "error",
+    });
   });
 });
 

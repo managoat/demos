@@ -11,6 +11,7 @@ const item: ItemDto = {
   agentIds: [],
   createdAt: "2026-08-24T00:00:00Z",
   proposal: null,
+  removedComputers: [],
 };
 
 const agent = { id: "a1", name: "Coder" };

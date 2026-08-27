@@ -571,6 +571,15 @@ button.attach:hover:not(:disabled) { background: var(--bg-2); }
 .conv-list.flat li.current { background: color-mix(in srgb, var(--brand) 12%, transparent); }
 .conv-list.flat .conv-row { padding: 8px 12px; }
 
+/* Computers taken out of a work item: folded away by default — the point of
+   removing one is not seeing it — and one click from being put back. */
+.removed-computers { margin-top: 14px; border: 1px dashed var(--border); border-radius: 12px; padding: 8px 12px; background: var(--bg-0); }
+.removed-computers > summary { color: var(--muted); font-size: 13px; }
+.removed-computers > summary::before { content: "▸ "; }
+.removed-computers[open] > summary::before { content: "▾ "; }
+.removed-computers .member-list { margin-top: 6px; }
+.removed-computers .member-row .computer-icon { opacity: 0.6; }
+
 .thread { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .thread-head { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--bg-1); flex-wrap: wrap; }
 .thread-title { flex: 1; min-width: 160px; }

@@ -49,6 +49,23 @@ export function retiredMessage(r: RetiredDto, status: ItemStatus = "done"): { te
   return { text: `Retired ${count(r.conversations, "conversation")}${on}.`, kind: "info" };
 }
 
+/**
+ * What to say after a computer was taken out of a work item. Removing retires
+ * whatever was still live on it first (server/projects.ts), and that is the
+ * only part worth a word: a computer that was already down went quietly, and
+ * "removed" is visible on screen without being told. One that would *not* go
+ * is news either way round — the row has left the item and the machine has
+ * not, which is the one outcome a person needs to hear about.
+ */
+export function removedMessage(r: RetiredDto): { text: string; kind: "info" | "error" } | null {
+  if (r.failed > 0 || r.error) {
+    const what = r.failed > 0 ? `${count(r.failed, "conversation")} would not retire, so it may still be running` : "it may still be running";
+    return { text: `Removed, but ${what}${r.error ? `: ${r.error}` : "."}`, kind: "error" };
+  }
+  if (r.conversations === 0) return null;
+  return { text: `Removed, and retired ${count(r.conversations, "conversation")} on it.`, kind: "info" };
+}
+
 function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }

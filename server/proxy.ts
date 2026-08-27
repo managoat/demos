@@ -6,7 +6,8 @@
  * A member's browser builds an ordinary SDK client with this as its base
  * URL and never holds a Fountain key. What it can reach:
  *
- *   GET  /api/conversations                 the owner's list, only `workbench:<project>/…`
+ *   GET  /api/conversations                 the owner's list, only `workbench:<project>/…`, less the
+ *                                           computers their work items have removed (server/projects.ts)
  *   POST /api/conversations                 start one; channel must name an item of this project and is
  *                                           re-minted per conversation; environment and vault are the project's;
  *                                           a sandbox_id must be a computer of that same item, same teammate
@@ -16,7 +17,8 @@
  *                                           record of what its sandbox reached) — after checking :id
  *                                           is in the project
  *   GET  /api/sandboxes/:id                 one computer, if a conversation of the project is on it
- *   GET  /api/search                        full text, cut down to hits in this project's conversations
+ *   GET  /api/search                        full text, cut down to hits in this project's conversations,
+ *                                           and — unless one conversation is named — less the removed ones
  *   GET  /api/agents, /api/agents/:id/avatar  the owner's agents (the team), with the values of
  *                                           every MCP server's `env` and `headers` withheld, every
  *                                           inline skill's body withheld, and — for a member —
@@ -25,10 +27,17 @@
  *   GET  /api/events/stream                 the owner's stream, filtered to the project, plus
  *                                           `event: workbench` when items or settings change
  *
- * Everything else is 404. The conversation → project map is cached, since
- * a `channel_id` does not change.
+ * Everything else is 404. The conversation → tree-position map is cached,
+ * since a `channel_id` does not change.
+ *
+ * A removed computer is left out of the listing and the palette, and that is
+ * as far as it goes: a conversation that ran on one is not deleted, so its own
+ * routes still answer and its link still opens. The stream needs no rule of
+ * its own — removing a computer retires it first (server/projects.ts), and a
+ * retired conversation has nothing left to say.
  */
 import { channelPrefix, newConversationChannel, parseChannel } from "../shared/channel";
+import { computerKey, removedKey } from "../shared/computers";
 import { imagesProblem } from "../shared/images";
 import { authenticate, ownerClient, projectAccess, type AppContext } from "./context";
 import type { ProjectRow, Role } from "./db";
@@ -38,11 +47,18 @@ import { addTeammate, reconcileItems } from "./projects";
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
 
-/** conversation id → the project its channel names (null: none of ours), with when we learned it. */
-const convProject = new Map<string, { projectId: string | null; at: number }>();
+/**
+ * conversation id → where it sits in the workbench tree (a null project: none
+ * of ours), with when we learned it. The item and the computer ride along
+ * because `search` has to drop hits on a computer the item has removed, and a
+ * hit carries nothing but an id; every listing refreshes the lot, so the
+ * placement is as fresh as the last time anybody looked at the project.
+ */
+const convProject = new Map<string, { projectId: string | null; itemId: string | null; key: string; at: number }>();
 
 function remember(c: ConversationSummary): void {
-  convProject.set(c.id, { projectId: parseChannel(c.channel_id)?.projectId ?? null, at: Date.now() });
+  const ref = parseChannel(c.channel_id);
+  convProject.set(c.id, { projectId: ref?.projectId ?? null, itemId: ref?.itemId ?? null, key: computerKey(c), at: Date.now() });
 }
 
 /** For tests: forget every cached conversation. */
@@ -61,7 +77,7 @@ async function belongs(client: FountainClient, projectId: string, conversationId
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.projectId === projectId;
   const c = await client.conversation(conversationId);
   if (!c) {
-    convProject.set(conversationId, { projectId: null, at: Date.now() });
+    convProject.set(conversationId, { projectId: null, itemId: null, key: "", at: Date.now() });
     return false;
   }
   remember(c);
@@ -107,7 +123,7 @@ export async function handleProxy(ctx: AppContext, req: Request, projectId: stri
   const sandbox = /^\/api\/sandboxes\/([^/]+)$/.exec(path);
   if (sandbox && method === "GET") return showSandbox(scope, decodeURIComponent(sandbox[1]!));
 
-  if (method === "GET" && path === "/api/search") return search(scope, url);
+  if (method === "GET" && path === "/api/search") return search(ctx, scope, url);
 
   if (method === "GET" && path === "/api/agents") {
     const res = await forward(client, req, path, url.search);
@@ -309,8 +325,26 @@ async function listConversations(ctx: AppContext, { project, client }: Scope, ur
   for (const c of all) remember(c);
   const prefix = channelPrefix(project.id);
   const mine = all.filter((c) => typeof c.channel_id === "string" && c.channel_id.startsWith(prefix));
+  // Reconciled before the removals are applied: a computer taken out of an
+  // item does not take the item with it, and an item this database has never
+  // heard of is still one to record.
   if (reconcileItems(ctx, project, mine)) ctx.events.emit(project.id, { kind: "items" });
-  return json({ ...body, data: mine });
+  const removed = removedSet(ctx, project.id);
+  return json({ ...body, data: removed.size === 0 ? mine : mine.filter((c) => !isRemoved(removed, c)) });
+}
+
+/** For a path that deliberately does not apply removals. */
+const NO_REMOVALS: ReadonlySet<string> = new Set();
+
+/** What this project has taken out of its tree, as `<item>\n<key>`. Empty for almost every project. */
+function removedSet(ctx: AppContext, projectId: string): Set<string> {
+  return new Set(ctx.db.removedInProject(projectId).map((r) => removedKey(r.item_id, r.key)));
+}
+
+/** Whether this conversation ran on a computer its work item has removed. */
+function isRemoved(removed: ReadonlySet<string>, c: ConversationSummary): boolean {
+  const itemId = parseChannel(c.channel_id)?.itemId;
+  return !!itemId && removed.has(removedKey(itemId, computerKey(c)));
 }
 
 async function startConversation(ctx: AppContext, { project, client }: Scope, req: Request): Promise<Response> {
@@ -348,6 +382,11 @@ async function startConversation(ctx: AppContext, { project, client }: Scope, re
     // the disk are that item's context. Fountain would share it by identity
     // alone; the workbench does not.
     if (parseChannel(host.channel_id)?.itemId !== item.id) throw new HttpError(422, "item_mismatch", "That computer belongs to another work item.");
+    // Removed from the item, so not one of its computers any more. Nothing in
+    // the app offers this, but the route is the boundary, not the button.
+    if (removedSet(ctx, project.id).has(removedKey(item.id, body.sandbox_id))) {
+      throw new HttpError(422, "computer_removed", "That computer was removed from this work item. Put it back first, or start a new one.");
+    }
     out.sandbox_id = body.sandbox_id;
   }
 
@@ -426,9 +465,14 @@ const SEARCH_FILTERS = ["agent_id", "since", "kinds"];
  * upstream itself and serves its own window over what survives — and says
  * `has_more` when it stopped digging rather than pretending it reached the end.
  */
-async function search({ project, client }: Scope, url: URL): Promise<Response> {
+async function search(ctx: AppContext, { project, client }: Scope, url: URL): Promise<Response> {
   const q = url.searchParams.get("q") ?? "";
   if (!q.trim()) throw new HttpError(400, "bad_query", "Search for something.");
+  // A transcript outlives the computer it was typed on, so a search is the
+  // one way a removed computer could come back on screen. `keepHits` places
+  // every hit it keeps, which is the same read that says which computer it
+  // was on: dropping them here costs no extra request.
+  const removed = removedSet(ctx, project.id);
   const limit = Math.min(Math.max(int(url.searchParams.get("limit"), 20), 1), SEARCH_PAGE);
   const offset = Math.max(int(url.searchParams.get("offset"), 0), 0);
 
@@ -453,8 +497,14 @@ async function search({ project, client }: Scope, url: URL): Promise<Response> {
     if (!res.ok) return passthrough(res, text);
     // Scoped by Fountain and checked again here, so that one rule governs
     // every hit that leaves this route and no path is exempt from it.
+    //
+    // Removals are not applied on this path, and that is the point of having
+    // it: this is find-in-page inside one open conversation, and a removed
+    // conversation is not deleted — its link still opens, so searching what
+    // is on screen must still find it. The palette, which is a way of
+    // *discovering* conversations, does apply them.
     const body = JSON.parse(text) as { data?: SearchHit[] };
-    return json({ ...body, data: await keepHits(client, project.id, body.data ?? []) });
+    return json({ ...body, data: await keepHits(client, project.id, body.data ?? [], NO_REMOVALS) });
   }
 
   const wanted = offset + limit;
@@ -470,7 +520,7 @@ async function search({ project, client }: Scope, url: URL): Promise<Response> {
     if (!res.ok) return passthrough(res, text);
     const body = JSON.parse(text) as { data?: SearchHit[]; meta?: { has_more?: boolean } };
     const hits = body.data ?? [];
-    kept.push(...(await keepHits(client, project.id, hits)));
+    kept.push(...(await keepHits(client, project.id, hits, removed)));
     read += hits.length;
     if (hits.length === 0 || body.meta?.has_more !== true) {
       ended = true;
@@ -491,7 +541,7 @@ async function search({ project, client }: Scope, url: URL): Promise<Response> {
  * whole account, so the first id we do not already know warms every id at once
  * off the conversation list; after that the checks are cache hits.
  */
-async function keepHits(client: FountainClient, projectId: string, hits: SearchHit[]): Promise<SearchHit[]> {
+async function keepHits(client: FountainClient, projectId: string, hits: SearchHit[], removed: ReadonlySet<string>): Promise<SearchHit[]> {
   let primed = false;
   const out: SearchHit[] = [];
   for (const hit of hits) {
@@ -501,7 +551,11 @@ async function keepHits(client: FountainClient, projectId: string, hits: SearchH
       for (const c of await client.conversations({ roots_only: "false" })) remember(c);
       primed = true;
     }
-    if (await belongs(client, projectId, id)) out.push(hit);
+    if (!(await belongs(client, projectId, id))) continue;
+    // Placed by the line above, so the tree position is there to read.
+    const at = convProject.get(id);
+    if (removed.size > 0 && at?.itemId && removed.has(removedKey(at.itemId, at.key))) continue;
+    out.push(hit);
   }
   return out;
 }

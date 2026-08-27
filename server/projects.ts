@@ -8,9 +8,10 @@
  * member's.
  */
 import { channelIsItem, channelPrefix, newId, parseChannel, recoveredTitle } from "../shared/channel";
+import { computerKey, projectRemovedKey } from "../shared/computers";
 import { emptyCounts, isClosed, isItemStatus, isProposedStatus, parseItemStatus, type ItemCounts, type ItemStatus, type Proposal, type ProposedStatus } from "../shared/status";
 import { authenticate, ownerClient, projectAccess, requireOwner, userClient, type AppContext } from "./context";
-import { NO_PROPOSAL, now, parseAgentIds, type ItemPatch, type ItemRow, type ProjectRow, type Role } from "./db";
+import { NO_PROPOSAL, now, parseAgentIds, type ItemPatch, type ItemRow, type ProjectRow, type RemovedComputerRow, type Role } from "./db";
 import { FountainHttpError, type ConversationSummary, type FountainClient } from "./fountain";
 import { HttpError, isEmail, json, normalizeEmail, optId, readJson, str } from "./http";
 import { heldRequests, type HeldRequest } from "./watch";
@@ -40,6 +41,16 @@ export interface ItemDto {
   createdAt: string;
   /** What a teammate says should happen to this item, waiting on a person. Null when nobody has said. */
   proposal: Proposal | null;
+  /** Computers taken out of this item's tree — not shown, not gone (see `removeComputer`). */
+  removedComputers: RemovedComputerDto[];
+}
+
+/** One computer a work item no longer shows, and who took it out. */
+export interface RemovedComputerDto {
+  /** Its sandbox id, or `conv:<id>` for one that never got a sandbox (shared/computers.ts). */
+  key: string;
+  at: string;
+  by: string;
 }
 
 /** What closing a work item did to its computers. */
@@ -70,7 +81,13 @@ function projectDto(ctx: AppContext, p: ProjectRow, role: Role, counts?: ItemCou
   };
 }
 
-export function itemDto(w: ItemRow): ItemDto {
+/**
+ * The item as the browser reads it. `removed` is passed in rather than read
+ * here so a whole project's items cost one query for the lot, not one each;
+ * a caller with nothing to say passes nothing, which is the common case
+ * (a fresh item has removed nothing).
+ */
+export function itemDto(w: ItemRow, removed: RemovedComputerRow[] = []): ItemDto {
   return {
     id: w.id,
     projectId: w.project_id,
@@ -80,6 +97,7 @@ export function itemDto(w: ItemRow): ItemDto {
     agentIds: parseAgentIds(w.agent_ids),
     createdAt: w.created_at,
     proposal: proposalOf(w),
+    removedComputers: removed.map((r) => ({ key: r.key, at: r.removed_at, by: r.removed_by })),
   };
 }
 
@@ -228,6 +246,11 @@ export async function activity(ctx: AppContext, req: Request): Promise<Response>
   const mine = new Map(rows.map((p) => [p.id, p]));
   const byOwner = new Map<string, ProjectRow>();
   for (const p of rows) if (!byOwner.has(p.owner_email)) byOwner.set(p.owner_email, p);
+  // Computers these projects have removed. A machine somebody took out of a
+  // work item must not be able to ring the bell from outside it — the feed is
+  // the one place a removed conversation could still reach a reader who has
+  // seen it gone (server/proxy.ts leaves it out of the project's own listing).
+  const removed = ctx.db.removedKeys(rows.map((p) => p.id));
   const out: Record<string, Activity> = {};
   for (const p of rows) out[p.id] = { live: 0, latest: null };
   const feed: FeedEntry[] = [];
@@ -246,6 +269,7 @@ export async function activity(ctx: AppContext, req: Request): Promise<Response>
         const project = mine.get(ref.projectId);
         // Only this owner's projects: the same id under another owner is not this conversation's.
         if (!project || project.owner_email !== p.owner_email) continue;
+        if (removed.size > 0 && removed.has(projectRemovedKey(project.id, ref.itemId, computerKey(c)))) continue;
         const a = out[project.id]!;
         if (c.status === "running" || c.status === "pending") a.live += 1;
         const at = c.last_active_at ?? c.updated_at ?? c.inserted_at ?? null;
@@ -313,7 +337,10 @@ export async function create(ctx: AppContext, req: Request): Promise<Response> {
 export async function show(ctx: AppContext, req: Request, id: string): Promise<Response> {
   const user = await authenticate(ctx, req);
   const { project, role } = projectAccess(ctx, user, id);
-  return json({ data: { project: projectDto(ctx, project, role), items: ctx.db.items(id).map(itemDto) } });
+  // One query for the project's removals, handed out per item: an items list
+  // must not be an item's worth of queries.
+  const removed = byItem(ctx.db.removedInProject(id));
+  return json({ data: { project: projectDto(ctx, project, role), items: ctx.db.items(id).map((w) => itemDto(w, removed.get(w.id))) } });
 }
 
 export async function patch(ctx: AppContext, req: Request, id: string): Promise<Response> {
@@ -402,7 +429,7 @@ export async function patchItem(ctx: AppContext, req: Request, id: string, itemI
   // Both ways of closing an item end the work, so both take its computers
   // down; going from one closed state to the other has nothing left to retire.
   const closing = p.status !== undefined && isClosed(p.status) && !isClosed(cur.status);
-  const item = itemDto(ctx.db.getItem(itemId)!);
+  const item = itemDto(ctx.db.getItem(itemId)!, ctx.db.removedComputers(itemId));
   return json(closing ? { data: item, retired: await retire(ctx, project, itemId) } : { data: item });
 }
 
@@ -417,8 +444,75 @@ export async function removeItem(ctx: AppContext, req: Request, id: string, item
 }
 
 /**
+ * Take a computer out of a work item.
+ *
+ * Terminating a computer is not the same as being done with it. Fountain
+ * keeps a terminated conversation for good — the transcript is the record of
+ * what was done, and the bill is the owner's — so an item worked on for a
+ * week ends up a column of dead machines with the live one somewhere in it,
+ * and nothing in the app could say "this one is finished with". This is that:
+ * the computer stops being part of the item's tree. It is a workbench
+ * decision, written here, not a delete on Fountain: the conversations stay,
+ * their transcripts stay searchable by direct link, and `GET /api/me/cost`
+ * still counts every token they spent, because removing a machine from a
+ * to-do list does not unspend the money.
+ *
+ * It is the project's decision, not the reader's: a shared project shares its
+ * tree, the same way it shares its items and its unread marks, so any member
+ * may remove and everyone sees it gone.
+ *
+ * **Removing retires it first.** A computer nobody can see must not still be
+ * running: whatever is live on it is terminated on the way out, by exactly the
+ * path that closing the item takes, and what actually went is reported back so
+ * the browser can say so. A removal whose terminate failed is still a removal —
+ * the machine may be up, and the answer says which, rather than the item
+ * quietly keeping a row nobody asked for.
+ */
+export async function removeComputer(ctx: AppContext, req: Request, id: string, itemId: string): Promise<Response> {
+  const user = await authenticate(ctx, req);
+  const { project } = projectAccess(ctx, user, id);
+  const item = ctx.db.getItem(itemId);
+  if (!item || item.project_id !== id) throw new HttpError(404, "not_found", "No such work item.");
+  const body = await readJson(req);
+  const key = str(body.key, 200).trim();
+  if (!key) throw new HttpError(422, "key_required", "Which computer?");
+  const retired = await retire(ctx, project, itemId, key);
+  ctx.db.removeComputer(itemId, key, user.email);
+  ctx.events.emit(id, { kind: "items" });
+  return json({ data: itemDto(ctx.db.getItem(itemId)!, ctx.db.removedComputers(itemId)), retired });
+}
+
+/**
+ * Put one back. Nothing was destroyed, so this is the whole of the undo: the
+ * conversations that ran on it are still on Fountain and reappear in the
+ * item's tree on the next listing. A computer that has since been torn down
+ * comes back as what it is — gone, with its transcripts.
+ */
+export async function restoreComputer(ctx: AppContext, req: Request, id: string, itemId: string, rawKey: string): Promise<Response> {
+  const user = await authenticate(ctx, req);
+  projectAccess(ctx, user, id);
+  const item = ctx.db.getItem(itemId);
+  if (!item || item.project_id !== id) throw new HttpError(404, "not_found", "No such work item.");
+  ctx.db.restoreComputer(itemId, decodeURIComponent(rawKey));
+  ctx.events.emit(id, { kind: "items" });
+  return json({ data: itemDto(ctx.db.getItem(itemId)!, ctx.db.removedComputers(itemId)) });
+}
+
+/** Removals grouped by the item they are on, for a page that needs a project's worth at once. */
+export function byItem(rows: RemovedComputerRow[]): Map<string, RemovedComputerRow[]> {
+  const out = new Map<string, RemovedComputerRow[]>();
+  for (const r of rows) {
+    const arr = out.get(r.item_id);
+    if (arr) arr.push(r);
+    else out.set(r.item_id, [r]);
+  }
+  return out;
+}
+
+/**
  * An item's computers, once it is closed — done or won't do alike: the work
- * is over either way, so the machines go.
+ * is over either way, so the machines go. With `key`, just the one computer:
+ * what removing it from the item has to do first (`removeComputer`).
  *
  * Fountain has no "destroy this sandbox" — a sprite is torn down with the
  * last live conversation on it (ADR 0023), so retiring every conversation of
@@ -430,7 +524,7 @@ export async function removeItem(ctx: AppContext, req: Request, id: string, item
  * reported back, so the browser can say so rather than imply a machine is
  * gone when it is still running.
  */
-async function retire(ctx: AppContext, project: ProjectRow, itemId: string): Promise<RetiredDto> {
+async function retire(ctx: AppContext, project: ProjectRow, itemId: string, key?: string): Promise<RetiredDto> {
   const out: RetiredDto = { conversations: 0, computers: 0, failed: 0 };
   let convs: ConversationSummary[];
   let client: FountainClient;
@@ -440,7 +534,7 @@ async function retire(ctx: AppContext, project: ProjectRow, itemId: string): Pro
   } catch (err) {
     return { ...out, error: reason(err) };
   }
-  const live = convs.filter((c) => channelIsItem(c.channel_id, project.id, itemId) && c.status !== "terminated");
+  const live = convs.filter((c) => channelIsItem(c.channel_id, project.id, itemId) && c.status !== "terminated" && (key === undefined || computerKey(c) === key));
   const computers = new Set<string>();
   await Promise.all(
     live.map(async (c) => {

@@ -23,7 +23,7 @@ import { readSse } from "./lib/sse";
 import { describeError } from "./lib/errors";
 import { feedRead, NO_ACTIVITY } from "./lib/feed";
 import { useDesktopNotify, type DesktopNotify } from "./lib/notify";
-import { retiredMessage } from "./lib/workbench";
+import { removedMessage, retiredMessage } from "./lib/workbench";
 
 export type EventHandler = (ev: UserEvent) => void;
 
@@ -228,6 +228,14 @@ export interface ProjectStore {
   removeItem: (id: string) => Promise<void>;
   addTeammate: (itemId: string, agentId: string) => Promise<void>;
   removeTeammate: (itemId: string, agentId: string) => Promise<void>;
+  /**
+   * Take a computer out of a work item — the machine's work is over and the
+   * row is in the way. Whatever is still live on it is retired first, by the
+   * server, and the conversation list comes back without it.
+   */
+  removeComputer: (itemId: string, key: string) => Promise<void>;
+  /** Put one back. Nothing was deleted, so its conversations simply return. */
+  restoreComputer: (itemId: string, key: string) => Promise<void>;
   /**
    * Start a conversation on a work item — which is also how a teammate gets
    * onto one: the server puts them there. Throws on failure, so the caller
@@ -518,6 +526,27 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
     },
     [items, updateItem],
   );
+  const removeComputer = useCallback<ProjectStore["removeComputer"]>(
+    async (itemId, key) => {
+      await run(async () => {
+        const { retired } = await api.removeComputer(projectId, itemId, key);
+        // Say what actually went. A computer that was already down retires
+        // nothing and needs no notice; one that would not go is news, because
+        // the row is gone from the item and the machine may not be.
+        const msg = removedMessage(retired);
+        if (msg) toast(msg.text, msg.kind);
+      });
+      void refresh();
+    },
+    [projectId, run, refresh, toast],
+  );
+  const restoreComputer = useCallback<ProjectStore["restoreComputer"]>(
+    async (itemId, key) => {
+      await run(() => api.restoreComputer(projectId, itemId, key));
+      void refresh();
+    },
+    [projectId, run, refresh],
+  );
   const startConversation = useCallback<ProjectStore["startConversation"]>(
     async (input) => {
       const conversation = await fountain.api.data<Conversation>("POST", "/api/conversations", { body: startBody(projectId, input) });
@@ -560,6 +589,8 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
             removeItem,
             addTeammate,
             removeTeammate,
+            removeComputer,
+            restoreComputer,
             startConversation,
           }
         : null,
@@ -588,6 +619,8 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
       removeItem,
       addTeammate,
       removeTeammate,
+      removeComputer,
+      restoreComputer,
       startConversation,
     ],
   );

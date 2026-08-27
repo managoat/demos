@@ -26,6 +26,8 @@
  *   POST   /api/projects/:id/items
  *   PATCH  /api/projects/:id/items/:item
  *   DELETE /api/projects/:id/items/:item
+ *   POST   /api/projects/:id/items/:item/computers        { key }: retire that computer and take it out of the item
+ *   DELETE /api/projects/:id/items/:item/computers/:key   put it back
  *   *      /f/:id/api/...                   Fountain, scoped to the project (proxy.ts)
  *   POST   /mcp                             the work items as MCP tools, on a Fountain key (mcp.ts)
  *   GET    /healthz
@@ -100,6 +102,10 @@ export function buildApp(ctx: AppContext): (req: Request) => Promise<Response> {
   on("POST", "/api/projects/:id/items", (req, p) => projects.createItem(ctx, req, p.id!));
   on("PATCH", "/api/projects/:id/items/:item", (req, p) => projects.patchItem(ctx, req, p.id!, p.item!));
   on("DELETE", "/api/projects/:id/items/:item", (req, p) => projects.removeItem(ctx, req, p.id!, p.item!));
+  // A computer is not a workbench record until somebody removes it — so the
+  // collection under an item is the removals, and this is a POST to it.
+  on("POST", "/api/projects/:id/items/:item/computers", (req, p) => projects.removeComputer(ctx, req, p.id!, p.item!));
+  on("DELETE", "/api/projects/:id/items/:item/computers/:key", (req, p) => projects.restoreComputer(ctx, req, p.id!, p.item!, p.key!));
 
   on("*", "/f/:id/*", (req, p) => handleProxy(ctx, req, p.id!, "/" + (p.rest ?? "")));
   // Not under /api: an agent's client is told one URL, and this is it.

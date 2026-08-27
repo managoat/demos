@@ -7,9 +7,13 @@
  * used to live in one browser's localStorage, now in one place so a project
  * can be shared. Conversations themselves stay on Fountain — a project's
  * conversations are the ones whose `channel_id` starts with
- * `workbench:<project>/`, under the owner's key.
+ * `workbench:<project>/`, under the owner's key — which is also why the one
+ * thing recorded here *about* those conversations is what a work item has
+ * removed: Fountain keeps every conversation there has ever been, and the
+ * workbench decides which of them are still part of the work.
  */
 import { Database } from "bun:sqlite";
+import { projectRemovedKey } from "../shared/computers";
 import { emptyCounts, parseItemStatus, type ItemCounts, type ItemStatus } from "../shared/status";
 
 export interface UserRow {
@@ -37,6 +41,21 @@ export interface MemberRow {
   email: string;
   added_by: string;
   added_at: string;
+}
+
+/**
+ * A computer a work item has removed: taken out of the item's tree, once its
+ * work was over. Fountain keeps the conversations that ran on it — the
+ * transcript and the bill are not the workbench's to delete — so this is the
+ * record of what the workbench stops showing, keyed by the computer's key
+ * (its sandbox id, or `conv:<id>` for one that never got a sandbox;
+ * shared/computers.ts).
+ */
+export interface RemovedComputerRow {
+  item_id: string;
+  key: string;
+  removed_by: string;
+  removed_at: string;
 }
 
 export interface ItemRow {
@@ -120,6 +139,13 @@ CREATE TABLE IF NOT EXISTS items (
   proposed_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS items_project ON items(project_id);
+CREATE TABLE IF NOT EXISTS removed_computers (
+  item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  removed_by TEXT NOT NULL,
+  removed_at TEXT NOT NULL,
+  PRIMARY KEY (item_id, key)
+);
 `;
 
 /**
@@ -326,6 +352,45 @@ export class Db {
 
   deleteItem(id: string): void {
     this.sql.query("DELETE FROM items WHERE id = $id").run({ id });
+  }
+
+  // ── removed computers ────────────────────────────────────────────────
+
+  /** What one work item has taken out of its tree, oldest first. */
+  removedComputers(itemId: string): RemovedComputerRow[] {
+    return this.sql.query("SELECT * FROM removed_computers WHERE item_id = $i ORDER BY removed_at, key").all({ i: itemId }) as RemovedComputerRow[];
+  }
+
+  /** Every removal in one project, in one query: what the conversation list has to leave out. */
+  removedInProject(projectId: string): RemovedComputerRow[] {
+    return this.sql
+      .query("SELECT r.* FROM removed_computers r JOIN items i ON i.id = r.item_id WHERE i.project_id = $p ORDER BY r.removed_at, r.key")
+      .all({ p: projectId }) as RemovedComputerRow[];
+  }
+
+  /** Removals across a set of projects, keyed by `projectRemovedKey` — one query for the whole feed. */
+  removedKeys(projectIds: string[]): Set<string> {
+    const out = new Set<string>();
+    if (projectIds.length === 0) return out;
+    const rows = this.sql
+      .query(`SELECT i.project_id, r.item_id, r.key FROM removed_computers r JOIN items i ON i.id = r.item_id WHERE i.project_id IN (${projectIds.map(() => "?").join(",")})`)
+      .all(...projectIds) as { project_id: string; item_id: string; key: string }[];
+    for (const r of rows) out.add(projectRemovedKey(r.project_id, r.item_id, r.key));
+    return out;
+  }
+
+  /** Take a computer out of a work item. False when it was already out. */
+  removeComputer(itemId: string, key: string, by: string): boolean {
+    const r = this.sql
+      .query("INSERT OR IGNORE INTO removed_computers (item_id, key, removed_by, removed_at) VALUES ($i, $k, $by, $t)")
+      .run({ i: itemId, k: key, by, t: now() });
+    return r.changes > 0;
+  }
+
+  /** Put one back. False when it was not removed. */
+  restoreComputer(itemId: string, key: string): boolean {
+    const r = this.sql.query("DELETE FROM removed_computers WHERE item_id = $i AND key = $k").run({ i: itemId, k: key });
+    return r.changes > 0;
   }
 
   /** Item counts per project for a user's list, in one query. */

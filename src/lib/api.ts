@@ -43,6 +43,21 @@ export interface ItemDto {
   createdAt: string;
   /** What a teammate says should happen to this item, waiting on a person (server/mcp.ts). */
   proposal: Proposal | null;
+  /**
+   * Computers taken out of this item's tree. The server leaves their
+   * conversations out of `/f/<project>/api/conversations` entirely, so this
+   * list is not a filter the browser applies — it is what the "removed" fold
+   * on the work item has to offer putting back.
+   */
+  removedComputers: RemovedComputer[];
+}
+
+/** One computer a work item no longer shows, and who took it out (server/projects.ts). */
+export interface RemovedComputer {
+  /** Its sandbox id, or `conv:<id>` for one that never got a sandbox (shared/computers.ts). */
+  key: string;
+  at: string;
+  by: string;
 }
 
 /**
@@ -303,6 +318,12 @@ export const api = {
   patchItem: (projectId: string, itemId: string, patch: ItemPatch) =>
     call<{ data: ItemDto; retired?: RetiredDto }>("PATCH", `/api/projects/${projectId}/items/${itemId}`, patch),
   deleteItem: (projectId: string, itemId: string) => call<{ ok: true }>("DELETE", `/api/projects/${projectId}/items/${itemId}`),
+  // The envelope again: removing a computer retires whatever is still live on
+  // it first, and says what went.
+  removeComputer: (projectId: string, itemId: string, key: string) =>
+    call<{ data: ItemDto; retired: RetiredDto }>("POST", `/api/projects/${projectId}/items/${itemId}/computers`, { key }),
+  restoreComputer: (projectId: string, itemId: string, key: string) =>
+    data(call<{ data: ItemDto }>("DELETE", `/api/projects/${projectId}/items/${itemId}/computers/${encodeURIComponent(key)}`)),
 
   recover: () => data(call<{ data: { projects: number; items: number } }>("POST", "/api/projects/recover")),
   importState: (state: unknown) => data(call<{ data: { projects: number; items: number } }>("POST", "/api/import", state)),
