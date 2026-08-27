@@ -632,7 +632,6 @@ li.editing { padding: 0; }
   .item-layout { flex-direction: column; }
   .item-side { width: auto; border-right: 0; border-bottom: 1px solid var(--border); max-height: 50dvh; }
   .item-layout.with-thread .item-side { display: none; }
-  .crumbs { display: none; }
 }
 .notice { margin-bottom: 16px; }
 .notice p { margin: 0; }
@@ -675,10 +674,17 @@ button.icon.small-icon:disabled { opacity: 0.4; }
 
 @media (max-width: 900px) {
   .menu { display: inline-flex; }
-  .sidebar { position: fixed; top: 0; bottom: 0; left: 0; z-index: 70; transform: translateX(-100%); transition: transform .18s ease; }
+  /* `max-width` rather than `width`: the explorer sets its dragged width
+     inline and would win a tie, so a sidebar pulled out to 420px on a desktop
+     would come back as a 420px drawer on a 390px phone. Clamp it instead. */
+  .sidebar {
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: 70; max-width: min(86vw, 340px);
+    transform: translateX(-100%); transition: transform .18s ease;
+    padding-left: env(safe-area-inset-left);
+  }
   .sidebar.open { transform: none; }
+  .app.ide .sidebar-list { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
   .drawer-backdrop { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 65; }
-  .crumbs { display: flex; }
 }
 /* sidebar: work item → computers → conversations */
 .sidebar-item { margin: 2px 0 8px; border-radius: 10px; padding: 2px 0 2px; }
@@ -1174,4 +1180,107 @@ body.resizing-col { cursor: col-resize; user-select: none; }
 .board-confirm .strong { color: inherit; }
 @media (max-width: 900px) {
   .board { grid-auto-columns: minmax(220px, 80vw); }
+}
+
+/* ── a phone ─────────────────────────────────────────────────────────────
+ * This app is an IDE and its density is the point: 11px mono, an 18px twisty,
+ * actions that appear under the pointer. Almost none of that survives a touch
+ * screen, and the parts that fail there fail hard rather than gracefully — a
+ * field that zooms the page and never zooms back out, a "+" with no pointer to
+ * appear under, a row of chrome wider than the phone.
+ *
+ * So the density stays where it works and is bought back here, keyed on what
+ * the device *has* rather than on width alone. `pointer: coarse` and
+ * `hover: none` are the honest questions: a narrow window on a desktop is
+ * still a desktop and should keep the tight tree, and a touch laptop at
+ * 1400px still cannot hover.
+ *
+ * Widths are for layout only, and the breakpoint is 700px — under the 900px
+ * one that folds the explorer and the details panel into drawers, because a
+ * tablet has room for the full top bar and a phone does not.
+ */
+
+/* 1. The reason a phone is unusable rather than merely cramped: Safari zooms
+ *    the page when a control under 16px takes focus, and does not zoom back
+ *    when the field is done. Every field here is 11.5–15px, so the first tap
+ *    on the composer leaves the app at 1.4× with its right-hand half off the
+ *    screen, for good. 16px only where there is a finger; the mouse keeps the
+ *    type this app was drawn in. */
+@media (pointer: coarse) {
+  input, select, textarea,
+  input.compact, select.compact,
+  .composer textarea, .composer.term textarea,
+  .palette-input, .find-input, .explorer-filter-input, .new-item-input,
+  .app.ide .project-pick { font-size: 16px; }
+}
+
+/* 2. A finger is about 9mm and the tree is drawn in 14px controls. Growing
+ *    them to 44px would make the explorer a list of buttons instead of a
+ *    tree, so the *target* grows past the paint and the paint stays put. */
+@media (pointer: coarse) {
+  .tree-twisty, button.icon.small-icon { position: relative; }
+  .tree-twisty::after, button.icon.small-icon::after,
+  .thumb-x::after { content: ""; position: absolute; inset: -8px; }
+  /* not the tab's ✕: an overlay there bleeds over the end of the tab's own
+     text, and a tap meant to open a thread would close it instead */
+  .tab-close { width: 28px; height: 28px; }
+  /* rows are hit anywhere along them, so they get real height instead */
+  .app.ide .sidebar-item-head,
+  .app.ide .sidebar summary.computer-head,
+  .app.ide .sidebar .computer-card .conv-link { min-height: 34px; }
+  .theme-option, .feed-row, .palette-list li, .digest-ask { min-height: 36px; }
+  .tab { height: 40px; }
+  .seg button, .seg .button { padding: 8px 12px; }
+  /* dragging a column edge is a mouse gesture; under a finger the strip only
+     swallows taps meant for the drawer it sits on the edge of */
+  .sidebar-resize, .details-resize { display: none; }
+}
+
+/* 3. Everything that waits for a pointer to rest on it is simply absent on a
+ *    touch screen. These are not decorations: the "+"s are the only way to add
+ *    a computer or start a second conversation from the tree, and the ✕ is the
+ *    only way to close a tab that is not the open one. */
+@media (hover: none) {
+  .app.ide .sidebar-list .icon.small-icon { opacity: 1; }
+  .tab-close { visibility: visible; }
+}
+
+/* 4. What `viewport-fit=cover` in index.html costs. The app paints under the
+ *    notch, the rounded corners and the home indicator; these are the edges
+ *    that owe something back. Everything else is interior. */
+.app.ide .topbar {
+  padding-left: max(10px, env(safe-area-inset-left));
+  padding-right: max(10px, env(safe-area-inset-right));
+}
+.composer { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+.composer.term { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+.statusbar { height: auto; min-height: 24px; padding-bottom: env(safe-area-inset-bottom); }
+.toasts { bottom: max(16px, env(safe-area-inset-bottom)); }
+.details-panel { padding-right: env(safe-area-inset-right); }
+
+/* 5. The top bar holds eleven things and a phone fits about seven. It wraps
+ *    instead of squashing: the picker and the icons keep one row, the
+ *    project's pages take the next. The word on a button goes and its glyph
+ *    stays — each one carries a title and an aria-label already. */
+@media (max-width: 700px) {
+  .app.ide .topbar { flex-wrap: wrap; row-gap: 4px; }
+  .brand, .topbar-sep { display: none; }
+  .btn-label { display: none; }
+  .topbar button.find kbd { display: none; }
+  /* the picker takes the slack the spacer was holding: on one row the name of
+     the project you are in is worth more than the gap before the icons */
+  .app.ide .project-pick { flex: 1; min-width: 6ch; max-width: none; }
+  .topbar .spacer { flex: 0; }
+  .crumbs { order: 2; width: 100%; }
+  /* the bar is a footer of asides; the last two are also on the people page */
+  .statusbar .statusbar-item.muted { display: none; }
+  /* 48px of the 390 a phone has is not padding, it is a margin */
+  .page { padding: 14px 12px; }
+  .transcript.term { padding: 12px 10px 20px; }
+  .composer.term { padding-left: 10px; padding-right: 10px; }
+  .settings, .modal-backdrop { padding: 12px; }
+  .settings-card { padding: 18px; }
+  /* three columns of name/value/✕ in 366px is three ellipses */
+  .secret-list li { grid-template-columns: 1fr; }
+  .kv-row { grid-template-columns: 1fr; }
 }

@@ -74,7 +74,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <a className="brand" href={href.projects()} title="All projects">
           workbench
         </a>
-        <span className="muted">/</span>
+        <span className="muted topbar-sep">/</span>
         <select
           className="compact project-pick"
           value={projectId}
@@ -108,8 +108,8 @@ export function Shell({ children }: { children: ReactNode }) {
         )}
         <span className="spacer" />
         {store && (
-          <button type="button" className="secondary small find" onClick={() => setPalette(true)} title="Search this project (⌘K)">
-            <span aria-hidden="true">⌕</span> search <kbd>⌘K</kbd>
+          <button type="button" className="secondary small find" onClick={() => setPalette(true)} aria-label="Search this project" title="Search this project (⌘K)">
+            <span aria-hidden="true">⌕</span> <span className="btn-label">search</span> <kbd>⌘K</kbd>
           </button>
         )}
         {store && conversationId && (
@@ -118,9 +118,10 @@ export function Shell({ children }: { children: ReactNode }) {
             className={`secondary small details-toggle ${details ? "on" : ""}`}
             onClick={() => toggleDetails(!details)}
             aria-pressed={details}
+            aria-label="Conversation details"
             title="What this conversation is running with: its computer, skills, MCP servers and permissions"
           >
-            <span aria-hidden="true">◨</span> details
+            <span aria-hidden="true">◨</span> <span className="btn-label">details</span>
           </button>
         )}
         {!store && (
@@ -132,8 +133,8 @@ export function Shell({ children }: { children: ReactNode }) {
             exactly what the page you are on cannot tell you. */}
         <Feed />
         <ThemePicker />
-        <button className="secondary small" onClick={signOut}>
-          sign out
+        <button className="secondary small" onClick={signOut} aria-label="Sign out" title="Sign out">
+          <span aria-hidden="true">⏻</span> <span className="btn-label">sign out</span>
         </button>
       </header>
       {store?.error && <div className="banner error">{store.error}</div>}

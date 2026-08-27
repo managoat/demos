@@ -23,6 +23,7 @@ import { AgentAvatar } from "./AgentAvatar";
 import { AttachButton, AttachmentStrip, useAttachments } from "./Attachments";
 import { FindBar, useThreadFind } from "./ThreadFind";
 import { turnImageUrl } from "../lib/api";
+import { composerHint, coarsePointer } from "../lib/touch";
 
 const HISTORY_STREAMS: Stream[] = ["acp", "stdout", "stage"];
 
@@ -192,8 +193,13 @@ export function Thread({ conversationId, onClose, context, focusTurnId }: { conv
     [fountain, conversationId],
   );
 
+  // A soft keyboard has no Shift+Enter, so on one Enter writes the newline and
+  // the ⏎ button sends (src/lib/touch.ts).
+  const touch = useMemo(() => coarsePointer(), []);
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Mid-composition Enter closes an IME's candidate list; it is not a send.
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === "Enter" && !e.shiftKey && !touch) {
       e.preventDefault();
       void send();
     }
@@ -314,7 +320,7 @@ export function Thread({ conversationId, onClose, context, focusTurnId }: { conv
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKey}
             onPaste={attachments.paste}
-            placeholder={retired ? "retired" : `${who} — Enter to send, Shift+Enter for a newline, 🖼 or paste or drop an image`}
+            placeholder={retired ? "retired" : composerHint(who, touch)}
             disabled={retired}
             spellCheck={false}
           />
