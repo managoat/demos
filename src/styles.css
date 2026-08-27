@@ -571,6 +571,11 @@ button.attach:hover:not(:disabled) { background: var(--bg-2); }
 .conv-list.flat li.current { background: color-mix(in srgb, var(--brand) 12%, transparent); }
 .conv-list.flat .conv-row { padding: 8px 12px; }
 
+/* The conversations heading, with the sweep beside it: the h2 keeps its own
+   spacing, so the row aligns on the text rather than on the block. */
+.conversations-head { align-items: baseline; }
+.conversations-head .h2.section { margin-bottom: 8px; }
+
 /* Computers taken out of a work item: folded away by default — the point of
    removing one is not seeing it — and one click from being put back. */
 .removed-computers { margin-top: 14px; border: 1px dashed var(--border); border-radius: 12px; padding: 8px 12px; background: var(--bg-0); }

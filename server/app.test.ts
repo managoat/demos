@@ -1346,6 +1346,51 @@ describe("removing a computer from a work item", () => {
     expect((await call(null, "POST", `/api/projects/${projectId}/items/${itemA}/computers`, { key: "sbR" })).status).toBe(401);
   });
 
+  test("a sweep takes many out in one request, over one listing", async () => {
+    // The chore this exists to end is clearing a week of dead machines one at
+    // a time, so `keys` is the point of the route, not a convenience on it.
+    const item = (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title: "a week of them" })).json()).data.id as string;
+    convs["key-alice"]!.push(
+      conv("s1", `workbench:${projectId}/${item}/111111111111`, "sbW", "terminated"),
+      conv("s2", `workbench:${projectId}/${item}/222222222222`, "sbX", "terminated"),
+      conv("s3", `workbench:${projectId}/${item}/333333333333`, "sbY", "idle"),
+    );
+    terminated.length = 0;
+    const res = await call("bob", "POST", `/api/projects/${projectId}/items/${item}/computers`, { keys: ["sbW", "sbX", "sbW"] });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { removedComputers: { key: string }[] }; retired: unknown; removed: number };
+    // Both were already down, so nothing was retired — and the repeat counted once.
+    expect(body.removed).toBe(2);
+    expect(body.retired).toEqual({ conversations: 0, computers: 0, failed: 0 });
+    expect(terminated).toEqual([]);
+    expect(body.data.removedComputers.map((r) => r.key).sort()).toEqual(["sbW", "sbX"]);
+    // The one that was still up was not named, so it is untouched.
+    const ids = ((await (await call("bob", "GET", `/f/${projectId}/api/conversations`)).json()).data as { id: string }[]).map((c) => c.id);
+    expect(ids).toContain("s3");
+    expect(ids).not.toContain("s1");
+    expect(ids).not.toContain("s2");
+  });
+
+  test("a sweep that names something live retires it, in the same single pass", async () => {
+    const item = (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title: "one of each" })).json()).data.id as string;
+    convs["key-alice"]!.push(
+      conv("t1", `workbench:${projectId}/${item}/444444444444`, "sbP", "terminated"),
+      conv("t2", `workbench:${projectId}/${item}/555555555555`, "sbQ", "running"),
+    );
+    terminated.length = 0;
+    const res = await call("bob", "POST", `/api/projects/${projectId}/items/${item}/computers`, { keys: ["sbP", "sbQ"] });
+    const body = (await res.json()) as { retired: unknown; removed: number };
+    expect(body.removed).toBe(2);
+    expect(body.retired).toEqual({ conversations: 1, computers: 1, failed: 0 });
+    expect(terminated).toEqual(["t2"]);
+  });
+
+  test("an empty or unusable list of keys is refused, not treated as \"all of them\"", async () => {
+    for (const body of [{ keys: [] }, { keys: ["", "   "] }, { keys: [1, null] }, {}]) {
+      expect((await call("bob", "POST", `/api/projects/${projectId}/items/${itemA}/computers`, body)).status).toBe(422);
+    }
+  });
+
   test("deleting the work item takes its removals with it", async () => {
     await call("bob", "POST", `/api/projects/${projectId}/items/${itemA}/computers`, { key: "sbR" });
     expect(db.removedComputers(itemA)).toHaveLength(2);

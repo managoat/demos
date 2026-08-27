@@ -17,6 +17,13 @@
  * it out of the item — here, in the explorer, in the palette, in the feed.
  * Nothing is deleted on Fountain, so it is a fold at the bottom of the page
  * away from being put back, and the bill still counts every token it spent.
+ *
+ * An item worked on for a week has a week of them, so there is a sweep beside
+ * the conversations: **Remove N gone**, which is every machine already down
+ * and nothing else. What counts as down is decided here rather than on the
+ * server — `isLive` reads a computer's conversations and its sandbox record
+ * together, and this side holds both — and the server removes exactly the
+ * computers it is handed.
  */
 import { useMemo, useState } from "react";
 import { useProject } from "../store";
@@ -35,7 +42,7 @@ import { ItemDigest } from "../components/ItemDigest";
 import { shortId } from "../lib/format";
 
 export function WorkItem({ itemId }: { itemId: string }) {
-  const { project, items, conversations, agents, sandboxes, environments, vaults, fountain, toast, refresh, updateItem, addTeammate, removeTeammate, removeComputer, restoreComputer } =
+  const { project, items, conversations, agents, sandboxes, environments, vaults, fountain, toast, refresh, updateItem, addTeammate, removeTeammate, removeComputers, restoreComputer } =
     useProject();
   const item = items.find((w) => w.id === itemId);
   const [dialog, setDialog] = useState<{ agentId: string | null } | null>(null);
@@ -50,6 +57,10 @@ export function WorkItem({ itemId }: { itemId: string }) {
 
   const convs = useMemo(() => conversations.filter((c) => channelIsItem(c.channel_id, project.id, itemId)), [conversations, project.id, itemId]);
   const computers = useMemo(() => computersOf(convs, sandboxes), [convs, sandboxes]);
+  // Machines that are already down: what a sweep is for, and the only thing it
+  // touches. Whether one is up is read off its conversations and its sandbox
+  // record together, here, and the server removes exactly what this names.
+  const gone = useMemo(() => computers.filter((c) => !c.live), [computers]);
   const byKey = useMemo(() => new Map(computers.map((c) => [c.key, c])), [computers]);
   const live = convs.filter((c) => c.status !== "terminated").length;
 
@@ -190,7 +201,17 @@ export function WorkItem({ itemId }: { itemId: string }) {
         )}
       </section>
 
-      <h2 className="h2 section">Conversations</h2>
+      <div className="row conversations-head">
+        <h2 className="h2 section grow">Conversations</h2>
+        {gone.length > 1 && (
+          <TwoStep
+            label={`Remove ${gone.length} gone`}
+            className="danger small"
+            title={`Take every computer that is already down out of "${item.title}" — ${gone.length} of them. Nothing running is touched, and they go in the fold below.`}
+            onConfirm={() => void removeComputers(item.id, gone.map((c) => c.key))}
+          />
+        )}
+      </div>
       {convs.length === 0 && <p className="muted">None yet. Pick a teammate above and prompt them; a second conversation on a computer that is up starts from the sidebar's +.</p>}
       {computers.map((comp) => {
         const agent = comp.agentId ? agents.get(comp.agentId) ?? null : null;
@@ -216,7 +237,7 @@ export function WorkItem({ itemId }: { itemId: string }) {
                     ? `Retire this computer and take it out of "${item.title}". Its conversations stay on Fountain; put it back below.`
                     : `Take this computer out of "${item.title}". Its conversations stay on Fountain; put it back below.`
                 }
-                onConfirm={() => void removeComputer(item.id, comp.key)}
+                onConfirm={() => void removeComputers(item.id, [comp.key])}
               />
             </div>
             <ul className="conv-list flat">

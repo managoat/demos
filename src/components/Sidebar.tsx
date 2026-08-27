@@ -3,7 +3,8 @@
  * — one collapsible per sandbox: the teammate on it, the machine's name and
  * state, the conversations on it inside. A computer belongs to the item it
  * was started for; "+" on a live one opens another conversation with the
- * same teammate there, on that item. Items with a live computer first,
+ * same teammate there, on that item, and "×" on a dead one takes it out of
+ * the item for good — the same slot, for the opposite reason. Items with a live computer first,
  * closed items — done and won't do alike — folded away, each still saying
  * which of the two it was.
  *
@@ -37,7 +38,7 @@ import { StartDialog } from "./StartDialog";
 import type { Conversation } from "../types";
 
 export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }) {
-  const { project, items, conversations, agents, sandboxes, createItem, startConversation, toast } = useProject();
+  const { project, items, conversations, agents, sandboxes, createItem, startConversation, removeComputers, toast } = useProject();
   const route = useRoute();
   const [dialog, setDialog] = useState<{ join: JoinTarget | null; agentId: string | null; itemId: string | null } | null>(null);
   const [folds, setFolds] = useState<Set<ItemState>>(() => loadFolds());
@@ -189,6 +190,30 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
               }}
             >
               +
+            </button>
+          )}
+          {/*
+            A dead computer's row is where the clutter is actually felt, so
+            this is where it goes. Only a dead one: it takes the slot the "+"
+            has on a live computer, which is the same slot for the opposite
+            reason, and it never has anything to interrupt. That is also why
+            it does not ask first the way the work item's does — nothing is
+            running, nothing is deleted, and the toast says where it went.
+            `preventDefault` on the way out keeps the summary from folding.
+          */}
+          {!comp.live && (
+            <button
+              type="button"
+              className="icon small-icon"
+              title={`Take ${computerLabel(comp)} out of "${item.title}". It is already down; its conversations stay on Fountain, and the work item puts it back.`}
+              aria-label={`Remove ${computerLabel(comp)} from ${item.title}`}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                void removeComputers(item.id, [comp.key]);
+              }}
+            >
+              ×
             </button>
           )}
         </summary>

@@ -26,7 +26,7 @@
  *   POST   /api/projects/:id/items
  *   PATCH  /api/projects/:id/items/:item
  *   DELETE /api/projects/:id/items/:item
- *   POST   /api/projects/:id/items/:item/computers        { key }: retire that computer and take it out of the item
+ *   POST   /api/projects/:id/items/:item/computers        { key } or { keys }: retire those computers and take them out of the item
  *   DELETE /api/projects/:id/items/:item/computers/:key   put it back
  *   *      /f/:id/api/...                   Fountain, scoped to the project (proxy.ts)
  *   POST   /mcp                             the work items as MCP tools, on a Fountain key (mcp.ts)

@@ -53,7 +53,7 @@ export interface RemovedComputerDto {
   by: string;
 }
 
-/** What closing a work item did to its computers. */
+/** What closing a work item — or removing computers from one — did to its computers. */
 export interface RetiredDto {
   /** Conversations retired. */
   conversations: number;
@@ -467,19 +467,42 @@ export async function removeItem(ctx: AppContext, req: Request, id: string, item
  * the browser can say so. A removal whose terminate failed is still a removal —
  * the machine may be up, and the answer says which, rather than the item
  * quietly keeping a row nobody asked for.
+ *
+ * **One or many, in one request.** An item that has been worked on for a week
+ * has a week of dead machines on it, and clearing those one at a time is the
+ * chore this is supposed to end, not a smaller version of it. So the body
+ * takes `key` or `keys`, and the retire is a single pass over a single
+ * listing however many are named — the alternative, a request each, is a
+ * conversation listing each.
+ *
+ * Which computers are worth sweeping is *not* decided here. Whether a machine
+ * is still up is read off its conversations and its sandbox record together,
+ * and the browser is the side that holds both (src/lib/sidebar.ts, `isLive`);
+ * a second definition on this side would be a second answer. The browser names
+ * the computers, this removes exactly those.
  */
 export async function removeComputer(ctx: AppContext, req: Request, id: string, itemId: string): Promise<Response> {
   const user = await authenticate(ctx, req);
   const { project } = projectAccess(ctx, user, id);
   const item = ctx.db.getItem(itemId);
   if (!item || item.project_id !== id) throw new HttpError(404, "not_found", "No such work item.");
-  const body = await readJson(req);
-  const key = str(body.key, 200).trim();
-  if (!key) throw new HttpError(422, "key_required", "Which computer?");
-  const retired = await retire(ctx, project, itemId, key);
-  ctx.db.removeComputer(itemId, key, user.email);
+  const keys = computerKeys(await readJson(req));
+  if (keys.length === 0) throw new HttpError(422, "key_required", "Which computer?");
+  const retired = await retire(ctx, project, itemId, new Set(keys));
+  for (const key of keys) ctx.db.removeComputer(itemId, key, user.email);
   ctx.events.emit(id, { kind: "items" });
-  return json({ data: itemDto(ctx.db.getItem(itemId)!, ctx.db.removedComputers(itemId)), retired });
+  return json({ data: itemDto(ctx.db.getItem(itemId)!, ctx.db.removedComputers(itemId)), retired, removed: keys.length });
+}
+
+/** `{ key }` or `{ keys }`, deduped and trimmed. Capped: a sweep is an item's computers, not a payload. */
+function computerKeys(body: Record<string, unknown>): string[] {
+  const raw = Array.isArray(body.keys) ? body.keys : [body.key];
+  const out = new Set<string>();
+  for (const k of raw.slice(0, 200)) {
+    const key = str(k, 200).trim();
+    if (key) out.add(key);
+  }
+  return [...out];
 }
 
 /**
@@ -511,8 +534,8 @@ export function byItem(rows: RemovedComputerRow[]): Map<string, RemovedComputerR
 
 /**
  * An item's computers, once it is closed — done or won't do alike: the work
- * is over either way, so the machines go. With `key`, just the one computer:
- * what removing it from the item has to do first (`removeComputer`).
+ * is over either way, so the machines go. With `keys`, just those computers:
+ * what removing them from the item has to do first (`removeComputer`).
  *
  * Fountain has no "destroy this sandbox" — a sprite is torn down with the
  * last live conversation on it (ADR 0023), so retiring every conversation of
@@ -524,7 +547,7 @@ export function byItem(rows: RemovedComputerRow[]): Map<string, RemovedComputerR
  * reported back, so the browser can say so rather than imply a machine is
  * gone when it is still running.
  */
-async function retire(ctx: AppContext, project: ProjectRow, itemId: string, key?: string): Promise<RetiredDto> {
+async function retire(ctx: AppContext, project: ProjectRow, itemId: string, keys?: ReadonlySet<string>): Promise<RetiredDto> {
   const out: RetiredDto = { conversations: 0, computers: 0, failed: 0 };
   let convs: ConversationSummary[];
   let client: FountainClient;
@@ -534,7 +557,7 @@ async function retire(ctx: AppContext, project: ProjectRow, itemId: string, key?
   } catch (err) {
     return { ...out, error: reason(err) };
   }
-  const live = convs.filter((c) => channelIsItem(c.channel_id, project.id, itemId) && c.status !== "terminated" && (key === undefined || computerKey(c) === key));
+  const live = convs.filter((c) => channelIsItem(c.channel_id, project.id, itemId) && c.status !== "terminated" && (keys === undefined || keys.has(computerKey(c))));
   const computers = new Set<string>();
   await Promise.all(
     live.map(async (c) => {

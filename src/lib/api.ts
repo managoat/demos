@@ -318,10 +318,11 @@ export const api = {
   patchItem: (projectId: string, itemId: string, patch: ItemPatch) =>
     call<{ data: ItemDto; retired?: RetiredDto }>("PATCH", `/api/projects/${projectId}/items/${itemId}`, patch),
   deleteItem: (projectId: string, itemId: string) => call<{ ok: true }>("DELETE", `/api/projects/${projectId}/items/${itemId}`),
-  // The envelope again: removing a computer retires whatever is still live on
-  // it first, and says what went.
-  removeComputer: (projectId: string, itemId: string, key: string) =>
-    call<{ data: ItemDto; retired: RetiredDto }>("POST", `/api/projects/${projectId}/items/${itemId}/computers`, { key }),
+  // The envelope again: removing computers retires whatever is still live on
+  // them first, and says what went. Many in one request, because clearing a
+  // week of dead machines one at a time is the chore this exists to end.
+  removeComputers: (projectId: string, itemId: string, keys: string[]) =>
+    call<{ data: ItemDto; retired: RetiredDto; removed: number }>("POST", `/api/projects/${projectId}/items/${itemId}/computers`, { keys }),
   restoreComputer: (projectId: string, itemId: string, key: string) =>
     data(call<{ data: ItemDto }>("DELETE", `/api/projects/${projectId}/items/${itemId}/computers/${encodeURIComponent(key)}`)),
 

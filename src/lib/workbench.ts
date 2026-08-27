@@ -50,20 +50,29 @@ export function retiredMessage(r: RetiredDto, status: ItemStatus = "done"): { te
 }
 
 /**
- * What to say after a computer was taken out of a work item. Removing retires
- * whatever was still live on it first (server/projects.ts), and that is the
- * only part worth a word: a computer that was already down went quietly, and
- * "removed" is visible on screen without being told. One that would *not* go
- * is news either way round — the row has left the item and the machine has
- * not, which is the one outcome a person needs to hear about.
+ * What to say after computers were taken out of a work item (`removed` of
+ * them). Two things are worth a word, and the row disappearing says neither.
+ *
+ * Where it went: a removal is undone from a fold on the work item's own page,
+ * which nobody would go looking for unless told it is there — so even the
+ * quietest case, a machine that was already down, says so once.
+ *
+ * And what would not go: removing retires whatever was still live first
+ * (server/projects.ts), so a terminate Fountain refused means the row has left
+ * the item and the machine has not. That is the one outcome nobody can see for
+ * themselves, and it is an error, not a note.
  */
-export function removedMessage(r: RetiredDto): { text: string; kind: "info" | "error" } | null {
+export function removedMessage(r: RetiredDto, removed = 1): { text: string; kind: "info" | "error" } | null {
+  const what = removed === 1 ? "Removed" : `Removed ${count(removed, "computer")}`;
   if (r.failed > 0 || r.error) {
-    const what = r.failed > 0 ? `${count(r.failed, "conversation")} would not retire, so it may still be running` : "it may still be running";
-    return { text: `Removed, but ${what}${r.error ? `: ${r.error}` : "."}`, kind: "error" };
+    const why =
+      r.failed > 0
+        ? `${count(r.failed, "conversation")} would not retire, so ${removed === 1 ? "it may" : "some may"} still be running`
+        : `${removed === 1 ? "it may" : "they may"} still be running`;
+    return { text: `${what}, but ${why}${r.error ? `: ${r.error}` : "."}`, kind: "error" };
   }
-  if (r.conversations === 0) return null;
-  return { text: `Removed, and retired ${count(r.conversations, "conversation")} on it.`, kind: "info" };
+  if (r.conversations === 0) return { text: `${what}. Put ${removed === 1 ? "it" : "them"} back from the work item.`, kind: "info" };
+  return { text: `${what}, and retired ${count(r.conversations, "conversation")}.`, kind: "info" };
 }
 
 function count(n: number, noun: string): string {

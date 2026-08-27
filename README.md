@@ -348,10 +348,14 @@ brings nothing back: it is new conversations from there.
 terminated conversation for good — the transcript is the record of what was
 done, and the bill is the owner's — so an item worked on all week ends up a
 column of dead machines with the live one somewhere in it, and nothing in the
-app could say "this one is over". **Remove**, on a computer's row on the work
-item, is the other half: it retires whatever is still running on that machine
-and takes it out of the item — out of the explorer, out of the palette, out
-of the feed. Removing is not deleting, and the app never pretends otherwise:
+app could say "this one is over". **Remove** is the other half: it retires
+whatever is still running on that machine and takes it out of the item — out
+of the explorer, out of the palette, out of the feed. It is on the computer's
+row on the work item, and, because the clutter is felt in the tree rather
+than on the page, as **×** on a dead computer's row in the explorer — the
+same slot "+" has on a live one, for the opposite reason. A week's worth goes
+in one go: **Remove N gone** beside the item's conversations takes every
+machine already down and nothing else. Removing is not deleting, and the app never pretends otherwise:
 the conversations stay on Fountain, a link straight to one still opens (and
 ⌘F still searches inside it), `/api/me/cost` still counts every token they
 spent, and the item's own **"N computers removed"** fold puts any of them

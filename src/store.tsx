@@ -229,11 +229,12 @@ export interface ProjectStore {
   addTeammate: (itemId: string, agentId: string) => Promise<void>;
   removeTeammate: (itemId: string, agentId: string) => Promise<void>;
   /**
-   * Take a computer out of a work item — the machine's work is over and the
-   * row is in the way. Whatever is still live on it is retired first, by the
-   * server, and the conversation list comes back without it.
+   * Take computers out of a work item — their work is over and the rows are in
+   * the way. Whatever is still live on them is retired first, by the server,
+   * and the conversation list comes back without them. One key or a sweep's
+   * worth; either way it is one request.
    */
-  removeComputer: (itemId: string, key: string) => Promise<void>;
+  removeComputers: (itemId: string, keys: string[]) => Promise<void>;
   /** Put one back. Nothing was deleted, so its conversations simply return. */
   restoreComputer: (itemId: string, key: string) => Promise<void>;
   /**
@@ -526,14 +527,15 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
     },
     [items, updateItem],
   );
-  const removeComputer = useCallback<ProjectStore["removeComputer"]>(
-    async (itemId, key) => {
+  const removeComputers = useCallback<ProjectStore["removeComputers"]>(
+    async (itemId, keys) => {
+      if (keys.length === 0) return;
       await run(async () => {
-        const { retired } = await api.removeComputer(projectId, itemId, key);
-        // Say what actually went. A computer that was already down retires
-        // nothing and needs no notice; one that would not go is news, because
-        // the row is gone from the item and the machine may not be.
-        const msg = removedMessage(retired);
+        const { retired, removed } = await api.removeComputers(projectId, itemId, keys);
+        // Always say something. The row leaving is the obvious half; where it
+        // went is not, and a removal is undone from a fold on the work item
+        // that nobody would think to look for unless told it is there.
+        const msg = removedMessage(retired, removed);
         if (msg) toast(msg.text, msg.kind);
       });
       void refresh();
@@ -589,7 +591,7 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
             removeItem,
             addTeammate,
             removeTeammate,
-            removeComputer,
+            removeComputers,
             restoreComputer,
             startConversation,
           }
@@ -619,7 +621,7 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
       removeItem,
       addTeammate,
       removeTeammate,
-      removeComputer,
+      removeComputers,
       restoreComputer,
       startConversation,
     ],

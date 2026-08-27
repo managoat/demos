@@ -47,11 +47,15 @@ describe("retiredMessage", () => {
 });
 
 describe("removedMessage", () => {
-  test("a computer that was already down goes quietly — the row leaving says it", () => {
-    expect(removedMessage({ conversations: 0, computers: 0, failed: 0 })).toBeNull();
+  test("a computer that was already down still says where it went — the undo is not discoverable", () => {
+    expect(removedMessage({ conversations: 0, computers: 0, failed: 0 })).toEqual({ text: "Removed. Put it back from the work item.", kind: "info" });
   });
   test("one that was still running says what it cost to take out", () => {
-    expect(removedMessage({ conversations: 2, computers: 1, failed: 0 })).toEqual({ text: "Removed, and retired 2 conversations on it.", kind: "info" });
+    expect(removedMessage({ conversations: 2, computers: 1, failed: 0 })).toEqual({ text: "Removed, and retired 2 conversations.", kind: "info" });
+  });
+  test("a sweep counts what it swept, and reads as more than one thing", () => {
+    expect(removedMessage({ conversations: 0, computers: 0, failed: 0 }, 4)).toEqual({ text: "Removed 4 computers. Put them back from the work item.", kind: "info" });
+    expect(removedMessage({ conversations: 3, computers: 2, failed: 0 }, 2)).toEqual({ text: "Removed 2 computers, and retired 3 conversations.", kind: "info" });
   });
   test("the row left the item and the machine did not: the one outcome worth hearing about", () => {
     expect(removedMessage({ conversations: 0, computers: 0, failed: 1, error: "Fountain answered 500." })).toEqual({
@@ -62,6 +66,9 @@ describe("removedMessage", () => {
       text: "Removed, but it may still be running: Fountain answered 401.",
       kind: "error",
     });
+    expect(removedMessage({ conversations: 0, computers: 0, failed: 2, error: "Fountain answered 500." }, 3)!.text).toBe(
+      "Removed 3 computers, but 2 conversations would not retire, so some may still be running: Fountain answered 500.",
+    );
   });
 });
 
