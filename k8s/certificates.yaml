@@ -9,4 +9,4 @@ spec:
     name: letsencrypt-production
     kind: ClusterIssuer
   dnsNames:
-    - arena.inevitable.fyi
+    - arena.demo.managoat.com

@@ -9,7 +9,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: "Host(`arena.inevitable.fyi`)"
+    - match: "Host(`arena.demo.managoat.com`)"
       kind: Rule
       services:
         - name: arena
@@ -28,7 +28,7 @@ spec:
   entryPoints:
     - web
   routes:
-    - match: "Host(`arena.inevitable.fyi`)"
+    - match: "Host(`arena.demo.managoat.com`)"
       kind: Rule
       middlewares:
         - name: redirect-https

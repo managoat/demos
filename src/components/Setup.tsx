@@ -60,7 +60,7 @@ export function Setup(props: { error: string | null; onPaste: (s: Settings) => v
         <p className="fineprint">Everything stays in this browser. Signing out revokes an OAuth key.</p>
         <p className="fineprint">
           Runs on <a href="https://github.com/BinaryBourbon/fountain">Fountain</a> ·{" "}
-          <a href="https://github.com/jhgaylor/arena">source</a>
+          <a href="https://github.com/managoat/arena">source</a>
         </p>
       </div>
     </div>

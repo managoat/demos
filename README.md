@@ -9,7 +9,7 @@ It is a static single-page app with no backend of its own — it talks only to
 the [Fountain](https://github.com/BinaryBourbon/fountain) API, where each
 contender runs as a teammate (one agent per model, hired lazily on the first
 fight and reused across rounds). Client patterns (OAuth, SSE, API client)
-follow [dns-desk](https://github.com/jhgaylor/dns-desk).
+follow [dns-desk](https://github.com/managoat/dns-desk).
 
 ## Run it
 
@@ -39,8 +39,8 @@ API_CORS_ORIGINS=http://localhost:5175     # or wherever you host the build
 OAUTH_CLIENTS='[{"id":"arena","name":"Arena","redirect_uris":["http://localhost:5175/"]}]'
 ```
 
-(The production deployment at `arena.inevitable.fyi` needs the same two
-entries with `https://arena.inevitable.fyi` / `https://arena.inevitable.fyi/`.)
+(The production deployment at `arena.demo.managoat.com` needs the same two
+entries with `https://arena.demo.managoat.com` / `https://arena.demo.managoat.com/`.)
 
 ## How it works
 
