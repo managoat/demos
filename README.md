@@ -76,7 +76,7 @@ The Fountain server must allow the browser origin — set on the server:
 
 ```
 API_CORS_ORIGINS=http://localhost:5173        # dev
-API_CORS_ORIGINS=https://jakegaylor.com       # wherever you host the build
+API_CORS_ORIGINS=https://fountain-conversations.demo.managoat.com   # wherever you host the build
 ```
 
 Off by default; it admits only a presented bearer key, never a cookie.
@@ -88,9 +88,10 @@ bun run build      # dist/ — static, host it anywhere
 ```
 
 The only build-time knob is `VITE_BASE`, the path the files are served under
-(default `/`). This repo deploys itself to GitHub Pages on every push to `main`
-(`.github/workflows/pages.yml`): https://jakegaylor.com/fountain-conversations/
-— so the origin to allow on the server is `https://jakegaylor.com`.
+(default `/`). This repo builds an nginx image on every push to `main`
+(`.github/workflows/build.yml`) and Flux rolls it out on home-cloud at
+https://fountain-conversations.demo.managoat.com/ — so the origin to allow on
+the server is `https://fountain-conversations.demo.managoat.com`.
 
 ## What it uses
 

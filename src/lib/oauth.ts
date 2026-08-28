@@ -33,7 +33,7 @@ async function challengeFor(verifier: string): Promise<string> {
 /**
  * The redirect URI: this app's page with the hash cleared. Must match a
  * `redirect_uris` entry registered for the client on the server (e.g.
- * https://jakegaylor.com/fountain-conversations/ or http://localhost:5173/).
+ * https://fountain-conversations.demo.managoat.com/ or http://localhost:5173/).
  */
 export function redirectUri(): string {
   return window.location.origin + window.location.pathname;
