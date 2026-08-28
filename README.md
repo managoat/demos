@@ -10,7 +10,7 @@ the [Fountain](https://github.com/BinaryBourbon/fountain) API. The coordinator
 runs as a teammate; every worker is a plain `POST /api/conversations`, one
 fresh computer each; the whole fleet streams back on a single
 `GET /api/events/stream?blocks=true` connection. Client patterns (OAuth, SSE,
-API client) follow [dns-desk](https://github.com/jhgaylor/dns-desk).
+API client) follow [dns-desk](https://github.com/managoat/dns-desk).
 
 ## Run it
 

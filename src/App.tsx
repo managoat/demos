@@ -632,7 +632,7 @@ function Control(props: {
           </div>
           <footer className="fineprint">
             Runs on <a href="https://github.com/BinaryBourbon/fountain">Fountain</a> ·{" "}
-            <a href="https://github.com/jhgaylor/mission-control">source</a>
+            <a href="https://github.com/managoat/mission-control">source</a>
           </footer>
         </aside>
 

@@ -1,4 +1,4 @@
-# Builds the mission-control image, pushes it to ghcr.io/jhgaylor/mission-control, then pins
+# Builds the mission-control image, pushes it to ghcr.io/managoat/mission-control, then pins
 # the immutable sha tag into k8s/deployment.yaml so Flux (home-cloud) rolls
 # the exact image that was just built. Multi-arch because home-cloud's k3s
 # nodes are arm64 Lima VMs. The SPA bundle is built on the runner (bun), so

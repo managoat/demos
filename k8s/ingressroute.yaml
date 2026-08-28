@@ -9,7 +9,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: "Host(`mission.inevitable.fyi`)"
+    - match: "Host(`mission-control.demo.managoat.com`)"
       kind: Rule
       services:
         - name: mission-control
@@ -28,7 +28,7 @@ spec:
   entryPoints:
     - web
   routes:
-    - match: "Host(`mission.inevitable.fyi`)"
+    - match: "Host(`mission-control.demo.managoat.com`)"
       kind: Rule
       middlewares:
         - name: redirect-https
