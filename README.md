@@ -8,7 +8,7 @@ jargon, no dashboards to configure.
 It is a static single-page app with no backend of its own — it talks only to
 the [Fountain](https://github.com/BinaryBourbon/fountain) API, where the
 analyst runs as a teammate (an agent in a sandbox). Client patterns (OAuth,
-SSE, API client) follow [dns-desk](https://github.com/jhgaylor/dns-desk).
+SSE, API client) follow [dns-desk](https://github.com/managoat/dns-desk).
 
 ## Run it
 
@@ -36,9 +36,9 @@ API_CORS_ORIGINS=http://localhost:5175     # or wherever you host the build
 OAUTH_CLIENTS='[{"id":"table-talk","name":"Table Talk","redirect_uris":["http://localhost:5175/"]}]'
 ```
 
-(The hosted copy at `tables.inevitable.fyi` needs its origin in
+(The hosted copy at `table-talk.demo.managoat.com` needs its origin in
 `API_CORS_ORIGINS` and a `table-talk` client with
-`https://tables.inevitable.fyi/` registered the same way.)
+`https://table-talk.demo.managoat.com/` registered the same way.)
 
 ## How it works: the report protocol
 
