@@ -387,7 +387,7 @@ export function App() {
 
       <footer className="room-footer fineprint">
         Runs on <a href="https://github.com/BinaryBourbon/fountain">Fountain</a> ·{" "}
-        <a href="https://github.com/jhgaylor/briefing-room">source</a>
+        <a href="https://github.com/managoat/briefing-room">source</a>
       </footer>
     </div>
   );

@@ -8,7 +8,7 @@ It is a static single-page app with no backend of its own — it talks only to
 the [Fountain](https://github.com/BinaryBourbon/fountain) API, where the
 researcher runs as a teammate (an agent in a sandbox with internet access; it
 holds no credentials of yours). Client patterns (OAuth, SSE, API client)
-follow [dns-desk](https://github.com/jhgaylor/dns-desk).
+follow [dns-desk](https://github.com/managoat/dns-desk).
 
 ## Run it
 
@@ -32,7 +32,7 @@ API_CORS_ORIGINS=http://localhost:5175     # or wherever you host the build
 OAUTH_CLIENTS='[{"id":"briefing-room","name":"Briefing Room","redirect_uris":["http://localhost:5175/"]}]'
 ```
 
-(In production this app is served at `https://briefs.inevitable.fyi` — that
+(In production this app is served at `https://briefing-room.demo.managoat.com` — that
 origin goes in `API_CORS_ORIGINS` and its redirect URI in `OAUTH_CLIENTS`.)
 
 ## How it works: the brief protocol

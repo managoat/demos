@@ -9,4 +9,4 @@ spec:
     name: letsencrypt-production
     kind: ClusterIssuer
   dnsNames:
-    - briefs.inevitable.fyi
+    - briefing-room.demo.managoat.com

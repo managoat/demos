@@ -9,7 +9,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: "Host(`briefs.inevitable.fyi`)"
+    - match: "Host(`briefing-room.demo.managoat.com`)"
       kind: Rule
       services:
         - name: briefing-room
@@ -28,7 +28,7 @@ spec:
   entryPoints:
     - web
   routes:
-    - match: "Host(`briefs.inevitable.fyi`)"
+    - match: "Host(`briefing-room.demo.managoat.com`)"
       kind: Rule
       middlewares:
         - name: redirect-https
