@@ -1,23 +1,22 @@
-# demos.inevitable.fyi is retired. Its index of the apps built on the Fountain
-# API moved onto the product site itself, at https://managoat.com/built-with,
-# where the roster is a list in code (MarketingHTML.built_apps/0) that the
-# suite checks — rather than hand-written HTML here that fell three apps
-# behind and still named the pre-managoat server URL.
+# demos.inevitable.fyi was this index's first home. It spent a while pointed at
+# managoat.com/built-with, because there was no index here to point at; now
+# there is one again, at demo.managoat.com, sitting at the parent of every host
+# it lists. Sending the old host there rather than to built-with keeps the two
+# pages in their own lanes: this one is a directory of what is running, that
+# one is the product's case for it.
 #
-# The host keeps its DNS record, its certificate and its route; only the
-# backend goes. Every path 308s to the one page that replaced it, so any link
-# anyone saved still lands somewhere true.
+# Every path 308s, so any link anyone saved still lands somewhere true.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
-  name: retired-to-built-with
+  name: moved-to-demo-index
   namespace: fountain-demos
 spec:
   redirectRegex:
     # Matches any path on the host, including bare "/" — the old site was one
     # page, so there is nothing to map per-URL the way a docs tombstone does.
     regex: "^https?://demos\\.inevitable\\.fyi/.*"
-    replacement: "https://managoat.com/built-with"
+    replacement: "https://demo.managoat.com/"
     # 308: permanent, and preserves the method. Browsers and crawlers both
     # take it as "this moved", which is what happened.
     permanent: true

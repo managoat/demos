@@ -9,4 +9,8 @@ spec:
     name: letsencrypt-production
     kind: ClusterIssuer
   dnsNames:
+    # The index itself, at the parent of every app it lists.
+    - demo.managoat.com
+    # The host this index used to live on. It only 308s now, but a redirect
+    # still has to answer on https or the hop is the browser's warning page.
     - demos.inevitable.fyi
