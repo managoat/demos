@@ -9,8 +9,8 @@ It is a static single-page app with no backend of its own — it talks only to
 the [Fountain](https://github.com/BinaryBourbon/fountain) API, where each sage
 runs as a teammate (an agent in a sandbox with a real shell and a real git).
 Client patterns (OAuth, SSE, API client) follow
-[dns-desk](https://github.com/jhgaylor/dns-desk) /
-[fountain-team](https://github.com/jhgaylor/fountain-team).
+[dns-desk](https://github.com/managoat/dns-desk) /
+[fountain-team](https://github.com/managoat/fountain-team).
 
 ## Run it
 
@@ -34,8 +34,8 @@ API_CORS_ORIGINS=http://localhost:5175     # or wherever you host the build
 OAUTH_CLIENTS='[{"id":"repo-sage","name":"Repo Sage","redirect_uris":["http://localhost:5175/"]}]'
 ```
 
-The production deployment at `reposage.inevitable.fyi` needs the same two
-entries with `https://reposage.inevitable.fyi` / `https://reposage.inevitable.fyi/`.
+The production deployment at `repo-sage.demo.managoat.com` needs the same two
+entries with `https://repo-sage.demo.managoat.com` / `https://repo-sage.demo.managoat.com/`.
 
 ## How it works: the sage protocol
 

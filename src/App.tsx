@@ -408,7 +408,7 @@ export function App() {
           </button>
           <p className="fineprint">
             Runs on <a href="https://github.com/BinaryBourbon/fountain">Fountain</a> ·{" "}
-            <a href="https://github.com/jhgaylor/repo-sage">source</a>
+            <a href="https://github.com/managoat/repo-sage">source</a>
           </p>
         </div>
       </aside>

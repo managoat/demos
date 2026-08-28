@@ -9,7 +9,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: "Host(`reposage.inevitable.fyi`)"
+    - match: "Host(`repo-sage.demo.managoat.com`)"
       kind: Rule
       services:
         - name: repo-sage
@@ -28,7 +28,7 @@ spec:
   entryPoints:
     - web
   routes:
-    - match: "Host(`reposage.inevitable.fyi`)"
+    - match: "Host(`repo-sage.demo.managoat.com`)"
       kind: Rule
       middlewares:
         - name: redirect-https

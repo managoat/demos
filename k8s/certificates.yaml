@@ -9,4 +9,4 @@ spec:
     name: letsencrypt-production
     kind: ClusterIssuer
   dnsNames:
-    - reposage.inevitable.fyi
+    - repo-sage.demo.managoat.com
