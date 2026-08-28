@@ -769,7 +769,7 @@ export function App() {
           <p className="fineprint">
             The audit is <a href="https://intentius.io/chant/cli/audit/">chant</a>. The cron and the computer are{" "}
             <a href="https://github.com/BinaryBourbon/fountain">Fountain</a>.{" "}
-            <a href="https://github.com/jhgaylor/rounds">Source</a>.
+            <a href="https://github.com/managoat/rounds">Source</a>.
           </p>
         </div>
       </aside>

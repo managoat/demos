@@ -8,7 +8,7 @@ workflows, Kubernetes manifests, Dockerfiles, Helm charts and cloud templates on
 a schedule. When it finds something worth a pull request, an
 agent fixes it, verifies the fix, and opens one. You meet the work on GitHub.
 
-This is [Mend](https://github.com/jhgaylor/mend)'s ambient sibling. Mend is the
+This is [Mend](https://github.com/managoat/mend)'s ambient sibling. Mend is the
 interactive version: you point it at a repo, watch it work, and take a patch. Rounds is the version you turn on and forget — same audit, same agent,
 opposite defaults, because nobody is watching when it runs.
 
@@ -251,8 +251,8 @@ lives in Fountain as agents, schedules and conversations.
 ## Deploy
 
 Static files behind nginx: CI builds the bundle, bakes
-`ghcr.io/jhgaylor/rounds`, pins the sha into `k8s/deployment.yaml`, and Flux
-rolls it out at `rounds.inevitable.fyi`.
+`ghcr.io/managoat/rounds`, pins the sha into `k8s/deployment.yaml`, and Flux
+rolls it out at `rounds.demo.managoat.com`.
 
 ## License
 

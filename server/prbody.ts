@@ -80,7 +80,7 @@ export function renderBody(input: BodyInput): string {
   lines.push("---");
   lines.push("");
   lines.push(
-    "Opened by [Rounds](https://rounds.inevitable.fyi), which audits this repository's configuration on a schedule. " +
+    "Opened by [Rounds](https://rounds.demo.managoat.com), which audits this repository's configuration on a schedule. " +
       "Close it without merging and this file will never be raised again.",
   );
 

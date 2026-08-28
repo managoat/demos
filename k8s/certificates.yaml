@@ -9,4 +9,4 @@ spec:
     name: letsencrypt-production
     kind: ClusterIssuer
   dnsNames:
-    - rounds.inevitable.fyi
+    - rounds.demo.managoat.com

@@ -58,7 +58,7 @@ export function Landing() {
         <nav className="lp-navlinks">
           <a href="#what">What it watches</a>
           <a href="#tiers">What it will open</a>
-          <a href="https://github.com/jhgaylor/rounds">Source</a>
+          <a href="https://github.com/managoat/rounds">Source</a>
         </nav>
       </header>
 
@@ -169,8 +169,8 @@ max_open_prs: 3`}</code>
         <p className="fineprint">
           The audit is <a href="https://intentius.io/chant/cli/audit/">chant</a>. The schedule and the computer are{" "}
           <a href="https://github.com/BinaryBourbon/fountain">Fountain</a>. The interactive version — point it at a
-          repo, watch it work, take the patch — is <a href="https://github.com/jhgaylor/mend">Mend</a>.{" "}
-          <a href="https://github.com/jhgaylor/rounds">Source</a>.
+          repo, watch it work, take the patch — is <a href="https://github.com/managoat/mend">Mend</a>.{" "}
+          <a href="https://github.com/managoat/rounds">Source</a>.
         </p>
       </footer>
     </div>

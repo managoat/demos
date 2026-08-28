@@ -153,8 +153,8 @@ git push "https://x-access-token:$GITHUB_TOKEN@github.com/o/r.git" HEAD:refs/hea
 
   test("the judgment-calls opt-in survives a rewrite", async () => {
     const { policyOfPrompt } = await import("./spec");
-    expect(policyOfPrompt(OLD_PROMPT(OPTED_IN, "https://rounds.inevitable.fyi")).includeNeedsReview).toBe(true);
-    expect(policyOfPrompt(OLD_PROMPT(MECHANICAL, "https://rounds.inevitable.fyi")).includeNeedsReview).toBe(false);
+    expect(policyOfPrompt(OLD_PROMPT(OPTED_IN, "https://rounds.demo.managoat.com")).includeNeedsReview).toBe(true);
+    expect(policyOfPrompt(OLD_PROMPT(MECHANICAL, "https://rounds.demo.managoat.com")).includeNeedsReview).toBe(false);
   });
 
   test("it reads back out of the new prompt too, so this keeps working", async () => {
@@ -169,7 +169,7 @@ git push "https://x-access-token:$GITHUB_TOKEN@github.com/o/r.git" HEAD:refs/hea
     const { apiBaseOfPrompt } = await import("./spec");
     // The hazard this exists to stop: refreshing prompts from a dev session
     // would otherwise repoint every production agent at localhost.
-    expect(apiBaseOfPrompt(OLD_PROMPT(MECHANICAL, "https://rounds.inevitable.fyi"))).toBe("https://rounds.inevitable.fyi");
+    expect(apiBaseOfPrompt(OLD_PROMPT(MECHANICAL, "https://rounds.demo.managoat.com"))).toBe("https://rounds.demo.managoat.com");
     expect(apiBaseOfPrompt(OLD_PROMPT(MECHANICAL, "http://localhost:5181"))).toBe("http://localhost:5181");
   });
 
@@ -188,8 +188,8 @@ git push "https://x-access-token:$GITHUB_TOKEN@github.com/o/r.git" HEAD:refs/hea
 
   test("an old prompt genuinely differs from the new one, so the refresh fires", async () => {
     const { systemPrompt } = await import("./spec");
-    const old = OLD_PROMPT(MECHANICAL, "https://rounds.inevitable.fyi");
-    const want = systemPrompt({ host: "github.com", owner: "o", name: "r" }, { includeNeedsReview: false }, "https://rounds.inevitable.fyi");
+    const old = OLD_PROMPT(MECHANICAL, "https://rounds.demo.managoat.com");
+    const want = systemPrompt({ host: "github.com", owner: "o", name: "r" }, { includeNeedsReview: false }, "https://rounds.demo.managoat.com");
     expect(old).not.toBe(want);
     expect(old).toContain("git push");
     expect(want).not.toContain("git push");

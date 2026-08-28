@@ -87,7 +87,7 @@ export function environmentSpec(): {
   return {
     name: ENVIRONMENT_NAME,
     description:
-      "chant and every audit lexicon, for Rounds (rounds.inevitable.fyi). Holds no credentials: each repository's agent carries its own grant in its own vault, and pull requests are opened by the Rounds server rather than from here.",
+      "chant and every audit lexicon, for Rounds (rounds.demo.managoat.com). Holds no credentials: each repository's agent carries its own grant in its own vault, and pull requests are opened by the Rounds server rather than from here.",
     networking_type: "unrestricted",
     packages: { apt: ["jq"], npm: CHANT_PACKAGES },
   };
@@ -137,7 +137,7 @@ export interface RoundsPolicy {
 export const DEFAULT_POLICY: RoundsPolicy = { includeNeedsReview: true };
 
 /** Where this deployment's server lives, for a prompt baked at enrollment time. */
-export const DEFAULT_API_BASE = "https://rounds.inevitable.fyi";
+export const DEFAULT_API_BASE = "https://rounds.demo.managoat.com";
 
 /**
  * Read an enrolled agent's own choices back out of the prompt it is carrying.
