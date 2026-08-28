@@ -251,7 +251,7 @@ const fountain = Bun.serve({
             // README's own worked example puts a Fountain key in `headers`.
             mcp_servers: {
               gh: { command: "gh-mcp", args: ["--repo", "acme/thing"], env: { GITHUB_TOKEN: "ghp_supersecret", GH_HOST: "github.com" } },
-              workbench: { type: "http", url: "https://workbench.inevitable.fyi/mcp", headers: { Authorization: "Bearer ftn_supersecret" } },
+              workbench: { type: "http", url: "https://fountain-workbench.demo.managoat.com/mcp", headers: { Authorization: "Bearer ftn_supersecret" } },
               acp: { command: "x", env: [{ name: "TOKEN", value: "ftn_supersecret" }] },
               odd: "not a map",
             },
@@ -763,7 +763,7 @@ describe("the project-scoped proxy", () => {
       // What the panel needs to say what is plugged in survives untouched.
       expect(entry("gh").command).toBe("gh-mcp");
       expect(entry("gh").args).toEqual(["--repo", "acme/thing"]);
-      expect(entry("workbench").url).toBe("https://workbench.inevitable.fyi/mcp");
+      expect(entry("workbench").url).toBe("https://fountain-workbench.demo.managoat.com/mcp");
       expect(mcp.odd).toBe("not a map");
     }
   });

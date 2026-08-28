@@ -33,7 +33,7 @@ spec:
   secrets:
     WORKBENCH_TOKEN: ${WORKBENCH_TOKEN}
   repositories:
-    - url: https://github.com/jhgaylor/fountain-workbench
+    - url: https://github.com/managoat/fountain-workbench
       mount_path: /workspace/fountain-workbench
       secret_key: GITHUB_TOKEN
     # The API the workbench is built on: OpenAPI, ADRs, the SDK source.
@@ -97,7 +97,7 @@ spec:
     against a fake Fountain in server/app.test.ts — add a case there for any
     change to what the proxy admits.
 
-    Never push to main: a push to main deploys to workbench.inevitable.fyi.
+    Never push to main: a push to main deploys to fountain-workbench.demo.managoat.com.
     Commit with a message that says what changed and why, push a branch, and
     open one pull request with `gh pr create`, with the gate output you
     actually saw. Never end a turn with work pending — the turn that did the
@@ -122,7 +122,7 @@ spec:
   mcp_servers:
     workbench:
       type: http
-      url: https://workbench.inevitable.fyi/mcp
+      url: https://fountain-workbench.demo.managoat.com/mcp
       headers:
         Authorization: "Bearer ${WORKBENCH_TOKEN}"
   permission_policy:

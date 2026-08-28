@@ -78,9 +78,9 @@ describe("MCP servers", () => {
   });
 
   test("http and sse are reached at a url", () => {
-    const [s] = mcpServersOf(agent({ mcp_servers: { workbench: { type: "http", url: "https://workbench.inevitable.fyi/mcp" } } }));
+    const [s] = mcpServersOf(agent({ mcp_servers: { workbench: { type: "http", url: "https://fountain-workbench.demo.managoat.com/mcp" } } }));
     expect(s!.transport).toBe("http");
-    expect(s!.url).toBe("https://workbench.inevitable.fyi/mcp");
+    expect(s!.url).toBe("https://fountain-workbench.demo.managoat.com/mcp");
     expect(s!.command).toBeNull();
   });
 

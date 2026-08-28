@@ -6,7 +6,7 @@ import react from "@vitejs/plugin-react";
 // serves the SPA and forwards both to the server (`bun run server`, :8080).
 //
 // `VITE_BASE` is the path the build is served under; unset means the root,
-// which is where workbench.inevitable.fyi serves it.
+// which is where fountain-workbench.demo.managoat.com serves it.
 const server = process.env.WORKBENCH_SERVER ?? "http://localhost:8080";
 
 export default defineConfig({

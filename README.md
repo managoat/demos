@@ -508,7 +508,7 @@ whole app; the choice is per browser. Every colour in the app comes from the
 tokens at the top of `src/styles.css`, so a new theme is one block of them
 there plus an entry in `src/lib/theme.ts`.
 
-Hosted at **https://workbench.inevitable.fyi/** against
+Hosted at **https://fountain-workbench.demo.managoat.com/** against
 `https://fountain.inevitable.fyi` — sign in with your account there.
 
 ## How it works
@@ -561,7 +561,7 @@ browser ──(session cookie)──▶ workbench server ──(owner's Fountain
   ```json
   { "mcp_servers": { "workbench": {
       "type": "http",
-      "url": "https://workbench.inevitable.fyi/mcp",
+      "url": "https://fountain-workbench.demo.managoat.com/mcp",
       "headers": { "Authorization": "Bearer ftn_…" }
   } } }
   ```
@@ -590,7 +590,7 @@ the SDK does not do for a browser). The server uses plain `fetch`.
 
 `.github/workflows/build.yml` builds the bundle on the runner, packages it
 with the server as a Bun image (`Dockerfile`, multi-arch), pushes
-`ghcr.io/jhgaylor/fountain-workbench:sha-<commit>` and pins that tag into
+`ghcr.io/managoat/fountain-workbench:sha-<commit>` and pins that tag into
 `k8s/deployment.yaml`. [home-cloud](https://github.com/jhgaylor/home-cloud)
 runs a Flux `GitRepository` + `Kustomization` over `k8s/` (namespace, PVC,
 Deployment, Service, Traefik IngressRoutes, cert-manager Certificate), so a

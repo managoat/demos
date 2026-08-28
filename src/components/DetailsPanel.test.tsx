@@ -22,7 +22,7 @@ const agent: Agent = {
   runtime: "claude",
   skills: [{ name: "house-style", content: "# House style" }, { source: "anthropics/skills", ref: "v2" }],
   mcp_servers: {
-    workbench: { type: "http", url: "https://workbench.inevitable.fyi/mcp", headers: { Authorization: "[withheld by the workbench]" } },
+    workbench: { type: "http", url: "https://fountain-workbench.demo.managoat.com/mcp", headers: { Authorization: "[withheld by the workbench]" } },
     gh: { command: "gh-mcp", args: ["--repo", "acme/thing"], env: { GITHUB_TOKEN: "[withheld by the workbench]" } },
   },
   permission_policy: { execute: "ask", default: "auto_allow" },
@@ -104,7 +104,7 @@ describe("the details panel", () => {
     current = store();
     const html = render();
     expect(html).toContain("workbench");
-    expect(html).toContain("https://workbench.inevitable.fyi/mcp");
+    expect(html).toContain("https://fountain-workbench.demo.managoat.com/mcp");
     expect(html).toContain("gh-mcp --repo acme/thing");
     expect(html).toContain("GITHUB_TOKEN");
     expect(html).toContain("Authorization");

@@ -9,7 +9,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: "Host(`workbench.inevitable.fyi`)"
+    - match: "Host(`fountain-workbench.demo.managoat.com`)"
       kind: Rule
       services:
         - name: workbench
@@ -28,7 +28,7 @@ spec:
   entryPoints:
     - web
   routes:
-    - match: "Host(`workbench.inevitable.fyi`)"
+    - match: "Host(`fountain-workbench.demo.managoat.com`)"
       kind: Rule
       middlewares:
         - name: redirect-https
