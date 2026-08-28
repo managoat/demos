@@ -1,0 +1,38 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: dns-desk
+  namespace: dns-desk
+  labels:
+    app: dns-desk
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`dns-desk.demo.managoat.com`)"
+      kind: Rule
+      services:
+        - name: dns-desk
+          port: 80
+  tls:
+    secretName: dns-desk-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: dns-desk-http
+  namespace: dns-desk
+  labels:
+    app: dns-desk
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: "Host(`dns-desk.demo.managoat.com`)"
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: dns-desk
+          port: 80
