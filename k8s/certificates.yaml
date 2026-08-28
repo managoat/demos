@@ -9,4 +9,4 @@ spec:
     name: letsencrypt-production
     kind: ClusterIssuer
   dnsNames:
-    - watchtower.inevitable.fyi
+    - watchtower.demo.managoat.com

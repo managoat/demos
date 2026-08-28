@@ -590,7 +590,7 @@ function Footer() {
   return (
     <footer className="footer fineprint">
       Runs on <a href="https://github.com/BinaryBourbon/fountain">Fountain</a> ·{" "}
-      <a href="https://github.com/jhgaylor/watchtower">source</a>
+      <a href="https://github.com/managoat/watchtower">source</a>
     </footer>
   );
 }

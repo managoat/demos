@@ -9,7 +9,7 @@ It is a static single-page app with no backend of its own — it talks only to
 the [Fountain](https://github.com/BinaryBourbon/fountain) API, where Watchtower
 runs as a teammate. The heartbeat is a Fountain **team schedule**: a cron that
 prompts the agent to patrol, every 30 minutes by default. Client patterns
-(OAuth, SSE, API client) follow [dns-desk](https://github.com/jhgaylor/dns-desk).
+(OAuth, SSE, API client) follow [dns-desk](https://github.com/managoat/dns-desk).
 
 ## Run it
 
@@ -37,8 +37,8 @@ API_CORS_ORIGINS=http://localhost:5175     # or wherever you host the build
 OAUTH_CLIENTS='[{"id":"watchtower","name":"Watchtower","redirect_uris":["http://localhost:5175/"]}]'
 ```
 
-The hosted build at `watchtower.inevitable.fyi` expects those two entries with
-`https://watchtower.inevitable.fyi` / `https://watchtower.inevitable.fyi/`.
+The hosted build at `watchtower.demo.managoat.com` expects those two entries with
+`https://watchtower.demo.managoat.com` / `https://watchtower.demo.managoat.com/`.
 
 ## How it works: the watch protocol
 

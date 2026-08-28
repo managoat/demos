@@ -9,7 +9,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: "Host(`watchtower.inevitable.fyi`)"
+    - match: "Host(`watchtower.demo.managoat.com`)"
       kind: Rule
       services:
         - name: watchtower
@@ -28,7 +28,7 @@ spec:
   entryPoints:
     - web
   routes:
-    - match: "Host(`watchtower.inevitable.fyi`)"
+    - match: "Host(`watchtower.demo.managoat.com`)"
       kind: Rule
       middlewares:
         - name: redirect-https
