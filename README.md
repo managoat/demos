@@ -30,7 +30,7 @@ another site's API is a CORS request. Set on the server:
 
 ```
 API_CORS_ORIGINS=http://localhost:5173        # dev
-API_CORS_ORIGINS=https://jakegaylor.com       # wherever you host the build
+API_CORS_ORIGINS=https://fountain-team.demo.managoat.com   # wherever you host the build
 ```
 
 That switch is off by default and only ever admits a presented bearer key —
@@ -214,10 +214,11 @@ Any static host works (Cloudflare Pages, GitHub Pages, an nginx container, an
 S3 bucket). The only build-time knob is `VITE_BASE`, the path the files are
 served under (default `/`); the Fountain URL is entered in the app.
 
-This repo deploys itself to GitHub Pages on every push to `main`
-(`.github/workflows/pages.yml`): https://jakegaylor.com/fountain-team/ (the
-Pages site sits behind that custom domain) — so the origin to allow on the
-server is `https://jakegaylor.com`.
+This repo builds an nginx image on every push to `main`
+(`.github/workflows/build.yml`), pushes it to `ghcr.io/managoat/fountain-team`
+and pins the sha into `k8s/deployment.yaml`, which Flux rolls out on
+home-cloud at https://fountain-team.demo.managoat.com/ — so the origin to
+allow on the server is `https://fountain-team.demo.managoat.com`.
 
 ## What it uses
 
