@@ -9,7 +9,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: "Host(`mend.inevitable.fyi`)"
+    - match: "Host(`mend.demo.managoat.com`)"
       kind: Rule
       services:
         - name: mend
@@ -28,7 +28,7 @@ spec:
   entryPoints:
     - web
   routes:
-    - match: "Host(`mend.inevitable.fyi`)"
+    - match: "Host(`mend.demo.managoat.com`)"
       kind: Rule
       middlewares:
         - name: redirect-https

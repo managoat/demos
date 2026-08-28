@@ -111,7 +111,7 @@ export function PrPanel(props: {
         branch,
         title: title.trim(),
         body,
-        commitMessage: `${title.trim()}\n\nFrom a chant audit via Mend (https://mend.inevitable.fyi).`,
+        commitMessage: `${title.trim()}\n\nFrom a chant audit via Mend (https://mend.demo.managoat.com).`,
         onStep: setStep,
       });
       setResult(res);

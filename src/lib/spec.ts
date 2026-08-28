@@ -65,7 +65,7 @@ export function environmentSpec(): {
 } {
   return {
     name: ENVIRONMENT_NAME,
-    description: "chant and every audit lexicon blacklight runs, preinstalled for Mend (mend.inevitable.fyi). No credentials belong here — menders clone anonymously and never push; the app opens pull requests from the browser with the user's own GitHub token.",
+    description: "chant and every audit lexicon blacklight runs, preinstalled for Mend (mend.demo.managoat.com). No credentials belong here — menders clone anonymously and never push; the app opens pull requests from the browser with the user's own GitHub token.",
     networking_type: "unrestricted",
     packages: { apt: ["jq"], npm: CHANT_PACKAGES },
   };

@@ -252,10 +252,10 @@ describe("POST /gh/token", () => {
 
 describe("CORS", () => {
   test("an allowed origin is echoed; an unknown one gets no header", async () => {
-    const routes = buildRoutes(loadConfig({ ...ENV, ALLOWED_ORIGINS: "https://rounds.inevitable.fyi" }), { fetchImpl: fakeGitHub().impl });
+    const routes = buildRoutes(loadConfig({ ...ENV, ALLOWED_ORIGINS: "https://rounds.demo.managoat.com" }), { fetchImpl: fakeGitHub().impl });
     const url = new URL("https://mend.test/gh/app");
-    const ok = await routes(new Request(url, { headers: { origin: "https://rounds.inevitable.fyi" } }), url);
-    expect(ok.headers.get("access-control-allow-origin")).toBe("https://rounds.inevitable.fyi");
+    const ok = await routes(new Request(url, { headers: { origin: "https://rounds.demo.managoat.com" } }), url);
+    expect(ok.headers.get("access-control-allow-origin")).toBe("https://rounds.demo.managoat.com");
     const no = await routes(new Request(url, { headers: { origin: "https://evil.test" } }), url);
     expect(no.headers.get("access-control-allow-origin")).toBeNull();
   });

@@ -9,4 +9,4 @@ spec:
     name: letsencrypt-production
     kind: ClusterIssuer
   dnsNames:
-    - mend.inevitable.fyi
+    - mend.demo.managoat.com

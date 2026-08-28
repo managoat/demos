@@ -46,8 +46,8 @@ doing. That is [Fountain](https://github.com/BinaryBourbon/fountain), and that i
 all it is here: the stagehand. Mend is a static page with no backend of its own;
 it talks to the Fountain API for the sandbox and to api.github.com for the pull
 request. Client patterns (OAuth, SSE, API client) follow
-[repo-sage](https://github.com/jhgaylor/repo-sage) /
-[dns-desk](https://github.com/jhgaylor/dns-desk).
+[repo-sage](https://github.com/managoat/repo-sage) /
+[dns-desk](https://github.com/managoat/dns-desk).
 
 ## Run it
 
@@ -73,8 +73,8 @@ API_CORS_ORIGINS=http://localhost:5180     # or wherever you host the build
 OAUTH_CLIENTS='[{"id":"mend","name":"Mend","redirect_uris":["http://localhost:5180/"]}]'
 ```
 
-The production deployment at `mend.inevitable.fyi` needs the same two entries
-with `https://mend.inevitable.fyi` / `https://mend.inevitable.fyi/`.
+The production deployment at `mend.demo.managoat.com` needs the same two entries
+with `https://mend.demo.managoat.com` / `https://mend.demo.managoat.com/`.
 
 ## The toolkit environment
 
@@ -239,8 +239,8 @@ repo → mender pairings per Fountain URL (`mend.repos`), and your GitHub token
 ## Deploy
 
 Static files behind nginx, same as the other demos: CI builds the bundle, bakes
-`ghcr.io/jhgaylor/mend`, pins the sha tag into `k8s/deployment.yaml`, and Flux
-rolls it out (home-cloud) at `mend.inevitable.fyi`.
+`ghcr.io/managoat/mend`, pins the sha tag into `k8s/deployment.yaml`, and Flux
+rolls it out (home-cloud) at `mend.demo.managoat.com`.
 
 ## License
 

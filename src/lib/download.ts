@@ -46,6 +46,6 @@ export function planToMarkdown(plan: MendPlan, label: string): string {
   if (plan.before && plan.after) {
     out.push(`Merge-worthy findings: ${plan.before.mergeWorthy} → ${plan.after.mergeWorthy}.`, "");
   }
-  out.push("---", "Audited with [chant](https://intentius.io/chant/cli/audit/) and mended by an agent on [Fountain](https://github.com/BinaryBourbon/fountain) — https://mend.inevitable.fyi");
+  out.push("---", "Audited with [chant](https://intentius.io/chant/cli/audit/) and mended by an agent on [Fountain](https://github.com/BinaryBourbon/fountain) — https://mend.demo.managoat.com");
   return out.join("\n");
 }

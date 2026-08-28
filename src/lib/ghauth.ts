@@ -41,4 +41,4 @@ export function clearGhAuth(): void {
 
 /** Where to mint a token, with the scope preselected. */
 export const TOKEN_URL =
-  "https://github.com/settings/tokens/new?scopes=public_repo&description=Mend%20(mend.inevitable.fyi)";
+  "https://github.com/settings/tokens/new?scopes=public_repo&description=Mend%20(mend.demo.managoat.com)";
