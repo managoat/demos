@@ -119,7 +119,9 @@ export function Chat({ id }: { id: string }) {
               </button>
               <Popover open={more} onClose={() => setMore(false)} align="right">
                 <button type="button" className="menu-item" onClick={() => setEditing(chat.title)}>
-                  <span className="menu-label">Rename</span>
+                  <span className="menu-text">
+                    <span className="menu-label">Rename</span>
+                  </span>
                 </button>
                 <TwoStep label="Retire this chat" onConfirm={() => void remove()} />
               </Popover>
@@ -141,8 +143,10 @@ function TwoStep({ label, onConfirm }: { label: string; onConfirm: () => void })
   }, [armed]);
   return (
     <button type="button" className="menu-item danger" onClick={() => (armed ? onConfirm() : setArmed(true))}>
-      <span className="menu-label">{armed ? `Sure? ${label}` : label}</span>
-      {!armed && <span className="menu-detail">Tears the computer down. The transcript stays on Fountain.</span>}
+      <span className="menu-text">
+        <span className="menu-label">{armed ? `Sure? ${label}` : label}</span>
+        {!armed && <span className="menu-detail">Tears the computer down. The transcript stays on Fountain.</span>}
+      </span>
     </button>
   );
 }

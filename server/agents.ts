@@ -24,8 +24,9 @@ import { HttpError } from "./http";
 
 export const SALON_NOTE =
   "You are chatting in Salon, a shared chat room. Several people may take part. " +
-  'A message that begins with "[from someone@example.com]" was sent by that person; ' +
-  "address people by name when it helps, and treat everyone in the room as a collaborator. " +
+  'A message that begins with "[from someone@example.com]" was sent by that person, and one ' +
+  "with no such tag was sent by the host. Address people by name when it helps, and treat " +
+  "everyone in the room as a collaborator. " +
   "Keep replies conversational unless asked for something else.";
 
 /** Agent fields copied onto a derived agent, as Fountain's create request takes them. */
