@@ -23,8 +23,13 @@ export interface ChatRow {
   conversation_id: string;
   /** A name the host gave it; empty means "use the conversation's own title". */
   title: string;
+  /** Derived from the model's provider; kept so a chat's history reads without the rule. */
   runtime: string;
   model: string;
+  /** JSON: skill ids (`shared/skills.ts`). */
+  skills: string;
+  /** JSON: `[{id, label}]` — the connections attached, and the names the header shows. */
+  connectors: string;
   preset_id: string | null;
   preset_name: string | null;
   environment_id: string | null;
@@ -78,6 +83,8 @@ CREATE TABLE IF NOT EXISTS chats (
   preset_name TEXT,
   environment_id TEXT,
   vault_id TEXT,
+  skills TEXT NOT NULL DEFAULT '[]',
+  connectors TEXT NOT NULL DEFAULT '[]',
   agent_id TEXT NOT NULL,
   invite_token TEXT UNIQUE,
   created_at TEXT NOT NULL
@@ -112,6 +119,14 @@ export class Db {
     this.sql.exec("PRAGMA journal_mode = WAL");
     this.sql.exec("PRAGMA foreign_keys = ON");
     this.sql.exec(SCHEMA);
+    this.migrate();
+  }
+
+  /** Columns added since the first release, for a database that predates them. */
+  private migrate(): void {
+    const have = new Set((this.sql.query("PRAGMA table_info(chats)").all() as { name: string }[]).map((c) => c.name));
+    if (!have.has("skills")) this.sql.exec("ALTER TABLE chats ADD COLUMN skills TEXT NOT NULL DEFAULT '[]'");
+    if (!have.has("connectors")) this.sql.exec("ALTER TABLE chats ADD COLUMN connectors TEXT NOT NULL DEFAULT '[]'");
   }
 
   close(): void {
@@ -188,8 +203,8 @@ export class Db {
   insertChat(c: ChatRow): void {
     this.sql
       .query(
-        `INSERT INTO chats (id, owner_email, conversation_id, title, runtime, model, preset_id, preset_name, environment_id, vault_id, agent_id, invite_token, created_at)
-         VALUES ($id, $owner_email, $conversation_id, $title, $runtime, $model, $preset_id, $preset_name, $environment_id, $vault_id, $agent_id, $invite_token, $created_at)`,
+        `INSERT INTO chats (id, owner_email, conversation_id, title, runtime, model, skills, connectors, preset_id, preset_name, environment_id, vault_id, agent_id, invite_token, created_at)
+         VALUES ($id, $owner_email, $conversation_id, $title, $runtime, $model, $skills, $connectors, $preset_id, $preset_name, $environment_id, $vault_id, $agent_id, $invite_token, $created_at)`,
       )
       .run(c as unknown as Record<string, string | null>);
   }

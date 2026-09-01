@@ -14,8 +14,10 @@
  *   POST   /api/join/:token               become a member of the chat the link names
  */
 import { imagesProblem } from "../shared/images";
+import { runtimeFor } from "../shared/models";
 import { parseSettings } from "../shared/settings";
 import { agentFor } from "./agents";
+import type { ChosenConnector } from "./connectors";
 import { authenticate, chatAccess, ownerClient, requireOwner, userClient, type AppContext } from "./context";
 import { randomToken } from "./crypto";
 import { now, type ChatRow, type Role, type UserRow } from "./db";
@@ -30,7 +32,8 @@ export interface ChatDto {
   members: { email: string; addedAt: string }[];
   conversationId: string;
   agentId: string;
-  settings: { runtime: string; model: string; presetId: string | null; presetName: string | null; environmentId: string | null; vaultId: string | null };
+  /** What the chat was started with, as the header shows it: "Opus 5 · Gmail, PDFs". */
+  settings: { model: string; skills: string[]; connectors: ChosenConnector[] };
   createdAt: string;
   /** The host only: the join link's token, when one has been made. */
   inviteToken?: string | null;
@@ -51,7 +54,7 @@ function toDto(ctx: AppContext, chat: ChatRow, role: Role, conv: ConversationSum
     members: ctx.db.members(chat.id).map((m) => ({ email: m.email, addedAt: m.added_at })),
     conversationId: chat.conversation_id,
     agentId: chat.agent_id,
-    settings: { runtime: chat.runtime, model: chat.model, presetId: chat.preset_id, presetName: chat.preset_name, environmentId: chat.environment_id, vaultId: chat.vault_id },
+    settings: { model: chat.model, skills: parseJson<string[]>(chat.skills, []), connectors: parseJson<ChosenConnector[]>(chat.connectors, []) },
     createdAt: chat.created_at,
     status: conv?.status ?? null,
     lastActiveAt: conv?.last_active_at ?? null,
@@ -60,6 +63,15 @@ function toDto(ctx: AppContext, chat: ChatRow, role: Role, conv: ConversationSum
   };
   if (role === "owner") dto.inviteToken = chat.invite_token;
   return dto;
+}
+
+function parseJson<T>(s: string | null | undefined, fallback: T): T {
+  if (!s) return fallback;
+  try {
+    return JSON.parse(s) as T;
+  } catch {
+    return fallback;
+  }
 }
 
 function firstLine(s: string | null | undefined): string | null {
@@ -120,12 +132,12 @@ export async function create(ctx: AppContext, req: Request): Promise<Response> {
   const client = await userClient(ctx, user);
   const id = crypto.randomUUID();
   let conversation: ConversationSummary;
-  let presetName: string | null;
+  let connectors: ChosenConnector[];
   let agentId: string;
   try {
     const made = await agentFor(client, settings);
     agentId = made.agentId;
-    presetName = made.presetName;
+    connectors = made.connectors;
     const create: Record<string, unknown> = { agent_id: agentId, prompt, channel_id: `salon:${id}`, fresh: true };
     if (images) create.images = images;
     if (settings.environmentId) create.environment_id = settings.environmentId;
@@ -142,10 +154,12 @@ export async function create(ctx: AppContext, req: Request): Promise<Response> {
     owner_email: user.email,
     conversation_id: conversation.id,
     title,
-    runtime: settings.runtime,
+    runtime: runtimeFor(settings.model),
     model: settings.model,
+    skills: JSON.stringify(settings.skills),
+    connectors: JSON.stringify(connectors),
     preset_id: settings.presetId,
-    preset_name: presetName,
+    preset_name: null,
     environment_id: settings.environmentId,
     vault_id: settings.vaultId,
     agent_id: agentId,

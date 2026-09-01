@@ -7,7 +7,7 @@
  *   POST   /api/session { apiKey }          sign in; sets the cookie
  *   DELETE /api/session                     sign out
  *   GET    /api/me
- *   GET    /api/me/presets                  my agents, environments, vaults and the model catalog
+ *   GET    /api/me/menu                     the model catalog and my connections, for the composer's menus
  *   GET    /api/chats                       mine: hosted and invited to
  *   POST   /api/chats                       start one
  *   GET    /api/chats/:id
@@ -25,7 +25,7 @@ import * as auth from "./auth";
 import * as chats from "./chats";
 import type { AppContext } from "./context";
 import { errorResponse, HttpError, json } from "./http";
-import * as presets from "./presets";
+import * as menu from "./menu";
 import { handleProxy } from "./proxy";
 
 type Handler = (req: Request, params: Record<string, string>) => Promise<Response> | Response;
@@ -65,7 +65,7 @@ export function buildApp(ctx: AppContext): (req: Request) => Promise<Response> {
   on("POST", "/api/session", (req) => auth.signIn(ctx, req));
   on("DELETE", "/api/session", (req) => auth.signOut(ctx, req));
   on("GET", "/api/me", (req) => auth.me(ctx, req));
-  on("GET", "/api/me/presets", (req) => presets.show(ctx, req));
+  on("GET", "/api/me/menu", (req) => menu.show(ctx, req));
 
   on("GET", "/api/chats", (req) => chats.list(ctx, req));
   on("POST", "/api/chats", (req) => chats.create(ctx, req));

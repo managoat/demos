@@ -11,7 +11,7 @@ import { arrange } from "../lib/blocks";
 import { describeError } from "../lib/errors";
 import { formatTime } from "../lib/format";
 import { useAttachments } from "../lib/images";
-import { authored, fold, stageLine } from "../lib/turns";
+import { authored, fold } from "../lib/turns";
 import { useSession, makeChatClient } from "../store";
 import type { Conversation, LogEvent, Turn } from "../types";
 import { Avatar } from "./Avatar";
@@ -19,7 +19,9 @@ import { BlockView } from "./Blocks";
 import { Composer, type ComposerHandle } from "./Composer";
 import { shortName, splitAuthor } from "../../shared/author";
 
-const STREAMS = "acp,stdout,stage";
+/** The streams shown: the transcript and its stages. The runtime's raw stdout is not something a chat needs to see. */
+const STREAMS = "acp,stage";
+const VISIBLE = new Set(["acp"]);
 /** How often the record is re-read while a turn is running — the stream can miss a fast finish (#1060). */
 const RUNNING_POLL_MS = 15_000;
 const IDLE_POLL_MS = 60_000;
@@ -32,7 +34,6 @@ export function Thread({ chat, sends, onSent }: { chat: ChatDto; sends: SendDto[
   const [turns, setTurns] = useState<Turn[]>([]);
   const [events, setEvents] = useState<LogEvent[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showStdout, setShowStdout] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const attachments = useAttachments(useCallback((m: string) => toast(m, "error"), [toast]));
@@ -40,7 +41,7 @@ export function Thread({ chat, sends, onSent }: { chat: ChatDto; sends: SendDto[
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
 
-  const who = chat.settings.presetName ?? modelLabel(chat.settings.model);
+  const who = modelLabel(chat.settings.model);
 
   const readRecord = useCallback(async () => {
     const h = fountain.resume(convId);
@@ -137,7 +138,6 @@ export function Thread({ chat, sends, onSent }: { chat: ChatDto; sends: SendDto[
 
   const folded = useMemo(() => fold(events, turns), [events, turns]);
   const authors = useMemo(() => authored(turns, sends, chat.ownerEmail), [turns, sends, chat.ownerEmail]);
-  const visible = useMemo(() => new Set(showStdout ? ["acp", "stdout"] : ["acp"]), [showStdout]);
 
   useEffect(() => {
     const el = scroller.current;
@@ -195,11 +195,11 @@ export function Thread({ chat, sends, onSent }: { chat: ChatDto; sends: SendDto[
           </div>
         )}
         {!loading && folded.setup.length > 0 && folded.turns.length === 0 && (
-          <div className={`setup ${setupFailed ? "error" : ""}`}>{setupFailed ? "The computer could not start." : `Starting a computer for ${who}… (${stageLine(folded.setup) ?? "provisioning"})`}</div>
+          <div className={`setup ${setupFailed ? "error" : ""}`}>{setupFailed ? "Something went wrong getting things ready. Try sending again in a moment." : "Getting things ready…"}</div>
         )}
         {folded.turns.map(({ turn, events: evs }) => {
           const a = authors.get(turn.id) ?? { email: chat.ownerEmail, text: turn.prompt };
-          const blocks = arrange(evs, visible);
+          const blocks = arrange(evs, VISIBLE);
           const turnRunning = turn.status === "running" || turn.status === "pending";
           return (
             <div className="turn" key={turn.id} data-turn={turn.id}>
@@ -225,7 +225,7 @@ export function Thread({ chat, sends, onSent }: { chat: ChatDto; sends: SendDto[
                 </div>
               )}
               <div className="msg them">
-                <span className="agent-mark" aria-hidden="true">
+                <span className="reply-mark" aria-hidden="true">
                   ✳
                 </span>
                 <div className="msg-body">
@@ -259,7 +259,7 @@ export function Thread({ chat, sends, onSent }: { chat: ChatDto; sends: SendDto[
           attachments={attachments}
           left={
             <>
-              <button type="button" className="icon plus" onClick={() => composer.current?.pickFiles()} aria-label="Attach an image" disabled={retired}>
+              <button type="button" className="icon plus" onClick={() => composer.current?.pickFiles()} aria-label="Add photos" title="Add photos" disabled={retired}>
                 +
               </button>
               {running && (
@@ -268,11 +268,6 @@ export function Thread({ chat, sends, onSent }: { chat: ChatDto; sends: SendDto[
                 </button>
               )}
             </>
-          }
-          right={
-            <label className="check tiny muted">
-              <input type="checkbox" checked={showStdout} onChange={(e) => setShowStdout(e.target.checked)} /> stdout
-            </label>
           }
         />
       </div>

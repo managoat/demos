@@ -6,24 +6,22 @@ export function describeError(err: unknown): string {
   const code = errorCode(err);
   switch (code) {
     case "conversation_busy":
-      return "The agent is still on the last message — wait for it to finish.";
+      return "It is still answering the last message — wait for it to finish.";
     case "sandbox_busy":
     case "sandbox_at_capacity":
-      return "The computer is busy with another turn — try again in a moment.";
+      return "It is busy with another message — try again in a moment.";
     case "sandbox_quota_exceeded":
-      return "The host is at their concurrent-computer limit on Fountain.";
+      return "The host has as many chats running as their Fountain plan allows. Retire one to start another.";
     case "insufficient_credits":
     case "subscription_required":
       return "The host's Fountain balance is empty, so this chat cannot spend. They can top up on Fountain.";
     case "fleet_full":
     case "provisioning":
-      return "The computer is still coming up — try again in a moment.";
+      return "Still getting things ready — try again in a moment.";
     case "environment_not_allowed":
-      return "That preset does not allow the chosen computer.";
     case "vault_not_allowed":
-      return "That preset does not allow the chosen vault.";
     case "permission_policy_unenforceable":
-      return "That runtime cannot enforce the preset's permission policy.";
+      return "Fountain would not start a chat with those settings.";
     case "host_key_rejected":
       return "Fountain no longer accepts the host's key. The host should sign in to Salon again.";
     case "unauthenticated":
@@ -31,8 +29,12 @@ export function describeError(err: unknown): string {
       return "Your session has ended. Sign in again.";
     case "rate_limited":
       return "Slow down — Fountain rate-limited that request.";
-    case "preset_not_found":
-      return "That preset is not one of your agents any more.";
+    case "connector_not_found":
+      return "That connection is not on your Fountain any more. Turn it off in Connectors and try again.";
+    case "connector_unusable":
+      return "That connection cannot be used in a Salon chat yet.";
+    case "connections_not_enabled":
+      return "Connectors are not switched on for this Fountain account.";
     case "bad_invite":
       return "That invite link is not valid any more.";
   }

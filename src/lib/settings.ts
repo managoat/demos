@@ -1,6 +1,7 @@
 /** The last settings this browser started a chat with, so the next one starts the same way. */
+import { modelProblem } from "../../shared/models";
 import { DEFAULT_SETTINGS, type ChatSettings } from "../../shared/settings";
-import { isRuntime } from "../../shared/models";
+import { isSkillId } from "../../shared/skills";
 
 const KEY = "salon.settings";
 
@@ -9,12 +10,12 @@ export function loadSettings(): ChatSettings {
     const raw = localStorage.getItem(KEY);
     if (!raw) return DEFAULT_SETTINGS;
     const v = JSON.parse(raw) as Partial<ChatSettings>;
+    const model = typeof v.model === "string" && modelProblem(v.model) === null ? v.model : DEFAULT_SETTINGS.model;
     return {
-      runtime: isRuntime(v.runtime) ? v.runtime : DEFAULT_SETTINGS.runtime,
-      model: typeof v.model === "string" && v.model ? v.model : DEFAULT_SETTINGS.model,
-      presetId: typeof v.presetId === "string" ? v.presetId : null,
-      environmentId: typeof v.environmentId === "string" ? v.environmentId : null,
-      vaultId: typeof v.vaultId === "string" ? v.vaultId : null,
+      ...DEFAULT_SETTINGS,
+      model,
+      skills: Array.isArray(v.skills) ? v.skills.filter(isSkillId) : [],
+      connectorIds: Array.isArray(v.connectorIds) ? v.connectorIds.filter((x): x is string => typeof x === "string") : [],
     };
   } catch {
     return DEFAULT_SETTINGS;

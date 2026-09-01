@@ -10,26 +10,19 @@ export interface Me {
   fountainUrl: string;
 }
 
-export interface Named {
+/** One of the host's Fountain connections, as the Connectors submenu shows it. */
+export interface ConnectorDto {
   id: string;
-  name: string;
+  label: string;
+  account: string | null;
+  usable: boolean;
+  why: string | null;
 }
 
-export interface PresetDto {
-  id: string;
-  name: string;
-  description: string;
-  runtime: string;
-  model: string;
-  environmentId: string | null;
-  hasAvatar: boolean;
-}
-
-export interface PresetsDto {
-  agents: PresetDto[];
-  environments: Named[];
-  vaults: Named[];
-  catalog: { runtimes: string[]; models: Record<string, string[]> };
+/** What the composer's menus are made of (server/menu.ts). */
+export interface MenuDto {
+  models: string[];
+  connectors: { enabled: boolean; items: ConnectorDto[]; connectUrl: string };
 }
 
 export interface ChatDto {
@@ -40,7 +33,7 @@ export interface ChatDto {
   members: { email: string; addedAt: string }[];
   conversationId: string;
   agentId: string;
-  settings: { runtime: string; model: string; presetId: string | null; presetName: string | null; environmentId: string | null; vaultId: string | null };
+  settings: { model: string; skills: string[]; connectors: { id: string; label: string }[] };
   createdAt: string;
   inviteToken?: string | null;
   status: string | null;
@@ -93,7 +86,7 @@ export const api = {
   me: () => call<Me>("GET", "/api/me"),
   signIn: (apiKey: string) => call<Me>("POST", "/api/session", { apiKey }),
   signOut: () => call<{ ok: true }>("DELETE", "/api/session"),
-  presets: () => data(call<{ data: PresetsDto }>("GET", "/api/me/presets")),
+  menu: () => data(call<{ data: MenuDto }>("GET", "/api/me/menu")),
 
   chats: () => data(call<{ data: ChatDto[] }>("GET", "/api/chats")),
   createChat: (input: { prompt: string; images?: ImageInput[] | null; settings: ChatSettings; title?: string }) => data(call<{ data: ChatDto }>("POST", "/api/chats", input)),
@@ -119,4 +112,10 @@ export function turnImageUrl(chatId: string, conversationId: string, turnId: str
 /** The join link for a token, on this origin. */
 export function joinUrl(token: string): string {
   return `${window.location.origin}${window.location.pathname}#/join/${token}`;
+}
+
+/** "Opus 5 · Gmail, PDFs" — what a chat was started with, for its header and the list. */
+export function settingsLine(settings: ChatDto["settings"], modelLabel: (m: string) => string, skillNames: (ids: readonly string[]) => string[]): string {
+  const extras = [...settings.connectors.map((c) => c.label), ...skillNames(settings.skills)];
+  return `${modelLabel(settings.model)}${extras.length ? ` · ${extras.join(", ")}` : ""}`;
 }

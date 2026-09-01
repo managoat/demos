@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { shortName } from "../../shared/author";
-import { modelLabel, runtimeLabel, type Runtime } from "../../shared/models";
-import { api, ApiError, type ChatDto, type SendDto } from "../lib/api";
+import { modelLabel } from "../../shared/models";
+import { skillNames } from "../../shared/skills";
+import { api, ApiError, settingsLine, type ChatDto, type SendDto } from "../lib/api";
 import { describeError } from "../lib/errors";
 import { navigate } from "../router";
 import { useSession } from "../store";
@@ -93,8 +94,8 @@ export function Chat({ id }: { id: string }) {
             </h2>
           )}
           <div className="muted small">
-            {owner ? "You host this chat" : `Hosted by ${shortName(chat.ownerEmail)}`} · {modelLabel(chat.settings.model)} on {runtimeLabel(chat.settings.runtime as Runtime)}
-            {chat.settings.presetName ? ` · from ${chat.settings.presetName}` : ""}
+            {settingsLine(chat.settings, modelLabel, skillNames)}
+            {owner ? " · You host this chat: you pay for it, and the people you invite chat for free" : ` · Hosted by ${shortName(chat.ownerEmail)}: they pay, you chat for free`}
             {chat.unavailable ? " · the host's key is not answering" : ""}
           </div>
         </div>
@@ -145,7 +146,7 @@ function TwoStep({ label, onConfirm }: { label: string; onConfirm: () => void })
     <button type="button" className="menu-item danger" onClick={() => (armed ? onConfirm() : setArmed(true))}>
       <span className="menu-text">
         <span className="menu-label">{armed ? `Sure? ${label}` : label}</span>
-        {!armed && <span className="menu-detail">Tears the computer down. The transcript stays on Fountain.</span>}
+        {!armed && <span className="menu-detail">Ends it for everyone. The transcript stays on your Fountain.</span>}
       </span>
     </button>
   );

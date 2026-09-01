@@ -18,14 +18,9 @@ export interface AgentSummary {
   model: string;
   runtime: string;
   environment_id?: string | null;
-  sandbox_provider?: string | null;
-  sandbox_mode?: string | null;
-  permission_policy?: Record<string, string> | null;
   skills?: unknown[];
   mcp_servers?: Record<string, unknown>;
   metadata?: Record<string, unknown> | null;
-  allowed_vault_ids?: string[] | null;
-  allowed_environment_ids?: string[] | null;
   avatar_media_type?: string | null;
   [k: string]: unknown;
 }
@@ -47,6 +42,32 @@ export interface ConversationSummary {
 export interface Catalog {
   runtimes: string[];
   models: Record<string, string[]>;
+  /** Remote MCP servers Fountain has checked, by URL: how a tenant's `mcp` provider gets a friendly name. */
+  mcp_servers?: { name: string; url: string; slug: string }[];
+  [k: string]: unknown;
+}
+
+/** One row of `GET /api/connections`. Never a token. */
+export interface Connection {
+  id: string;
+  /** `google`, `microsoft`, `slack`, or a tenant provider's slug. */
+  provider: string;
+  /** Null for a platform provider. */
+  provider_id: string | null;
+  account_email: string | null;
+  status: "active" | "revoked" | "expired" | string;
+  [k: string]: unknown;
+}
+
+/** One row of `GET /api/connection-providers`. Never a client secret. */
+export interface ConnectionProvider {
+  id: string;
+  slug: string;
+  name: string;
+  kind: "oauth2" | "mcp" | string;
+  platform: boolean;
+  mcp_url: string | null;
+  connect_url?: string;
   [k: string]: unknown;
 }
 
@@ -120,12 +141,19 @@ export class FountainClient {
     return (await this.post<{ data: AgentSummary }>("/api/agents", body)).data;
   }
 
-  async environments(): Promise<Record<string, unknown>[]> {
-    return (await this.json<{ data: Record<string, unknown>[] }>("/api/environments")).data ?? [];
-  }
-
-  async vaults(): Promise<Record<string, unknown>[]> {
-    return (await this.json<{ data: Record<string, unknown>[] }>("/api/vaults")).data ?? [];
+  /**
+   * The account's connections and the providers behind them. Both are a 404
+   * `connections_not_enabled` for an account the egress broker is not on
+   * for — reported here as `null`, which the menu turns into a sentence.
+   */
+  async connections(): Promise<{ connections: Connection[]; providers: ConnectionProvider[] } | null> {
+    try {
+      const [c, p] = await Promise.all([this.json<{ data: Connection[] }>("/api/connections"), this.json<{ data: ConnectionProvider[] }>("/api/connection-providers")]);
+      return { connections: c.data ?? [], providers: p.data ?? [] };
+    } catch (err) {
+      if (err instanceof FountainHttpError && err.status === 404 && err.code === "connections_not_enabled") return null;
+      throw err;
+    }
   }
 
   async createConversation(body: Record<string, unknown>): Promise<ConversationSummary> {

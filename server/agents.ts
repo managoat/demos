@@ -1,26 +1,33 @@
 /**
  * Fountain runs an *agent*; Salon offers *settings*. This is the seam.
  *
- * A chat starts from a runtime, a model and optionally a preset — one of the
- * host's own agents, which brings its prompt, skills and servers. The rules:
+ * A chat's settings are a model, some skills and some connectors
+ * (shared/settings.ts). For each distinct combination one agent is derived,
+ * named `Salon · Opus 5 · gmail, pdf`, and found again on the next chat by
+ * `metadata.salon.key` — a hash of the whole tuple (`derivedKey`) — so the
+ * host's agent list does not grow by one per chat. The agent gets:
  *
- *   - A preset whose runtime and model are exactly what was picked is used
- *     as it is. "I picked my Coder agent" means Coder, not a copy of Coder.
- *   - Otherwise an agent is derived: a copy of the preset with the model
- *     swapped (or, with no preset, a plain agent on that model), found again
- *     on the next chat by `metadata.salon.key` so the host's agent list does
- *     not grow by one per chat. They are named `Salon · …` and the presets
- *     menu leaves them out.
+ *   - the runtime the model's provider implies (anthropic → claude, …);
+ *   - a system prompt written for a chat room, plus the note about the
+ *     `[from someone]` tags (shared/author.ts);
+ *   - the chosen skills as skills.sh installs, and the chosen connectors as
+ *     `mcp_servers` (server/connectors.ts);
+ *   - no environment: the computer is Fountain's default.
  *
- * Derived agents also carry a note in the system prompt about the room: a
- * message tagged `[from someone]` was sent by that person (shared/author.ts).
- * A preset used as it is gets only the tag, because its prompt is the host's
- * to write.
+ * The menu (server/menu.ts) never lists these agents; they are the result of
+ * a pick, not something to pick.
  */
-import { modelLabel } from "../shared/models";
-import { derivedKey, type ChatSettings } from "../shared/settings";
+import { modelLabel, runtimeFor } from "../shared/models";
+import { canonical, derivedKey, type ChatSettings } from "../shared/settings";
+import { skillById, skillEntry } from "../shared/skills";
+import { attach, resolveConnectors, type ChosenConnector } from "./connectors";
 import type { AgentSummary, FountainClient } from "./fountain";
-import { HttpError } from "./http";
+
+export const ROOM_PROMPT =
+  "You are the assistant in a group chat. Be friendly, concise and plain-spoken: short paragraphs, " +
+  "no jargon unless someone uses it first, and no code unless someone asks for code. Answer the " +
+  "question that was asked before adding anything else. When you make a file (a PDF, a spreadsheet, a deck), " +
+  "say where it is and what is in it in a sentence. If something is unclear, ask one short question rather than guessing.";
 
 export const SALON_NOTE =
   "You are chatting in Salon, a shared chat room. Several people may take part. " +
@@ -29,57 +36,44 @@ export const SALON_NOTE =
   "everyone in the room as a collaborator. " +
   "Keep replies conversational unless asked for something else.";
 
-/** Agent fields copied onto a derived agent, as Fountain's create request takes them. */
-const COPIED: (keyof AgentSummary)[] = [
-  "description",
-  "environment_id",
-  "sandbox_provider",
-  "sandbox_mode",
-  "permission_policy",
-  "skills",
-  "mcp_servers",
-  "allowed_vault_ids",
-  "allowed_environment_ids",
-];
-
 export interface Materialised {
   agentId: string;
-  presetName: string | null;
-  /** True when an agent was created for this pick (rather than found or used as is). */
+  /** The connectors that were attached, with the names the header shows. */
+  connectors: ChosenConnector[];
+  /** True when an agent was created for this pick (rather than found). */
   created: boolean;
 }
 
 export async function agentFor(client: FountainClient, settings: ChatSettings): Promise<Materialised> {
-  const agents = await client.agents();
-  const preset = settings.presetId ? agents.find((a) => a.id === settings.presetId) ?? null : null;
-  if (settings.presetId && !preset) throw new HttpError(404, "preset_not_found", "That preset is not one of your agents any more.");
-
-  if (preset && preset.runtime === settings.runtime && preset.model === settings.model) {
-    return { agentId: preset.id, presetName: preset.name, created: false };
+  // Connectors are resolved first: a stale or unusable one is refused before anything else is asked of Fountain.
+  let connectors: ChosenConnector[] = [];
+  let mcpServers: Record<string, unknown> = {};
+  if (settings.connectorIds.length > 0) {
+    const [held, catalog] = await Promise.all([client.connections(), client.catalog()]);
+    ({ mcpServers, chosen: connectors } = attach(settings.connectorIds, resolveConnectors(held?.connections ?? [], held?.providers ?? [], catalog)));
   }
 
   const key = derivedKey(settings);
+  const agents = await client.agents();
   const existing = agents.find((a) => salonKey(a) === key);
-  if (existing) return { agentId: existing.id, presetName: preset?.name ?? null, created: false };
+  if (existing) return { agentId: existing.id, connectors, created: false };
 
+  const skills = settings.skills.map(skillById).flatMap((s) => (s ? [skillEntry(s)] : []));
+  const parts = [...Object.keys(mcpServers), ...settings.skills].sort();
   const body: Record<string, unknown> = {
-    name: (preset ? `Salon · ${preset.name} · ${modelLabel(settings.model)}` : `Salon · ${modelLabel(settings.model)}`).slice(0, 200),
-    runtime: settings.runtime,
+    name: `Salon · ${modelLabel(settings.model)}${parts.length ? ` · ${parts.join(", ")}` : ""}`.slice(0, 200),
+    runtime: runtimeFor(settings.model),
     model: settings.model,
-    system: preset && typeof preset.system === "string" && preset.system.trim() ? `${preset.system.trim()}\n\n${SALON_NOTE}` : SALON_NOTE,
-    metadata: { ...(preset?.metadata ?? {}), salon: { key, preset: preset?.id ?? null } },
+    system: `${ROOM_PROMPT}\n\n${SALON_NOTE}`,
+    metadata: { salon: { key, tuple: JSON.parse(canonical(settings)) as unknown } },
   };
-  if (preset) {
-    for (const field of COPIED) {
-      const v = preset[field];
-      if (v !== undefined && v !== null) body[field] = v;
-    }
-  }
+  if (skills.length) body.skills = skills;
+  if (Object.keys(mcpServers).length) body.mcp_servers = mcpServers;
   const made = await client.createAgent(body);
-  return { agentId: made.id, presetName: preset?.name ?? null, created: true };
+  return { agentId: made.id, connectors, created: true };
 }
 
-function salonKey(a: AgentSummary): string | null {
+export function salonKey(a: AgentSummary): string | null {
   const meta = a.metadata;
   if (!meta || typeof meta !== "object") return null;
   const salon = (meta as { salon?: unknown }).salon;

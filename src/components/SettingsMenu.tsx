@@ -1,96 +1,47 @@
 /**
  * The two menus on the composer: the model pill on the right, and the "+"
- * on the left that adds a preset, a computer, secrets, an image or people.
- * Nothing here asks for an agent and an environment; a preset is an agent to
- * *start from*, and the computer and the vault are optional.
+ * on the left — photos, skills, connectors, people. The shape is the one the
+ * desktop chat apps taught. Nothing here asks for an agent or a computer;
+ * the server derives those from these picks (server/agents.ts).
  */
 import { useCallback, useState } from "react";
-import { modelBlurb, modelLabel, modelProblem, runtimeBlurb, runtimeLabel, RUNTIMES, type Runtime } from "../../shared/models";
+import { groupByProvider, modelBlurb, modelLabel, providerLabel } from "../../shared/models";
 import type { ChatSettings } from "../../shared/settings";
-import type { PresetsDto } from "../lib/api";
-import { MenuHeading, MenuItem, Popover } from "./Menu";
+import { SKILLS, skillNames } from "../../shared/skills";
+import type { MenuDto } from "../lib/api";
+import { MenuBack, MenuHeading, MenuItem, Popover } from "./Menu";
 
-const SHORTLIST = 4;
-
-export function ModelPill({ settings, presets, onChange }: { settings: ChatSettings; presets: PresetsDto | null; onChange: (s: ChatSettings) => void }) {
+export function ModelPill({ settings, menu, onChange }: { settings: ChatSettings; menu: MenuDto | null; onChange: (s: ChatSettings) => void }) {
   const [open, setOpen] = useState(false);
-  const [view, setView] = useState<"models" | "more" | "runtime">("models");
-  const [custom, setCustom] = useState("");
-  const close = useCallback(() => {
-    setOpen(false);
-    setView("models");
-  }, []);
-
-  const catalog = presets?.catalog.models[settings.runtime] ?? [];
-  const known = catalog.includes(settings.model) ? catalog : [settings.model, ...catalog];
-  const shortlist = known.slice(0, SHORTLIST);
-  const rest = known.slice(SHORTLIST);
-
-  const pick = (model: string) => {
-    onChange({ ...settings, model });
-    close();
-  };
-  const pickRuntime = (runtime: Runtime) => {
-    const models = presets?.catalog.models[runtime] ?? [];
-    const model = modelProblem(runtime, settings.model) === null ? settings.model : (models[0] ?? settings.model);
-    onChange({ ...settings, runtime, model });
-    setView("models");
-  };
-  const customProblem = custom.trim() ? modelProblem(settings.runtime, custom.trim()) : null;
+  const close = useCallback(() => setOpen(false), []);
+  const models = menu?.models ?? [];
+  const groups = groupByProvider(models.includes(settings.model) ? models : [settings.model, ...models]);
 
   return (
     <div className="pill-wrap">
       <button type="button" className={`pill${open ? " on" : ""}`} onClick={() => (open ? close() : setOpen(true))} aria-haspopup="menu" aria-expanded={open}>
         <span className="pill-main">{modelLabel(settings.model)}</span>
-        <span className="pill-sub">{runtimeLabel(settings.runtime)}</span>
         <span className="pill-caret">⌄</span>
       </button>
       <Popover open={open} onClose={close} align="right" className="model-menu">
-        {view === "models" && (
-          <>
-            {shortlist.map((m) => (
-              <MenuItem key={m} label={modelLabel(m)} detail={modelBlurb(m) ?? m} checked={m === settings.model} onClick={() => pick(m)} />
+        {!menu && <MenuHeading>Loading…</MenuHeading>}
+        {groups.map((g) => (
+          <div key={g.provider}>
+            <MenuHeading>{providerLabel(g.provider)}</MenuHeading>
+            {g.models.map((m) => (
+              <MenuItem
+                key={m}
+                label={modelLabel(m)}
+                detail={modelBlurb(m) ?? undefined}
+                checked={m === settings.model}
+                onClick={() => {
+                  onChange({ ...settings, model: m });
+                  close();
+                }}
+              />
             ))}
-            <div className="menu-sep" />
-            <MenuItem label="Runtime" detail={runtimeLabel(settings.runtime)} arrow onClick={() => setView("runtime")} />
-            <MenuItem label="More models" arrow onClick={() => setView("more")} />
-          </>
-        )}
-        {view === "runtime" && (
-          <>
-            <button type="button" className="menu-back" onClick={() => setView("models")}>
-              ‹ Back
-            </button>
-            {RUNTIMES.map((rt) => (
-              <MenuItem key={rt} label={runtimeLabel(rt)} detail={runtimeBlurb(rt)} checked={rt === settings.runtime} onClick={() => pickRuntime(rt)} />
-            ))}
-          </>
-        )}
-        {view === "more" && (
-          <>
-            <button type="button" className="menu-back" onClick={() => setView("models")}>
-              ‹ Back
-            </button>
-            {rest.length === 0 && <div className="menu-heading">Every suggestion is already listed.</div>}
-            {rest.map((m) => (
-              <MenuItem key={m} label={modelLabel(m)} detail={m} checked={m === settings.model} onClick={() => pick(m)} />
-            ))}
-            <div className="menu-sep" />
-            <form
-              className="menu-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (custom.trim() && !customProblem) pick(custom.trim());
-              }}
-            >
-              <input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder={`any ${settings.runtime === "opencode" ? "provider" : (settings.runtime === "claude" ? "anthropic" : settings.runtime === "codex" ? "openai" : "google")}/model id`} spellCheck={false} />
-              <button type="submit" className="small" disabled={!custom.trim() || !!customProblem}>
-                Use
-              </button>
-              {customProblem && <div className="menu-problem">{customProblem}</div>}
-            </form>
-          </>
-        )}
+          </div>
+        ))}
       </Popover>
     </div>
   );
@@ -102,32 +53,39 @@ export interface Extras {
 
 export function AddMenu({
   settings,
-  presets,
-  presetsError,
+  menu,
+  menuError,
   onChange,
   extras,
   onExtras,
   onAttach,
 }: {
   settings: ChatSettings;
-  presets: PresetsDto | null;
-  presetsError: string | null;
+  menu: MenuDto | null;
+  menuError: string | null;
   onChange: (s: ChatSettings) => void;
   extras: Extras;
   onExtras: (e: Extras) => void;
   onAttach: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [view, setView] = useState<"root" | "preset" | "environment" | "vault" | "people">("root");
+  const [view, setView] = useState<"root" | "skills" | "connectors" | "people">("root");
   const [email, setEmail] = useState("");
   const close = useCallback(() => {
     setOpen(false);
     setView("root");
   }, []);
 
-  const preset = presets?.agents.find((a) => a.id === settings.presetId) ?? null;
-  const env = presets?.environments.find((e) => e.id === settings.environmentId) ?? null;
-  const vault = presets?.vaults.find((v) => v.id === settings.vaultId) ?? null;
+  const toggleSkill = (id: string) => {
+    const skills = settings.skills.includes(id) ? settings.skills.filter((s) => s !== id) : [...settings.skills, id].sort();
+    onChange({ ...settings, skills });
+  };
+  const toggleConnector = (id: string) => {
+    const connectorIds = settings.connectorIds.includes(id) ? settings.connectorIds.filter((c) => c !== id) : [...settings.connectorIds, id].sort();
+    onChange({ ...settings, connectorIds });
+  };
+  const chosenSkills = skillNames(settings.skills);
+  const chosenConnectors = connectorLabels(settings.connectorIds, menu);
 
   const addEmail = () => {
     const e = email.trim().toLowerCase();
@@ -135,6 +93,8 @@ export function AddMenu({
     if (!extras.invitees.includes(e)) onExtras({ invitees: [...extras.invitees, e] });
     setEmail("");
   };
+
+  const connectors = menu?.connectors ?? null;
 
   return (
     <div className="pill-wrap">
@@ -144,113 +104,70 @@ export function AddMenu({
       <Popover open={open} onClose={close} className="add-menu">
         {view === "root" && (
           <>
-            <MenuHeading>Start from</MenuHeading>
-            <MenuItem label="Preset" detail={preset ? preset.name : presets && presets.agents.length === 0 ? "No agents on your Fountain yet" : "One of your agents: its prompt, skills, servers"} arrow onClick={() => setView("preset")} disabled={!presets} />
-            <MenuHeading>Give it</MenuHeading>
-            <MenuItem label="A computer" detail={env ? env.name : "An environment: packages, repos, setup"} arrow onClick={() => setView("environment")} disabled={!presets} />
-            <MenuItem label="Secrets" detail={vault ? vault.name : "A vault, attached when the computer starts"} arrow onClick={() => setView("vault")} disabled={!presets} />
-            <MenuHeading>Add</MenuHeading>
             <MenuItem
-              label="An image"
-              detail="Paste or drop one, too"
+              icon="📎"
+              label="Add photos"
+              detail="Or paste or drop them in"
               onClick={() => {
                 close();
                 onAttach();
               }}
             />
+            <div className="menu-sep" />
+            <MenuItem label="Skills" detail={chosenSkills.length ? chosenSkills.join(", ") : "PDFs, spreadsheets, slides and more"} arrow onClick={() => setView("skills")} />
+            <MenuItem
+              label="Connectors"
+              detail={chosenConnectors.length ? chosenConnectors.join(", ") : connectors && !connectors.enabled ? "Not available on your account yet" : "Gmail and other accounts you have linked"}
+              arrow
+              onClick={() => setView("connectors")}
+            />
+            <div className="menu-sep" />
             <MenuItem label="People" detail={extras.invitees.length ? `${extras.invitees.length} invited` : "Invite by email; they see it when they sign in"} arrow onClick={() => setView("people")} />
-            {presetsError && <div className="menu-problem">{presetsError}</div>}
+            {menuError && <div className="menu-problem">{menuError}</div>}
           </>
         )}
-        {view === "preset" && presets && (
+        {view === "skills" && (
           <>
-            <button type="button" className="menu-back" onClick={() => setView("root")}>
-              ‹ Back
-            </button>
-            <MenuItem
-              label="None"
-              detail="A plain agent on the model you picked"
-              checked={!settings.presetId}
-              onClick={() => {
-                onChange({ ...settings, presetId: null });
-                close();
-              }}
-            />
-            {presets.agents.map((a) => (
-              <MenuItem
-                key={a.id}
-                label={a.name}
-                detail={`${runtimeLabel(a.runtime as Runtime)} · ${modelLabel(a.model)}${a.description ? ` — ${a.description}` : ""}`}
-                checked={a.id === settings.presetId}
-                onClick={() => {
-                  // A preset brings its own runtime and model; the pill follows.
-                  onChange({ ...settings, presetId: a.id, runtime: a.runtime as Runtime, model: a.model });
-                  close();
-                }}
-              />
+            <MenuBack onClick={() => setView("root")} />
+            {SKILLS.map((s) => (
+              <MenuItem key={s.id} toggle label={s.name} detail={s.blurb} checked={settings.skills.includes(s.id)} onClick={() => toggleSkill(s.id)} />
             ))}
+            <MenuHeading>Each one teaches the chat how to work with that kind of file.</MenuHeading>
           </>
         )}
-        {view === "environment" && presets && (
+        {view === "connectors" && (
           <>
-            <button type="button" className="menu-back" onClick={() => setView("root")}>
-              ‹ Back
-            </button>
-            <MenuItem
-              label="Default"
-              detail={preset?.environmentId ? "The preset's own computer" : "A plain computer"}
-              checked={!settings.environmentId}
-              onClick={() => {
-                onChange({ ...settings, environmentId: null });
-                close();
-              }}
-            />
-            {presets.environments.map((e) => (
-              <MenuItem
-                key={e.id}
-                label={e.name}
-                checked={e.id === settings.environmentId}
-                onClick={() => {
-                  onChange({ ...settings, environmentId: e.id });
-                  close();
-                }}
-              />
-            ))}
-            {presets.environments.length === 0 && <div className="menu-heading">No environments on your Fountain yet.</div>}
-          </>
-        )}
-        {view === "vault" && presets && (
-          <>
-            <button type="button" className="menu-back" onClick={() => setView("root")}>
-              ‹ Back
-            </button>
-            <MenuItem
-              label="None"
-              checked={!settings.vaultId}
-              onClick={() => {
-                onChange({ ...settings, vaultId: null });
-                close();
-              }}
-            />
-            {presets.vaults.map((v) => (
-              <MenuItem
-                key={v.id}
-                label={v.name}
-                checked={v.id === settings.vaultId}
-                onClick={() => {
-                  onChange({ ...settings, vaultId: v.id });
-                  close();
-                }}
-              />
-            ))}
-            {presets.vaults.length === 0 && <div className="menu-heading">No vaults on your Fountain yet.</div>}
+            <MenuBack onClick={() => setView("root")} />
+            {!connectors && <MenuHeading>{menuError ?? "Loading…"}</MenuHeading>}
+            {connectors && !connectors.enabled && (
+              <MenuHeading>
+                Connectors let a chat read and send from accounts you have linked on Fountain, such as Gmail. They are not switched on for your Fountain account yet — it is a limited-access feature, so ask Fountain to enable it for you.
+              </MenuHeading>
+            )}
+            {connectors?.enabled && (
+              <>
+                {connectors.items.length === 0 && <MenuHeading>Nothing linked yet.</MenuHeading>}
+                {connectors.items.map((c) => (
+                  <MenuItem
+                    key={c.id}
+                    toggle
+                    label={c.account ? `${c.label} · ${c.account}` : c.label}
+                    detail={c.why ?? undefined}
+                    checked={settings.connectorIds.includes(c.id)}
+                    disabled={!c.usable}
+                    onClick={() => toggleConnector(c.id)}
+                  />
+                ))}
+                <div className="menu-sep" />
+                <MenuItem label="Connect another…" detail="Opens the Connections page on your Fountain" onClick={() => window.open(connectors.connectUrl, "_blank", "noopener")} />
+                {connectors.items.some((c) => c.usable) && <MenuHeading>Anyone in the chat can ask it to use what you turn on here.</MenuHeading>}
+              </>
+            )}
           </>
         )}
         {view === "people" && (
           <>
-            <button type="button" className="menu-back" onClick={() => setView("root")}>
-              ‹ Back
-            </button>
+            <MenuBack onClick={() => setView("root")} />
             <form
               className="menu-form"
               onSubmit={(e) => {
@@ -266,7 +183,7 @@ export function AddMenu({
             {extras.invitees.map((e) => (
               <MenuItem key={e} label={e} detail="Remove" onClick={() => onExtras({ invitees: extras.invitees.filter((x) => x !== e) })} />
             ))}
-            <div className="menu-heading">They sign in with Fountain and find the chat waiting. You can also share a link once it starts.</div>
+            <MenuHeading>They sign in with Fountain and find the chat waiting. You can also share a link once it starts.</MenuHeading>
           </>
         )}
       </Popover>
@@ -274,15 +191,23 @@ export function AddMenu({
   );
 }
 
+/** "Gmail", "Linear" for the chosen connector ids; an id the menu no longer lists is left out. */
+function connectorLabels(ids: readonly string[], menu: MenuDto | null): string[] {
+  const items = menu?.connectors.items ?? [];
+  return ids.flatMap((id) => {
+    const c = items.find((x) => x.id === id);
+    return c ? [c.label] : [];
+  });
+}
+
 /** What the "+" has added, as chips on the composer. */
-export function Chips({ settings, presets, extras, onChange, onExtras }: { settings: ChatSettings; presets: PresetsDto | null; extras: Extras; onChange: (s: ChatSettings) => void; onExtras: (e: Extras) => void }) {
+export function Chips({ settings, menu, extras, onChange, onExtras }: { settings: ChatSettings; menu: MenuDto | null; extras: Extras; onChange: (s: ChatSettings) => void; onExtras: (e: Extras) => void }) {
   const chips: { key: string; label: string; clear: () => void }[] = [];
-  const preset = presets?.agents.find((a) => a.id === settings.presetId);
-  if (settings.presetId) chips.push({ key: "preset", label: `⚙ ${preset?.name ?? "preset"}`, clear: () => onChange({ ...settings, presetId: null }) });
-  const env = presets?.environments.find((e) => e.id === settings.environmentId);
-  if (settings.environmentId) chips.push({ key: "env", label: `🖥 ${env?.name ?? "computer"}`, clear: () => onChange({ ...settings, environmentId: null }) });
-  const vault = presets?.vaults.find((v) => v.id === settings.vaultId);
-  if (settings.vaultId) chips.push({ key: "vault", label: `🔑 ${vault?.name ?? "vault"}`, clear: () => onChange({ ...settings, vaultId: null }) });
+  for (const s of SKILLS) if (settings.skills.includes(s.id)) chips.push({ key: `s:${s.id}`, label: s.name, clear: () => onChange({ ...settings, skills: settings.skills.filter((x) => x !== s.id) }) });
+  for (const id of settings.connectorIds) {
+    const c = menu?.connectors.items.find((x) => x.id === id);
+    chips.push({ key: `c:${id}`, label: c ? c.label : "Connector", clear: () => onChange({ ...settings, connectorIds: settings.connectorIds.filter((x) => x !== id) }) });
+  }
   for (const e of extras.invitees) chips.push({ key: `p:${e}`, label: `@ ${e}`, clear: () => onExtras({ invitees: extras.invitees.filter((x) => x !== e) }) });
   if (chips.length === 0) return null;
   return (

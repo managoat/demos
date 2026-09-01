@@ -1,12 +1,12 @@
 /**
  * The signed-in person's store: who they are, their chats (hosted and
- * invited to), the presets menu's contents, and toasts. It talks to the
+ * invited to), what the composer's menus are made of, and toasts. It talks to the
  * Salon server (src/lib/api.ts). Fountain itself is reached per chat through
  * the SDK at `/f/<chat>` (`makeChatClient`).
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Fountain } from "@agentshit/fountain-sdk";
-import { api, ApiError, chatFountainBase, type ChatDto, type Me, type PresetsDto } from "./lib/api";
+import { api, ApiError, chatFountainBase, type ChatDto, type Me, type MenuDto } from "./lib/api";
 import { describeError } from "./lib/errors";
 
 /** How often the chat list is re-read while the tab is on screen. */
@@ -17,9 +17,9 @@ export interface Session {
   chats: ChatDto[];
   chatsLoaded: boolean;
   refreshChats: () => Promise<ChatDto[] | null>;
-  presets: PresetsDto | null;
-  presetsError: string | null;
-  loadPresets: () => Promise<PresetsDto | null>;
+  menu: MenuDto | null;
+  menuError: string | null;
+  loadMenu: () => Promise<MenuDto | null>;
   toast: (text: string, kind?: "info" | "error") => void;
   signOut: () => void;
 }
@@ -41,8 +41,8 @@ interface Toast {
 export function SessionProvider({ me, onSignOut, children }: { me: Me; onSignOut: () => void; children: ReactNode }) {
   const [chats, setChats] = useState<ChatDto[]>([]);
   const [chatsLoaded, setChatsLoaded] = useState(false);
-  const [presets, setPresets] = useState<PresetsDto | null>(null);
-  const [presetsError, setPresetsError] = useState<string | null>(null);
+  const [menu, setMenu] = useState<MenuDto | null>(null);
+  const [menuError, setMenuError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const toast = useCallback((text: string, kind: Toast["kind"] = "info") => {
@@ -64,23 +64,23 @@ export function SessionProvider({ me, onSignOut, children }: { me: Me; onSignOut
     }
   }, [onSignOut, toast]);
 
-  const loadPresets = useCallback(async () => {
+  const loadMenu = useCallback(async () => {
     try {
-      const p = await api.presets();
-      setPresets(p);
-      setPresetsError(null);
-      return p;
+      const m = await api.menu();
+      setMenu(m);
+      setMenuError(null);
+      return m;
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) onSignOut();
-      setPresetsError(describeError(err));
+      setMenuError(describeError(err));
       return null;
     }
   }, [onSignOut]);
 
   useEffect(() => {
     void refreshChats();
-    void loadPresets();
-  }, [refreshChats, loadPresets]);
+    void loadMenu();
+  }, [refreshChats, loadMenu]);
 
   useEffect(() => {
     const tick = () => {
@@ -100,8 +100,8 @@ export function SessionProvider({ me, onSignOut, children }: { me: Me; onSignOut
   }, [onSignOut]);
 
   const value = useMemo<Session>(
-    () => ({ me, chats, chatsLoaded, refreshChats, presets, presetsError, loadPresets, toast, signOut }),
-    [me, chats, chatsLoaded, refreshChats, presets, presetsError, loadPresets, toast, signOut],
+    () => ({ me, chats, chatsLoaded, refreshChats, menu, menuError, loadMenu, toast, signOut }),
+    [me, chats, chatsLoaded, refreshChats, menu, menuError, loadMenu, toast, signOut],
   );
 
   return (

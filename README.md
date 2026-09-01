@@ -4,24 +4,33 @@
 chat on the [Fountain](https://github.com/BinaryBourbon/fountain) API.
 
 Sign in with Fountain. Pick a model, say something, and a chat starts on your
-account — on a real computer, with whatever your agents already know how to
-do. Invite people by email or by link; they read and write the same thread,
-and you pay for it. The interface is the one the desktop apps taught: no
-"choose an agent, choose an environment" form, a box you type into and a pill
-that says which model.
+account. Invite people by email or by link; they read and write the same
+thread, and you pay for it. The interface is the one the desktop apps
+taught: a box you type into, a pill that says which model, and a `+` menu —
+nothing about agents, environments or runtimes anywhere.
 
 ## What it does
 
-- **Settings, not setup.** The composer has a model pill (`Opus 5 · Claude
-  Code ⌄`, with a runtime submenu and "more models") and a `+` menu that
-  adds a *preset* (one of your agents: its prompt, skills and servers), a
-  *computer* (an environment), *secrets* (a vault), an image, or people.
-  Everything is optional. Enter starts the chat.
-- **Presets are agents; the rest is derived.** A preset picked on its own
-  model is used as it is. Change the model, or pick none, and the server
-  materialises an agent for that combination once (`Salon · Coder · Opus 5`)
-  and finds it again next time by `metadata.salon.key`. The presets menu
-  hides those. (`server/agents.ts`)
+- **Settings, not setup.** The model pill is one list grouped by brand
+  (Anthropic / OpenAI / Google) from Fountain's catalog; the `+` menu is
+  *Add photos*, *Skills ›* (PDFs, Word documents, Spreadsheets, Slides,
+  Posters & visuals — checkmark toggles), *Connectors ›* (the accounts you
+  have linked on Fountain, such as Gmail, plus *Connect another…*), and
+  *People ›*. Everything is optional. Enter starts the chat.
+- **One agent per combination, derived.** A chat's settings are a model,
+  some skills and some connectors. The server derives the agent Fountain
+  needs — the runtime the model's provider implies, a prompt written for a
+  chat room, the skills as skills.sh installs, the connectors as
+  `mcp_servers`, no environment — once per distinct combination
+  (`Salon · Opus 5 · gmail, pdf`) and finds it again by a hash in
+  `metadata.salon.key`. Your own agents are never listed or touched.
+  (`server/agents.ts`, `shared/settings.ts`, `shared/skills.ts`)
+- **Connectors need the broker.** Connections exist only for Fountain
+  accounts the egress broker is on for; elsewhere the Connectors submenu
+  says so instead of showing an empty list. Google attaches as Fountain's
+  own Gmail server; a remote MCP server you connected (Linear, Notion, …)
+  attaches with the connection's bearer; Outlook and Slack show as not
+  usable in a chat yet.
 - **The host pays.** A chat is a Fountain conversation under the host's key,
   bound to `channel_id = salon:<chat>`. Guests never hold that key: their
   browser runs an ordinary SDK client whose base URL is `/f/<chat>`, a proxy
@@ -77,7 +86,7 @@ in `OAUTH_CLIENTS`.
 
 ```
 server/   Bun: auth, chats, the agent seam, the chat-scoped proxy, SQLite
-shared/   what both sides agree on: author tags, models, settings, images
+shared/   what both sides agree on: author tags, models, settings, skills, images
 src/      Vite + React: sign-in, sidebar, the composer and its menus, the thread
 k8s/      Deployment + Service + IngressRoutes + Certificate for home-cloud
 ```

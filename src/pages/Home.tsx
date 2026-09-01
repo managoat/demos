@@ -17,7 +17,7 @@ import { Mark } from "../components/Mark";
 import { AddMenu, Chips, ModelPill, type Extras } from "../components/SettingsMenu";
 
 export function Home() {
-  const { me, presets, presetsError, toast, refreshChats } = useSession();
+  const { me, menu, menuError, toast, refreshChats } = useSession();
   const [settings, setSettingsState] = useState<ChatSettings>(loadSettings);
   const [extras, setExtras] = useState<Extras>({ invitees: [] });
   const [draft, setDraft] = useState("");
@@ -30,21 +30,19 @@ export function Home() {
     saveSettings(s);
   }, []);
 
-  // A remembered pick that is gone from the account is dropped, quietly.
+  // A remembered connector that is gone from the account, or cannot be used, is dropped quietly.
   useEffect(() => {
-    if (!presets) return;
-    const next = { ...settings };
-    if (next.presetId && !presets.agents.some((a) => a.id === next.presetId)) next.presetId = null;
-    if (next.environmentId && !presets.environments.some((e) => e.id === next.environmentId)) next.environmentId = null;
-    if (next.vaultId && !presets.vaults.some((v) => v.id === next.vaultId)) next.vaultId = null;
-    if (next.presetId !== settings.presetId || next.environmentId !== settings.environmentId || next.vaultId !== settings.vaultId) setSettings(next);
-  }, [presets]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!menu) return;
+    const usable = new Set(menu.connectors.items.filter((c) => c.usable).map((c) => c.id));
+    const connectorIds = settings.connectorIds.filter((id) => usable.has(id));
+    if (connectorIds.length !== settings.connectorIds.length) setSettings({ ...settings, connectorIds });
+  }, [menu]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function start() {
     const prompt = draft.trim();
     const images = attachments.payload;
     if ((!prompt && !images) || sending) return;
-    const problem = modelProblem(settings.runtime, settings.model);
+    const problem = modelProblem(settings.model);
     if (problem) {
       toast(problem, "error");
       return;
@@ -88,14 +86,14 @@ export function Home() {
         attachments={attachments}
         left={
           <>
-            <AddMenu settings={settings} presets={presets} presetsError={presetsError} onChange={setSettings} extras={extras} onExtras={setExtras} onAttach={() => composer.current?.pickFiles()} />
-            <Chips settings={settings} presets={presets} extras={extras} onChange={setSettings} onExtras={setExtras} />
+            <AddMenu settings={settings} menu={menu} menuError={menuError} onChange={setSettings} extras={extras} onExtras={setExtras} onAttach={() => composer.current?.pickFiles()} />
+            <Chips settings={settings} menu={menu} extras={extras} onChange={setSettings} onExtras={setExtras} />
           </>
         }
-        right={<ModelPill settings={settings} presets={presets} onChange={setSettings} />}
+        right={<ModelPill settings={settings} menu={menu} onChange={setSettings} />}
       />
       <p className="muted small hint">
-        Starts on your Fountain as {me.email} — you pay for this chat. Invite people and they chat for free.
+        Starts on your Fountain as {me.email} — you pay for this chat, and the people you invite chat for free.
       </p>
     </div>
   );

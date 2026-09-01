@@ -28,14 +28,20 @@ export function Popover({ open, onClose, align = "left", children, className = "
   );
 }
 
-export function MenuItem({ label, detail, checked, onClick, arrow, disabled }: { label: ReactNode; detail?: ReactNode; checked?: boolean; onClick?: () => void; arrow?: boolean; disabled?: boolean }) {
+export function MenuItem({ label, detail, icon, checked, onClick, arrow, disabled, toggle }: { label: ReactNode; detail?: ReactNode; icon?: ReactNode; checked?: boolean; onClick?: () => void; arrow?: boolean; disabled?: boolean; toggle?: boolean }) {
   return (
-    <button type="button" className={`menu-item${checked ? " checked" : ""}`} onClick={onClick} disabled={disabled} role="menuitem">
+    <button type="button" className={`menu-item${checked ? " checked" : ""}${toggle ? " toggle" : ""}`} onClick={onClick} disabled={disabled} role={toggle ? "menuitemcheckbox" : "menuitem"} aria-checked={toggle ? !!checked : undefined}>
+      {icon && (
+        <span className="menu-icon" aria-hidden="true">
+          {icon}
+        </span>
+      )}
       <span className="menu-text">
         <span className="menu-label">{label}</span>
         {detail && <span className="menu-detail">{detail}</span>}
       </span>
       {checked && <span className="menu-check">✓</span>}
+      {toggle && !checked && <span className="menu-check blank" />}
       {arrow && <span className="menu-arrow">›</span>}
     </button>
   );
@@ -43,4 +49,12 @@ export function MenuItem({ label, detail, checked, onClick, arrow, disabled }: {
 
 export function MenuHeading({ children }: { children: ReactNode }) {
   return <div className="menu-heading">{children}</div>;
+}
+
+export function MenuBack({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" className="menu-back" onClick={onClick}>
+      ‹ Back
+    </button>
+  );
 }
