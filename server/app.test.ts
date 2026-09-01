@@ -1,0 +1,314 @@
+/**
+ * The server against a fake Fountain: sign-in, starting a chat (and the
+ * agent it materialises), sharing, and the chat-scoped proxy. The fake's
+ * responses are shaped like the real API's — `{data: …}` envelopes except
+ * on /api/auth/me — because a fake that wraps what the server does not is
+ * how a green suite ships a null.
+ */
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { SALON_NOTE } from "./agents";
+import { buildApp } from "./app";
+import type { AppContext } from "./context";
+import { Cipher } from "./crypto";
+import { Db } from "./db";
+
+// ── the fake Fountain ────────────────────────────────────────────────────
+
+interface FakeAgent {
+  id: string;
+  name: string;
+  runtime: string;
+  model: string;
+  system?: string;
+  environment_id?: string | null;
+  skills?: unknown[];
+  mcp_servers?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+
+const KEYS: Record<string, { id: string; email: string }> = {
+  ftn_host: { id: "u-host", email: "Host@Example.com" },
+  ftn_guest: { id: "u-guest", email: "guest@example.com" },
+  ftn_other: { id: "u-other", email: "other@example.com" },
+};
+
+const state = {
+  agents: new Map<string, FakeAgent[]>(),
+  conversations: new Map<string, Record<string, unknown>[]>(),
+  prompts: [] as { key: string; id: string; body: unknown }[],
+  agentPosts: [] as { key: string; body: Record<string, unknown> }[],
+  terminated: [] as string[],
+};
+
+function reset(): void {
+  state.agents.clear();
+  state.conversations.clear();
+  state.prompts = [];
+  state.agentPosts = [];
+  state.terminated = [];
+  state.agents.set("ftn_host", [
+    { id: "a-coder", name: "Coder", runtime: "claude", model: "anthropic/claude-sonnet-5", system: "You write code.", environment_id: "e-1", skills: [{ name: "x", content: "SKILL" }], mcp_servers: { gh: { headers: { authorization: "Bearer secret" } } } },
+    { id: "a-old", name: "Salon · leftover", runtime: "claude", model: "anthropic/claude-opus-5", metadata: { salon: { key: "salon:base:claude:anthropic/claude-opus-5" } } },
+  ]);
+}
+
+let fake: ReturnType<typeof Bun.serve>;
+let fakeUrl: string;
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+
+beforeAll(() => {
+  fake = Bun.serve({
+    port: 0,
+    async fetch(req) {
+      const url = new URL(req.url);
+      const key = (req.headers.get("authorization") ?? "").replace(/^Bearer /, "");
+      const who = KEYS[key];
+      if (!who) return json({ error: "unauthorized", message: "bad key" }, 401);
+      const p = url.pathname;
+      if (p === "/api/auth/me") return json(who);
+      if (p === "/api/catalog") return json({ data: { runtimes: ["claude", "codex", "gemini", "opencode"], models: { claude: ["anthropic/claude-opus-5", "anthropic/claude-sonnet-5"] } } });
+      if (p === "/api/environments") return json({ data: [{ id: "e-1", name: "Laptop" }] });
+      if (p === "/api/vaults") return json({ data: [{ id: "v-1", name: "Keys" }] });
+      if (p === "/api/agents" && req.method === "GET") return json({ data: state.agents.get(key) ?? [] });
+      if (p === "/api/agents" && req.method === "POST") {
+        const body = (await req.json()) as Record<string, unknown>;
+        state.agentPosts.push({ key, body });
+        const made = { id: `a-${state.agentPosts.length}`, ...body } as unknown as FakeAgent;
+        state.agents.set(key, [...(state.agents.get(key) ?? []), made]);
+        return json({ data: made }, 201);
+      }
+      if (p === "/api/conversations" && req.method === "POST") {
+        const body = (await req.json()) as Record<string, unknown>;
+        if (body.agent_id === "a-broke") return json({ error: "insufficient_credits", message: "no credit", upgrade_url: "x" }, 402);
+        const conv = { id: `c-${crypto.randomUUID().slice(0, 8)}`, status: "pending", agent_id: body.agent_id, channel_id: body.channel_id, turn_count: 1, first_prompt: body.prompt, title: null, last_active_at: null, request: body };
+        state.conversations.set(key, [...(state.conversations.get(key) ?? []), conv]);
+        return json({ data: conv }, 201);
+      }
+      if (p === "/api/conversations" && req.method === "GET") return json({ data: state.conversations.get(key) ?? [] });
+      const m = /^\/api\/conversations\/([^/]+)(\/.*)?$/.exec(p);
+      if (m) {
+        const conv = (state.conversations.get(key) ?? []).find((c) => c.id === m[1]);
+        if (!conv) return json({ error: "not_found" }, 404);
+        const sub = m[2] ?? "";
+        if (sub === "" && req.method === "GET") return json({ data: conv });
+        if (sub === "/turns") return json({ data: [{ id: "t1", turn_number: 1, prompt: String((conv.request as { prompt?: string }).prompt ?? ""), status: "completed" }] });
+        if (sub === "/events") return json({ data: [], meta: { limit: 1000, has_more: false, next_cursor: null } });
+        if (sub === "/prompts" && req.method === "POST") {
+          state.prompts.push({ key, id: conv.id as string, body: await req.json() });
+          return json({ status: "queued" }, 202);
+        }
+        if (sub === "/terminate" && req.method === "POST") {
+          state.terminated.push(conv.id as string);
+          return json({ data: { ...conv, status: "terminated" } });
+        }
+        return json({ error: "not_found" }, 404);
+      }
+      return json({ error: "not_found", message: p }, 404);
+    },
+  });
+  fakeUrl = `http://localhost:${fake.port}`;
+});
+
+afterAll(() => fake.stop(true));
+
+// ── the app under test ───────────────────────────────────────────────────
+
+let app: (req: Request) => Promise<Response>;
+let ctx: AppContext;
+
+beforeEach(async () => {
+  reset();
+  ctx = {
+    db: new Db(":memory:"),
+    cipher: await Cipher.from("a-test-secret-that-is-long-enough"),
+    config: { fountainUrl: fakeUrl, dataDir: ".", dbPath: ":memory:", secret: "x", port: 0, staticDir: null, sessionMaxAgeMs: 60_000 },
+  };
+  app = buildApp(ctx);
+});
+
+async function call(method: string, path: string, opts: { body?: unknown; cookie?: string; headers?: Record<string, string> } = {}): Promise<Response> {
+  const headers: Record<string, string> = { ...(opts.headers ?? {}) };
+  if (opts.body !== undefined) headers["content-type"] = "application/json";
+  if (opts.cookie) headers.cookie = opts.cookie;
+  return app(new Request(`http://salon.test${path}`, { method, headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) }));
+}
+
+async function signIn(key: string): Promise<string> {
+  const res = await call("POST", "/api/session", { body: { apiKey: key } });
+  expect(res.status).toBe(200);
+  const cookie = res.headers.get("set-cookie")!.split(";")[0]!;
+  return cookie;
+}
+
+const SETTINGS = { runtime: "claude", model: "anthropic/claude-opus-5", presetId: null, environmentId: null, vaultId: null };
+
+async function startChat(cookie: string, settings: Record<string, unknown> = SETTINGS, prompt = "hello room"): Promise<Record<string, any>> {
+  const res = await call("POST", "/api/chats", { cookie, body: { prompt, settings } });
+  expect(res.status).toBe(201);
+  return ((await res.json()) as { data: Record<string, any> }).data;
+}
+
+describe("sign-in", () => {
+  test("a bad key is 401, a good one is a cookie and a lowercased email", async () => {
+    expect((await call("POST", "/api/session", { body: { apiKey: "ftn_nope" } })).status).toBe(401);
+    const cookie = await signIn("ftn_host");
+    const me = (await (await call("GET", "/api/me", { cookie })).json()) as { email: string };
+    expect(me.email).toBe("host@example.com");
+    expect((await call("GET", "/api/me")).status).toBe(401);
+  });
+});
+
+describe("presets", () => {
+  test("lists the caller's agents without Salon's own", async () => {
+    const cookie = await signIn("ftn_host");
+    const res = await call("GET", "/api/me/presets", { cookie });
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as { data: { agents: { id: string; name: string }[]; catalog: { models: Record<string, string[]> } } };
+    expect(data.agents.map((a) => a.id)).toEqual(["a-coder"]);
+    expect(data.agents[0]).not.toHaveProperty("mcp_servers");
+    expect(data.catalog.models.claude).toContain("anthropic/claude-opus-5");
+  });
+});
+
+describe("starting a chat", () => {
+  test("with no preset reuses the derived agent that already exists", async () => {
+    const cookie = await signIn("ftn_host");
+    const chat = await startChat(cookie);
+    expect(state.agentPosts).toHaveLength(0);
+    expect(chat.agentId).toBe("a-old");
+    expect(chat.role).toBe("owner");
+    const conv = state.conversations.get("ftn_host")![0]!;
+    expect(conv.request).toMatchObject({ agent_id: "a-old", prompt: "hello room", channel_id: `salon:${chat.id}`, fresh: true });
+    expect((conv.request as Record<string, unknown>).environment_id).toBeUndefined();
+  });
+
+  test("with no preset and a new model creates a plain Salon agent", async () => {
+    const cookie = await signIn("ftn_host");
+    const chat = await startChat(cookie, { ...SETTINGS, model: "anthropic/claude-sonnet-5", environmentId: "e-1", vaultId: "v-1" });
+    expect(state.agentPosts).toHaveLength(1);
+    const made = state.agentPosts[0]!.body;
+    expect(made).toMatchObject({ name: "Salon · Sonnet 5", runtime: "claude", model: "anthropic/claude-sonnet-5", system: SALON_NOTE, metadata: { salon: { key: "salon:base:claude:anthropic/claude-sonnet-5", preset: null } } });
+    expect(chat.agentId).toBe("a-1");
+    const conv = state.conversations.get("ftn_host")![0]!;
+    expect(conv.request).toMatchObject({ environment_id: "e-1", vault_id: "v-1" });
+    // The same pick again finds it rather than making another.
+    await startChat(cookie, { ...SETTINGS, model: "anthropic/claude-sonnet-5" });
+    expect(state.agentPosts).toHaveLength(1);
+  });
+
+  test("a preset on its own model is used as it is", async () => {
+    const cookie = await signIn("ftn_host");
+    const chat = await startChat(cookie, { ...SETTINGS, presetId: "a-coder", model: "anthropic/claude-sonnet-5" });
+    expect(state.agentPosts).toHaveLength(0);
+    expect(chat.agentId).toBe("a-coder");
+    expect(chat.settings.presetName).toBe("Coder");
+  });
+
+  test("a preset on another model is copied, prompt and servers included, with the room note", async () => {
+    const cookie = await signIn("ftn_host");
+    const chat = await startChat(cookie, { ...SETTINGS, presetId: "a-coder", model: "anthropic/claude-opus-5" });
+    expect(state.agentPosts).toHaveLength(1);
+    const made = state.agentPosts[0]!.body;
+    expect(made.name).toBe("Salon · Coder · Opus 5");
+    expect(made.system).toBe(`You write code.\n\n${SALON_NOTE}`);
+    expect(made.environment_id).toBe("e-1");
+    expect(made.skills).toEqual([{ name: "x", content: "SKILL" }]);
+    expect(made.mcp_servers).toEqual({ gh: { headers: { authorization: "Bearer secret" } } });
+    expect(made.metadata).toEqual({ salon: { key: "salon:a-coder:claude:anthropic/claude-opus-5", preset: "a-coder" } });
+    expect(chat.agentId).toBe("a-1");
+  });
+
+  test("bad settings, a missing preset and an empty prompt are refused before Fountain is asked", async () => {
+    const cookie = await signIn("ftn_host");
+    expect((await call("POST", "/api/chats", { cookie, body: { prompt: "x", settings: { runtime: "claude", model: "openai/gpt-5" } } })).status).toBe(422);
+    expect((await call("POST", "/api/chats", { cookie, body: { prompt: "", settings: SETTINGS } })).status).toBe(422);
+    const gone = await call("POST", "/api/chats", { cookie, body: { prompt: "x", settings: { ...SETTINGS, presetId: "nope" } } });
+    expect(gone.status).toBe(404);
+    expect(state.conversations.size).toBe(0);
+  });
+
+  test("Fountain's refusal comes through with its status and code", async () => {
+    const cookie = await signIn("ftn_host");
+    state.agents.set("ftn_host", [{ id: "a-broke", name: "Broke", runtime: "claude", model: "anthropic/claude-opus-5" }]);
+    const res = await call("POST", "/api/chats", { cookie, body: { prompt: "x", settings: { ...SETTINGS, presetId: "a-broke" } } });
+    expect(res.status).toBe(402);
+    expect(((await res.json()) as { error: string }).error).toBe("insufficient_credits");
+  });
+});
+
+describe("sharing", () => {
+  test("a guest sees the chat, reads it through the proxy, and sends a tagged turn; a stranger sees nothing", async () => {
+    const host = await signIn("ftn_host");
+    const guest = await signIn("ftn_guest");
+    const other = await signIn("ftn_other");
+    const chat = await startChat(host);
+
+    // Not yet a member.
+    expect((await call("GET", `/api/chats/${chat.id}`, { cookie: guest })).status).toBe(404);
+    expect((await call("GET", `/f/${chat.id}/api/conversations/${chat.conversationId}`, { cookie: guest })).status).toBe(404);
+
+    // The guest cannot add themselves; the host can.
+    expect((await call("POST", `/api/chats/${chat.id}/members`, { cookie: guest, body: { email: "guest@example.com" } })).status).toBe(404);
+    const added = await call("POST", `/api/chats/${chat.id}/members`, { cookie: host, body: { email: "guest@example.com" } });
+    expect(added.status).toBe(200);
+
+    const list = (await (await call("GET", "/api/chats", { cookie: guest })).json()) as { data: { id: string; role: string; ownerEmail: string; status: string }[] };
+    expect(list.data).toHaveLength(1);
+    expect(list.data[0]).toMatchObject({ id: chat.id, role: "member", ownerEmail: "host@example.com", status: "pending" });
+    expect(list.data[0]).not.toHaveProperty("inviteToken");
+
+    // The proxy answers for the chat's conversation on the host's key…
+    const rec = await call("GET", `/f/${chat.id}/api/conversations/${chat.conversationId}`, { cookie: guest });
+    expect(rec.status).toBe(200);
+    expect(((await rec.json()) as { data: { id: string } }).data.id).toBe(chat.conversationId);
+    // …and for nothing else.
+    expect((await call("GET", `/f/${chat.id}/api/conversations/c-nope`, { cookie: guest })).status).toBe(404);
+    expect((await call("GET", `/f/${chat.id}/api/agents`, { cookie: guest })).status).toBe(404);
+    expect((await call("POST", `/f/${chat.id}/api/conversations/${chat.conversationId}/terminate`, { cookie: guest })).status).toBe(404);
+    expect((await call("GET", `/f/${chat.id}/api/conversations/${chat.conversationId}`, { cookie: other })).status).toBe(404);
+
+    // A turn from the guest goes in tagged, on the host's key, and is recorded.
+    const sent = await call("POST", `/f/${chat.id}/api/conversations/${chat.conversationId}/prompts`, { cookie: guest, body: { prompt: "and me" } });
+    expect(sent.status).toBe(202);
+    expect(state.prompts).toHaveLength(1);
+    expect(state.prompts[0]).toMatchObject({ key: "ftn_host", body: { prompt: "[from guest@example.com] and me" } });
+    const shown = (await (await call("GET", `/api/chats/${chat.id}`, { cookie: guest })).json()) as { data: { sends: { seq: number; email: string }[] } };
+    expect(shown.data.sends.map((s) => [s.seq, s.email])).toEqual([
+      [1, "host@example.com"],
+      [2, "guest@example.com"],
+    ]);
+
+    // The host alone is untagged.
+    const solo = await startChat(host);
+    await call("POST", `/f/${solo.id}/api/conversations/${solo.conversationId}/prompts`, { cookie: host, body: { prompt: "just me" } });
+    expect(state.prompts[1]!.body).toEqual({ prompt: "just me" });
+
+    // Leaving.
+    const left = await call("DELETE", `/api/chats/${chat.id}/members/guest%40example.com`, { cookie: guest });
+    expect(((await left.json()) as { left?: boolean }).left).toBe(true);
+    expect((await call("GET", `/api/chats/${chat.id}`, { cookie: guest })).status).toBe(404);
+  });
+
+  test("a join link admits whoever opens it, and the host can retire the chat", async () => {
+    const host = await signIn("ftn_host");
+    const other = await signIn("ftn_other");
+    const chat = await startChat(host);
+    expect((await call("POST", `/api/chats/${chat.id}/invite`, { cookie: other })).status).toBe(404);
+    const { data } = (await (await call("POST", `/api/chats/${chat.id}/invite`, { cookie: host })).json()) as { data: { token: string } };
+    expect((await call("POST", `/api/join/nope`, { cookie: other })).status).toBe(404);
+    const joined = await call("POST", `/api/join/${data.token}`, { cookie: other });
+    expect(joined.status).toBe(200);
+    expect(((await joined.json()) as { data: { role: string } }).data.role).toBe("member");
+    const mine = (await (await call("GET", `/api/chats/${chat.id}`, { cookie: host })).json()) as { data: { chat: { members: { email: string }[]; inviteToken: string } } };
+    expect(mine.data.chat.members.map((m) => m.email)).toEqual(["other@example.com"]);
+    expect(mine.data.chat.inviteToken).toBe(data.token);
+
+    expect((await call("DELETE", `/api/chats/${chat.id}`, { cookie: other })).status).toBe(403);
+    expect((await call("DELETE", `/api/chats/${chat.id}`, { cookie: host })).status).toBe(200);
+    expect(state.terminated).toEqual([chat.conversationId]);
+    expect((await call("GET", `/api/chats/${chat.id}`, { cookie: other })).status).toBe(404);
+  });
+});

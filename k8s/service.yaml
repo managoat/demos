@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: salon
+  namespace: salon
+  labels:
+    app: salon
+spec:
+  type: ClusterIP
+  selector:
+    app: salon
+  ports:
+    - port: 80
+      targetPort: 8080

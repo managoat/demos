@@ -1,0 +1,38 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: salon
+  namespace: salon
+  labels:
+    app: salon
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`salon.demo.managoat.com`)"
+      kind: Rule
+      services:
+        - name: salon
+          port: 80
+  tls:
+    secretName: salon-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: salon-http
+  namespace: salon
+  labels:
+    app: salon
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: "Host(`salon.demo.managoat.com`)"
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: salon
+          port: 80
