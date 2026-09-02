@@ -237,7 +237,7 @@ export function AddMenu({
  * both this person and the Salon App installation can reach; no repository
  * token is typed into or retained by the browser.
  */
-function NewProject({ onMade }: { onMade: (p: ProjectDto) => void }) {
+export function NewProject({ onMade }: { onMade: (p: ProjectDto) => void }) {
   const { toast } = useSession();
   const [info, setInfo] = useState<GitHubInfo | null>(null);
   const [repos, setRepos] = useState<GitHubRepo[] | null>(null);

@@ -6,6 +6,7 @@ import { hashFor, type Route } from "../router";
 import { useSession } from "../store";
 import { Avatar } from "./Avatar";
 import { Mark } from "./Mark";
+import { Notifications } from "./Notifications";
 
 export function Sidebar({ route, onClose }: { route: Route; onClose: () => void }) {
   const { me, chats, chatsLoaded, signOut } = useSession();
@@ -48,9 +49,9 @@ export function Sidebar({ route, onClose }: { route: Route; onClose: () => void 
         <span className="who" title={me.email}>
           {shortName(me.email)}
         </span>
-        <button className="linklike small" onClick={signOut}>
-          Sign out
-        </button>
+        <Notifications />
+        <a className="icon side-settings" href={hashFor({ page: "preferences" })} aria-label="Preferences" title="Preferences">⚙</a>
+        <button className="linklike tiny" onClick={signOut}>Sign out</button>
       </div>
     </nav>
   );

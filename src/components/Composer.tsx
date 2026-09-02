@@ -24,9 +24,11 @@ interface Props {
   right?: ReactNode;
   autoFocus?: boolean;
   big?: boolean;
+  /** Optional autocomplete shown directly below the text area. */
+  suggestions?: ReactNode;
 }
 
-export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ value, onChange, onSend, sending, disabled, placeholder, attachments, left, right, autoFocus, big }, ref) {
+export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ value, onChange, onSend, sending, disabled, placeholder, attachments, left, right, autoFocus, big, suggestions }, ref) {
   const file = useRef<HTMLInputElement>(null);
   const area = useRef<HTMLTextAreaElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -77,6 +79,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ va
         </div>
       )}
       <textarea ref={area} rows={1} value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={onKey} onPaste={attachments.paste} placeholder={placeholder} disabled={disabled} autoFocus={autoFocus} />
+      {suggestions}
       <div className="composer-foot">
         <div className="foot-left">{left}</div>
         <div className="foot-right">

@@ -333,9 +333,22 @@ describe("sign-in", () => {
   test("a bad key is 401, a good one is a cookie and a lowercased email", async () => {
     expect((await call("POST", "/api/session", { body: { apiKey: "ftn_nope" } })).status).toBe(401);
     const cookie = await signIn("ftn_host");
-    const me = (await (await call("GET", "/api/me", { cookie })).json()) as { email: string };
+    const me = (await (await call("GET", "/api/me", { cookie })).json()) as { email: string; onboardingComplete: boolean; inferenceToken: { connected: boolean } };
     expect(me.email).toBe("host@example.com");
+    expect(me.onboardingComplete).toBe(false);
+    expect(me.inferenceToken.connected).toBe(true);
     expect((await call("GET", "/api/me")).status).toBe(401);
+  });
+
+  test("the inference token can be confirmed or replaced only by one for the same account", async () => {
+    const cookie = await signIn("ftn_host");
+    expect((await call("POST", "/api/me/token", { cookie, body: { apiKey: "ftn_guest" } })).status).toBe(403);
+    const updated = await call("POST", "/api/me/token", { cookie, body: { apiKey: "ftn_host" } });
+    expect(updated.status).toBe(200);
+    expect(((await updated.json()) as { data: { inferenceToken: { connected: boolean } } }).data.inferenceToken.connected).toBe(true);
+    const completed = await call("POST", "/api/me/onboarding", { cookie });
+    expect(completed.status).toBe(200);
+    expect(((await completed.json()) as { data: { onboardingComplete: boolean } }).data.onboardingComplete).toBe(true);
   });
 });
 
@@ -531,6 +544,27 @@ describe("sharing", () => {
     expect((await call("DELETE", `/api/chats/${chat.id}`, { cookie: host })).status).toBe(200);
     expect(state.terminated).toEqual([chat.conversationId]);
     expect((await call("GET", `/api/chats/${chat.id}`, { cookie: other })).status).toBe(404);
+  });
+
+  test("mentioning a workspace teammate shares the thread and creates a readable notification", async () => {
+    const host = await signIn("ftn_host");
+    const guest = await signIn("ftn_guest");
+    const chat = await startChat(host);
+    const roster = await call("POST", "/api/workspace/members", { cookie: host, body: { email: "guest@example.com" } });
+    expect(roster.status).toBe(200);
+
+    const sent = await call("POST", `/f/${chat.id}/api/conversations/${chat.conversationId}/prompts`, { cookie: host, body: { prompt: "@guest can you take a look?" } });
+    expect(sent.status).toBe(202);
+    expect(state.prompts.at(-1)!.body).toEqual({ prompt: "[from host@example.com] @guest can you take a look?" });
+
+    const shared = (await (await call("GET", "/api/chats", { cookie: guest })).json()) as { data: { id: string; role: string }[] };
+    expect(shared.data).toContainEqual(expect.objectContaining({ id: chat.id, role: "member" }));
+    const inbox = (await (await call("GET", "/api/notifications", { cookie: guest })).json()) as { data: { id: string; chatId: string; actorEmail: string; readAt: string | null }[] };
+    expect(inbox.data).toHaveLength(1);
+    expect(inbox.data[0]).toMatchObject({ chatId: chat.id, actorEmail: "host@example.com", readAt: null });
+    expect((await call("POST", `/api/notifications/${inbox.data[0]!.id}/read`, { cookie: guest })).status).toBe(200);
+    const read = (await (await call("GET", "/api/notifications", { cookie: guest })).json()) as { data: { readAt: string | null }[] };
+    expect(read.data[0]!.readAt).not.toBeNull();
   });
 });
 

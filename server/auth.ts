@@ -13,6 +13,7 @@ import { authenticate, type AppContext } from "./context";
 import { randomToken, sha256 } from "./crypto";
 import { FountainClient, FountainHttpError } from "./fountain";
 import { HttpError, clearedSessionCookie, cookieValue, json, readJson, SESSION_COOKIE, sessionCookie, str } from "./http";
+import { meDto } from "./account";
 
 export function config(ctx: AppContext): Response {
   return json({ fountainUrl: ctx.config.fountainUrl });
@@ -20,7 +21,7 @@ export function config(ctx: AppContext): Response {
 
 export async function me(ctx: AppContext, req: Request): Promise<Response> {
   const user = await authenticate(ctx, req);
-  return json({ email: user.email, fountainUrl: ctx.config.fountainUrl });
+  return json(meDto(ctx, user));
 }
 
 export async function signIn(ctx: AppContext, req: Request): Promise<Response> {
@@ -44,7 +45,7 @@ export async function signIn(ctx: AppContext, req: Request): Promise<Response> {
   const token = randomToken();
   ctx.db.createSession(await sha256(token), email);
   ctx.db.expireSessions(ctx.config.sessionMaxAgeMs);
-  return json({ email, fountainUrl: ctx.config.fountainUrl }, 200, { "set-cookie": sessionCookie(token, req, ctx.config.sessionMaxAgeMs / 1000) });
+  return json(meDto(ctx, ctx.db.getUser(email)!), 200, { "set-cookie": sessionCookie(token, req, ctx.config.sessionMaxAgeMs / 1000) });
 }
 
 export async function signOut(ctx: AppContext, req: Request): Promise<Response> {

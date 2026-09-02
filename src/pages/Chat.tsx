@@ -14,7 +14,7 @@ import { People } from "../components/People";
 import { Thread } from "../components/Thread";
 
 export function Chat({ id }: { id: string }) {
-  const { toast, refreshChats, signOut } = useSession();
+  const { toast, refreshChats, signOut, notifications, readNotification } = useSession();
   const [state, setState] = useState<{ chat: ChatDto; sends: SendDto[] } | null>(null);
   const [missing, setMissing] = useState(false);
   const [people, setPeople] = useState(false);
@@ -37,6 +37,12 @@ export function Chat({ id }: { id: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Opening a mentioned thread from either the notification or the shared
+  // list clears its badge.
+  useEffect(() => {
+    for (const notification of notifications) if (!notification.readAt && notification.chatId === id) void readNotification(notification.id);
+  }, [id, notifications, readNotification]);
 
   if (missing)
     return (

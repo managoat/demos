@@ -24,6 +24,7 @@ import { authenticate, chatAccess, ownerClient, type AppContext } from "./contex
 import type { Role } from "./db";
 import type { FountainClient } from "./fountain";
 import { HttpError, json, readJson, str } from "./http";
+import { mentionedWorkspaceMembers } from "./account";
 
 export async function handleProxy(ctx: AppContext, req: Request, chatId: string, path: string): Promise<Response> {
   const user = await authenticate(ctx, req);
@@ -45,11 +46,18 @@ export async function handleProxy(ctx: AppContext, req: Request, chatId: string,
     const problem = imagesProblem(body.images);
     if (problem) throw new HttpError(422, "bad_images", problem);
     let prompt = str(body.prompt, 100_000);
-    if (ctx.db.participants(chat).length > 1) prompt = withAuthor(user.email, prompt);
+    const mentions = mentionedWorkspaceMembers(ctx, user.email, prompt).filter((email) => email !== chat.owner_email && email !== user.email);
+    if (ctx.db.participants(chat).length > 1 || mentions.length > 0) prompt = withAuthor(user.email, prompt);
     const out: Record<string, unknown> = { prompt };
     if (Array.isArray(body.images) && body.images.length) out.images = body.images;
     const res = await forward(client, req, path, url.search, JSON.stringify(out));
-    if (res.ok) ctx.db.addSend(chat.id, user.email);
+    if (res.ok) {
+      ctx.db.addSend(chat.id, user.email);
+      for (const email of mentions) {
+        ctx.db.addMember(chat.id, email, `mention:${user.email}`);
+        ctx.db.addMentionNotification(email, chat.id, user.email);
+      }
+    }
     return res;
   }
 

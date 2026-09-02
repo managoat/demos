@@ -7,7 +7,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Fountain } from "@agentshit/fountain-sdk";
 import type { ProjectDto } from "../shared/projects";
-import { api, ApiError, chatFountainBase, type ChatDto, type Me, type MenuDto } from "./lib/api";
+import { api, ApiError, chatFountainBase, type ChatDto, type Me, type MenuDto, type NotificationDto, type WorkspaceMemberDto } from "./lib/api";
 import { describeError } from "./lib/errors";
 
 /** How often the chat list is re-read while the tab is on screen. */
@@ -15,6 +15,7 @@ const SURVEY_MS = 30_000;
 
 export interface Session {
   me: Me;
+  setMe: (me: Me) => void;
   chats: ChatDto[];
   chatsLoaded: boolean;
   refreshChats: () => Promise<ChatDto[] | null>;
@@ -23,6 +24,11 @@ export interface Session {
   loadMenu: () => Promise<MenuDto | null>;
   projects: ProjectDto[];
   refreshProjects: () => Promise<ProjectDto[] | null>;
+  workspace: WorkspaceMemberDto[];
+  refreshWorkspace: () => Promise<WorkspaceMemberDto[] | null>;
+  notifications: NotificationDto[];
+  refreshNotifications: () => Promise<NotificationDto[] | null>;
+  readNotification: (id: string) => Promise<void>;
   toast: (text: string, kind?: "info" | "error") => void;
   signOut: () => void;
 }
@@ -42,11 +48,14 @@ interface Toast {
 }
 
 export function SessionProvider({ me, onSignOut, initialError, children }: { me: Me; onSignOut: () => void; initialError?: string | null; children: ReactNode }) {
+  const [currentMe, setMe] = useState(me);
   const [chats, setChats] = useState<ChatDto[]>([]);
   const [chatsLoaded, setChatsLoaded] = useState(false);
   const [menu, setMenu] = useState<MenuDto | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectDto[]>([]);
+  const [workspace, setWorkspace] = useState<WorkspaceMemberDto[]>([]);
+  const [notifications, setNotifications] = useState<NotificationDto[]>([]);
   const [toasts, setToasts] = useState<Toast[]>(() => (initialError ? [{ id: Date.now(), text: initialError, kind: "error" }] : []));
 
   useEffect(() => {
@@ -98,15 +107,50 @@ export function SessionProvider({ me, onSignOut, initialError, children }: { me:
     }
   }, [onSignOut]);
 
+  const refreshWorkspace = useCallback(async () => {
+    try {
+      const list = await api.workspace();
+      setWorkspace(list);
+      return list;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) onSignOut();
+      return null;
+    }
+  }, [onSignOut]);
+
+  const refreshNotifications = useCallback(async () => {
+    try {
+      const list = await api.notifications();
+      setNotifications(list);
+      return list;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) onSignOut();
+      return null;
+    }
+  }, [onSignOut]);
+
+  const readNotification = useCallback(async (id: string) => {
+    setNotifications((items) => items.map((n) => (n.id === id ? { ...n, readAt: n.readAt ?? new Date().toISOString() } : n)));
+    try {
+      await api.readNotification(id);
+    } catch (err) {
+      toast(describeError(err), "error");
+      void refreshNotifications();
+    }
+  }, [refreshNotifications, toast]);
+
   useEffect(() => {
     void refreshChats();
     void loadMenu();
     void refreshProjects();
-  }, [refreshChats, loadMenu, refreshProjects]);
+    void refreshWorkspace();
+    void refreshNotifications();
+  }, [refreshChats, loadMenu, refreshProjects, refreshWorkspace, refreshNotifications]);
 
   useEffect(() => {
     const tick = () => {
       if (document.visibilityState === "visible") void refreshChats();
+      if (document.visibilityState === "visible") void refreshNotifications();
     };
     const timer = window.setInterval(tick, SURVEY_MS);
     document.addEventListener("visibilitychange", tick);
@@ -114,7 +158,7 @@ export function SessionProvider({ me, onSignOut, initialError, children }: { me:
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [refreshChats]);
+  }, [refreshChats, refreshNotifications]);
 
   const signOut = useCallback(() => {
     void api.signOut().catch(() => undefined);
@@ -122,8 +166,8 @@ export function SessionProvider({ me, onSignOut, initialError, children }: { me:
   }, [onSignOut]);
 
   const value = useMemo<Session>(
-    () => ({ me, chats, chatsLoaded, refreshChats, menu, menuError, loadMenu, projects, refreshProjects, toast, signOut }),
-    [me, chats, chatsLoaded, refreshChats, menu, menuError, loadMenu, projects, refreshProjects, toast, signOut],
+    () => ({ me: currentMe, setMe, chats, chatsLoaded, refreshChats, menu, menuError, loadMenu, projects, refreshProjects, workspace, refreshWorkspace, notifications, refreshNotifications, readNotification, toast, signOut }),
+    [currentMe, chats, chatsLoaded, refreshChats, menu, menuError, loadMenu, projects, refreshProjects, workspace, refreshWorkspace, notifications, refreshNotifications, readNotification, toast, signOut],
   );
 
   return (
