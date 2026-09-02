@@ -53,6 +53,9 @@ const PROVIDERS = [
 const OLD_KEY = derivedKey({ ...DEFAULT_SETTINGS });
 
 const state = {
+  environments: [] as { key: string; id: string; body: Record<string, unknown> }[],
+  secrets: [] as { key: string; env: string; body: Record<string, unknown> }[],
+  deletedEnvironments: [] as string[],
   agents: new Map<string, FakeAgent[]>(),
   conversations: new Map<string, Record<string, unknown>[]>(),
   prompts: [] as { key: string; id: string; body: unknown }[],
@@ -62,6 +65,9 @@ const state = {
 };
 
 function reset(): void {
+  state.environments = [];
+  state.secrets = [];
+  state.deletedEnvironments = [];
   state.agents.clear();
   state.conversations.clear();
   state.prompts = [];
@@ -103,6 +109,26 @@ beforeAll(() => {
       if (p === "/api/connections" || p === "/api/connection-providers") {
         if (!CONNECTIONS[key]) return json({ error: "connections_not_enabled" }, 404);
         return json({ data: p === "/api/connections" ? CONNECTIONS[key] : PROVIDERS });
+      }
+      // Environments, shaped from the docs' tour and one real create (2026-09-02): `{data: {id, name, repositories, packages, setup_script}}`.
+      if (p === "/api/environments" && req.method === "POST") {
+        const body = (await req.json()) as Record<string, unknown>;
+        if (body.name === "Salon · broken") return json({ errors: { repositories: ["is invalid"] } }, 422);
+        const id = `e-${state.environments.length + 1}`;
+        state.environments.push({ key, id, body });
+        return json({ data: { id, ...body } }, 201);
+      }
+      const em = /^\/api\/environments\/([^/]+)(\/secrets)?$/.exec(p);
+      if (em && em[2] && req.method === "POST") {
+        const body = (await req.json()) as Record<string, unknown>;
+        if (!state.environments.some((e) => e.id === em[1] && e.key === key)) return json({ error: "not_found" }, 404);
+        state.secrets.push({ key, env: em[1]!, body });
+        return json({ data: { id: `s-${state.secrets.length}`, key: body.key } }, 201);
+      }
+      if (em && !em[2] && req.method === "DELETE") {
+        if (!state.environments.some((e) => e.id === em[1] && e.key === key)) return json({ error: "not_found" }, 404);
+        state.deletedEnvironments.push(em[1]!);
+        return new Response(null, { status: 204 });
       }
       if (p === "/api/agents" && req.method === "GET") return json({ data: state.agents.get(key) ?? [] });
       if (p === "/api/agents" && req.method === "POST") {
@@ -760,5 +786,109 @@ describe("a chat on an environment", () => {
     const convs = state.conversations.get("ftn_host")!;
     expect((convs.find((c) => c.id === onEnv.conversationId)!.request as Record<string, unknown>).environment_id).toBe("e-1");
     expect((convs.find((c) => c.id === plain.conversationId)!.request as Record<string, unknown>).environment_id).toBeUndefined();
+  });
+});
+
+describe("projects", () => {
+  async function makeProject(cookie: string, over: Record<string, unknown> = {}): Promise<Record<string, any>> {
+    const res = await call("POST", "/api/projects", { cookie, body: { repoUrl: "github.com/acme/widgets", token: "ghp_secret_token", setup: "npm install", ...over } });
+    expect(res.status).toBe(201);
+    return ((await res.json()) as { data: Record<string, any> }).data;
+  }
+
+  test("a repository becomes an environment on the owner's Fountain: the clone, the hook, the setup, the token as a secret Salon never keeps", async () => {
+    withPublicUrl();
+    const host = await signIn("ftn_host");
+    expect((await call("POST", "/api/projects", { cookie: host, body: { repoUrl: "not a repo" } })).status).toBe(422);
+    expect((await call("POST", "/api/projects", { cookie: host, body: { repoUrl: "github.com/acme/widgets", base: "bad branch" } })).status).toBe(422);
+    const project = await makeProject(host);
+    expect(project).toMatchObject({ name: "widgets", ownerEmail: "host@example.com", role: "owner", repoUrl: "https://github.com/acme/widgets", base: "main", hasToken: true, members: [] });
+
+    expect(state.environments).toHaveLength(1);
+    const env = state.environments[0]!;
+    expect(env.key).toBe("ftn_host");
+    expect(env.body).toMatchObject({ name: "Salon · widgets", repositories: [{ url: "https://github.com/acme/widgets", mount_path: "/home/sprite/work/widgets", ref: "main", secret_key: "GITHUB_TOKEN" }], packages: { apt: ["jq"] } });
+    const script = env.body.setup_script as string;
+    expect(script).toContain("/home/sprite/.salon/changes.sh");
+    expect(script).toContain("URL='https://salon.test/hooks/changes'");
+    expect(script).toContain("REPO='/home/sprite/work/widgets'");
+    expect(script).toContain("git config --global user.name 'Host'");
+    expect(script).toContain("cd '/home/sprite/work/widgets' && (\nnpm install\n)");
+    expect(state.secrets.map((x) => [x.env, x.body.key, x.body.value])).toEqual([
+      ["e-1", "GITHUB_TOKEN", "ghp_secret_token"],
+      ["e-1", "GH_TOKEN", "ghp_secret_token"],
+    ]);
+    // Nothing of the token in Salon's own records.
+    const rows = ctx.db.sql.query("SELECT * FROM projects").all() as Record<string, unknown>[];
+    expect(JSON.stringify(rows)).not.toContain("ghp_");
+
+    // Without a token: a public repository, no secret_key, no secrets.
+    const open = await makeProject(host, { repoUrl: "https://github.com/acme/site.git", token: "", base: "develop", name: "The site" });
+    expect(open).toMatchObject({ name: "The site", base: "develop", hasToken: false });
+    expect((state.environments[1]!.body.repositories as Record<string, unknown>[])[0]!.secret_key).toBeUndefined();
+    expect(state.secrets).toHaveLength(2);
+
+    // Fountain's refusal comes through, and nothing is kept.
+    const broke = await call("POST", "/api/projects", { cookie: host, body: { repoUrl: "github.com/acme/x", name: "broken" } });
+    expect(broke.status).toBe(422);
+    expect(((await (await call("GET", "/api/projects", { cookie: host })).json()) as { data: unknown[] }).data).toHaveLength(2);
+  });
+
+  test("a chat in a project runs on the project owner's key whoever starts it, and the project's people are in it", async () => {
+    withPublicUrl();
+    const host = await signIn("ftn_host");
+    const guest = await signIn("ftn_guest");
+    const other = await signIn("ftn_other");
+    const project = await makeProject(host, { token: "" });
+    expect((await call("GET", `/api/projects/${project.id}`, { cookie: guest })).status).toBe(404);
+    expect((await call("POST", `/api/projects/${project.id}/members`, { cookie: guest, body: { email: "other@example.com" } })).status).toBe(404);
+    await call("POST", `/api/projects/${project.id}/members`, { cookie: host, body: { email: "guest@example.com" } });
+    expect(((await (await call("GET", "/api/projects", { cookie: guest })).json()) as { data: Record<string, any>[] }).data[0]).toMatchObject({ id: project.id, role: "member" });
+
+    // The guest starts a chat in it.
+    const res = await call("POST", "/api/chats", { cookie: guest, body: { prompt: "fix the widget", settings: { ...SETTINGS, projectId: project.id } } });
+    expect(res.status).toBe(201);
+    const chat = ((await res.json()) as { data: Record<string, any> }).data;
+    expect(chat).toMatchObject({ ownerEmail: "host@example.com", role: "member", project: { id: project.id, name: "widgets", repoUrl: "https://github.com/acme/widgets", base: "main" } });
+    expect(chat.members.map((m: { email: string }) => m.email)).toEqual(["guest@example.com"]);
+    // On the host's key, with the host's environment, the guest's words tagged, the agent named for the project and told about the repository.
+    const conv = state.conversations.get("ftn_host")!.find((c) => c.id === chat.conversationId)!;
+    expect((conv.request as Record<string, unknown>).environment_id).toBe("e-1");
+    expect((conv.request as Record<string, unknown>).prompt).toBe("[from guest@example.com] fix the widget");
+    expect(state.conversations.get("ftn_guest") ?? []).toHaveLength(0);
+    const agent = state.agentPosts.find((a) => a.key === "ftn_host" && String(a.body.name).includes("widgets"))!;
+    expect(agent.body.name).toBe("Salon · Opus 5 · on widgets");
+    expect(String(agent.body.system)).toContain("checked out at /home/sprite/work/widgets");
+    expect(String(agent.body.system)).toContain("Co-authored-by");
+    // The guest reads it through the proxy; a stranger does not.
+    expect((await call("GET", `/f/${chat.id}/api/conversations/${chat.conversationId}`, { cookie: guest })).status).toBe(200);
+    expect((await call("GET", `/api/chats/${chat.id}`, { cookie: other })).status).toBe(404);
+    // The host sees it as theirs, in the project.
+    const mine = ((await (await call("GET", "/api/chats", { cookie: host })).json()) as { data: Record<string, any>[] }).data;
+    expect(mine.find((c) => c.id === chat.id)).toMatchObject({ role: "owner", project: { id: project.id } });
+
+    // Someone added to the project later is in its chats too; removed, they are out of the ones the project put them in.
+    await call("POST", `/api/projects/${project.id}/members`, { cookie: host, body: { email: "other@example.com" } });
+    expect((await call("GET", `/api/chats/${chat.id}`, { cookie: other })).status).toBe(200);
+    await call("DELETE", `/api/projects/${project.id}/members/other%40example.com`, { cookie: host });
+    expect((await call("GET", `/api/chats/${chat.id}`, { cookie: other })).status).toBe(404);
+    expect((await call("GET", `/api/projects/${project.id}`, { cookie: other })).status).toBe(404);
+
+    // The host starts one too: no tag needed? The room has the guest, so the host's words are tagged as well.
+    const res2 = await call("POST", "/api/chats", { cookie: host, body: { prompt: "and the gadget", settings: { ...SETTINGS, projectId: project.id } } });
+    const chat2 = ((await res2.json()) as { data: Record<string, any> }).data;
+    expect(chat2.role).toBe("owner");
+    expect(chat2.members.map((m: { email: string }) => m.email)).toEqual(["guest@example.com"]);
+    const conv2 = state.conversations.get("ftn_host")!.find((c) => c.id === chat2.conversationId)!;
+    expect((conv2.request as Record<string, unknown>).prompt).toBe("[from host@example.com] and the gadget");
+    // The second chat found the same derived agent.
+    expect(state.agentPosts.filter((a) => String(a.body.name).includes("widgets"))).toHaveLength(1);
+
+    // Removing the project removes the environment; the chats stay, unattached.
+    expect((await call("DELETE", `/api/projects/${project.id}`, { cookie: guest })).status).toBe(403);
+    expect((await call("DELETE", `/api/projects/${project.id}`, { cookie: host })).status).toBe(200);
+    expect(state.deletedEnvironments).toEqual(["e-1"]);
+    expect(((await (await call("GET", `/api/chats/${chat.id}`, { cookie: host })).json()) as { data: { chat: { project: unknown } } }).data.chat.project).toBeNull();
+    expect((await call("POST", "/api/chats", { cookie: host, body: { prompt: "x", settings: { ...SETTINGS, projectId: project.id } } })).status).toBe(404);
   });
 });

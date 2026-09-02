@@ -9,8 +9,17 @@ import { Mark } from "./Mark";
 
 export function Sidebar({ route, onClose }: { route: Route; onClose: () => void }) {
   const { me, chats, chatsLoaded, signOut } = useSession();
-  const hosting = chats.filter((c) => c.role === "owner");
-  const invited = chats.filter((c) => c.role !== "owner");
+  // A chat in a project sits under the project; the rest under who hosts them.
+  const byProject = new Map<string, { name: string; items: ChatDto[] }>();
+  for (const c of chats) {
+    if (!c.project) continue;
+    const g = byProject.get(c.project.id) ?? { name: c.project.name, items: [] };
+    g.items.push(c);
+    byProject.set(c.project.id, g);
+  }
+  const loose = chats.filter((c) => !c.project);
+  const hosting = loose.filter((c) => c.role === "owner");
+  const invited = loose.filter((c) => c.role !== "owner");
   const current = route.page === "chat" ? route.id : null;
 
   return (
@@ -26,6 +35,9 @@ export function Sidebar({ route, onClose }: { route: Route; onClose: () => void 
       <div className="side-list">
         {!chatsLoaded && <div className="muted small pad">Loading…</div>}
         {chatsLoaded && chats.length === 0 && <div className="muted small pad">No chats yet. Say something on the right.</div>}
+        {[...byProject.entries()].map(([id, g]) => (
+          <Group key={id} label={g.name} items={g.items} current={current} />
+        ))}
         {hosting.length > 0 && <Group label="Your chats" items={hosting} current={current} />}
         {invited.length > 0 && <Group label="Shared with you" items={invited} current={current} />}
       </div>

@@ -39,6 +39,14 @@ export interface ConversationSummary {
   [k: string]: unknown;
 }
 
+export interface EnvironmentSummary {
+  id: string;
+  name: string;
+  repositories?: { url: string; mount_path: string; ref?: string | null; secret_key?: string | null }[];
+  setup_script?: string | null;
+  [k: string]: unknown;
+}
+
 export interface Catalog {
   runtimes: string[];
   models: Record<string, string[]>;
@@ -158,6 +166,25 @@ export class FountainClient {
       if (err instanceof FountainHttpError && err.status === 404 && err.code === "connections_not_enabled") return null;
       throw err;
     }
+  }
+
+  async createEnvironment(body: Record<string, unknown>): Promise<EnvironmentSummary> {
+    return (await this.post<{ data: EnvironmentSummary }>("/api/environments", body)).data;
+  }
+
+  async updateEnvironment(id: string, body: Record<string, unknown>): Promise<EnvironmentSummary> {
+    return (await this.json<{ data: EnvironmentSummary }>(`/api/environments/${encodeURIComponent(id)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).data;
+  }
+
+  /** Remove an environment. Idempotent for one that is already gone. */
+  async deleteEnvironment(id: string): Promise<void> {
+    const res = await this.fetch(`/api/environments/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!res.ok && res.status !== 404) throw new FountainHttpError(res.status, await res.text());
+  }
+
+  /** Write one secret into an environment. The value never comes back. */
+  async setEnvironmentSecret(id: string, key: string, value: string): Promise<void> {
+    await this.post(`/api/environments/${encodeURIComponent(id)}/secrets`, { key, value });
   }
 
   async createConversation(body: Record<string, unknown>): Promise<ConversationSummary> {

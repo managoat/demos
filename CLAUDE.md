@@ -33,16 +33,18 @@ server/   Bun. app.ts is the route table; index.ts boots it.
           menu.ts      GET /api/me/menu: the model catalog + the caller's connections (never their agents)
           connectors.ts a connection → the mcp_servers entry an agent uses, and the menu row
           agents.ts    settings → the agent Fountain runs (the seam, see below)
-          chats.ts     chats, members, invites, join
+          chats.ts     chats, members, invites, join; a chat in a project is hosted by the project's owner
+          projects.ts  projects: a repository → an Environment on the owner's Fountain (clone, hook, token as a secret)
           proxy.ts     /f/<chat>/api/conversations/<id>/… on the host's key
           games.ts     a chat's games: start, move
           changes.ts   the repository's changes: the hook's POST, the latest record, `record` (the one way in)
           hub.ts       GET /api/chats/:id/stream: what Salon itself records, live (game, changes events)
           sandbox.ts   who a computer is (bearer = $FOUNTAIN_TOKEN + conversation id), and the hook setup script
           mcp.ts       POST /mcp: Salon as an MCP server for the chat's computer (start_game, game_state)
-          db.ts        SQLite: users, sessions, chats, chat_members, sends, games, changes
+          db.ts        SQLite: users, sessions, chats, chat_members, sends, games, changes, projects, project_members
 shared/   what both sides agree on: author.ts, models.ts, settings.ts, skills.ts, images.ts, games.ts (the rules),
-          changes.ts (the snapshot shape, and the diff/status parsers both sides use)
+          changes.ts (the snapshot shape, and the diff/status parsers both sides use),
+          projects.ts (what a repository address is, where it is checked out)
 src/      Vite + React. store.tsx (session), router.ts (hash routes), lib/live.ts (the chat's own stream),
           components/Thread.tsx (transcript + composer), SettingsMenu.tsx (pill + `+`),
           Game.tsx (the board), Blocks.tsx (a start_game tool block renders as the board),
@@ -50,7 +52,7 @@ src/      Vite + React. store.tsx (session), router.ts (hash routes), lib/live.t
 k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) applies it
 ```
 
-## Six boundaries, easy to get wrong
+## Seven boundaries, easy to get wrong
 
 1. **The proxy is the member boundary.** A guest's browser builds
    `new Fountain({ baseUrl: "<origin>/f/<chat>", apiKey: "session" })`; the
@@ -140,6 +142,28 @@ k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) ap
    cuts a diff at 1 MB and says so. The hook is claude-only, like games.
    Verified end to end 2026-09-02 against `github.com/managoat/salon`.
 
+7. **A project is the owner's environment, and its chats are the owner's.**
+   `server/projects.ts` turns a repository address into one Environment on
+   the *creator's* Fountain: `repositories: [{url, mount_path:
+   /home/sprite/work/<repo>, ref: <base>, secret_key: GITHUB_TOKEN}]`,
+   `packages.apt: [jq]`, and a `setup_script` that is the changes hook,
+   the owner's git identity, `gh` best-effort, then the project's own
+   command in the checkout. A token is written as `GITHUB_TOKEN` and
+   `GH_TOKEN` (the clone reads one, `gh` the other) and Salon keeps only
+   `has_token`. Settings carry `projectId`; `chats.ts#create` swaps it for
+   the project's `environmentId` *and for the project owner as host* — a
+   member who starts a chat in a project starts it on the owner's key, and
+   is a member of it, tagged from the first prompt. The project's people
+   are copied into `chat_members` (`added_by = project:<id>`) on every
+   chat in it, on create and when someone is added; removal takes back
+   only what the project put in. The derived agent gets `on <project>` in
+   its name (names are unique on Fountain) and `agents.ts#codeNote` in
+   its prompt: where the repo is, the branch is already made, commit as
+   you go, `gh pr create` when asked, `Co-authored-by` for tagged senders.
+   Removing a project deletes the environment (Fountain retires its
+   sandboxes; `409 sandbox_mid_turn` while one runs) and detaches the
+   chats, which keep their transcripts.
+
 ## Run, test, ship
 
 ```bash
@@ -177,9 +201,12 @@ answers `ok` too, and its sign-in sets `wb_session`), so use 8090; and a
 server started with `&` from an agent's shell dies with that shell — run it
 detached. For the hook: create an Environment on `[default]` with
 `repositories: [{url, mount_path: "/home/sprite/work/<name>", ref: "main"}]`,
-`packages: {apt: ["jq"]}` and `setup_script` from `hookSetupScript`, then
-`POST /api/chats` with `settings.environmentId` set (curl can; the menu
-cannot yet). A missed POST is not retried: send another prompt. A
+`packages: {apt: ["jq"]}` and `setup_script` from `hookSetupScript` — or
+simply `POST /api/projects {"repoUrl": "github.com/managoat/salon"}` and
+start a chat with `settings.projectId`, which is the same thing through
+the seam (verified 2026-09-02: branch, commit, clean tree, diff against
+main, all on the panel). A missed POST is not retried: send another
+prompt. A
 brokered sandbox reaches it only through `HTTPS_PROXY`, which the runtime
 honours. Start a chat, add the guest, wait for the first turn to finish
 (a prompt during a turn is `conversation_busy`), then send "let's play

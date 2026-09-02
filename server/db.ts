@@ -37,7 +37,31 @@ export interface ChatRow {
   agent_id: string;
   /** The join link's token; null when the host has not made one. */
   invite_token: string | null;
+  /** The project the chat was started in (shared/projects.ts), or null. */
+  project_id: string | null;
   created_at: string;
+}
+
+/** A repository a chat's computer starts with: an Environment on the owner's Fountain. */
+export interface ProjectRow {
+  id: string;
+  owner_email: string;
+  name: string;
+  repo_url: string;
+  base: string;
+  mount_path: string;
+  environment_id: string;
+  has_token: 0 | 1;
+  /** The project's own setup command, appended after Salon's. */
+  setup: string;
+  created_at: string;
+}
+
+export interface ProjectMemberRow {
+  project_id: string;
+  email: string;
+  added_by: string;
+  added_at: string;
 }
 
 export interface MemberRow {
@@ -123,6 +147,7 @@ CREATE TABLE IF NOT EXISTS chats (
   connectors TEXT NOT NULL DEFAULT '[]',
   agent_id TEXT NOT NULL,
   invite_token TEXT UNIQUE,
+  project_id TEXT,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS chats_owner ON chats(owner_email);
@@ -155,6 +180,27 @@ CREATE TABLE IF NOT EXISTS games (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS games_chat ON games(chat_id, created_at);
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  owner_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  repo_url TEXT NOT NULL,
+  base TEXT NOT NULL,
+  mount_path TEXT NOT NULL,
+  environment_id TEXT NOT NULL,
+  has_token INTEGER NOT NULL DEFAULT 0,
+  setup TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS projects_owner ON projects(owner_email);
+CREATE TABLE IF NOT EXISTS project_members (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  added_by TEXT NOT NULL,
+  added_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, email)
+);
+CREATE INDEX IF NOT EXISTS project_members_email ON project_members(email);
 CREATE TABLE IF NOT EXISTS changes (
   chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
   seq INTEGER NOT NULL,
@@ -193,6 +239,7 @@ export class Db {
     const have = new Set((this.sql.query("PRAGMA table_info(chats)").all() as { name: string }[]).map((c) => c.name));
     if (!have.has("skills")) this.sql.exec("ALTER TABLE chats ADD COLUMN skills TEXT NOT NULL DEFAULT '[]'");
     if (!have.has("connectors")) this.sql.exec("ALTER TABLE chats ADD COLUMN connectors TEXT NOT NULL DEFAULT '[]'");
+    if (!have.has("project_id")) this.sql.exec("ALTER TABLE chats ADD COLUMN project_id TEXT");
   }
 
   close(): void {
@@ -269,8 +316,8 @@ export class Db {
   insertChat(c: ChatRow): void {
     this.sql
       .query(
-        `INSERT INTO chats (id, owner_email, conversation_id, title, runtime, model, skills, connectors, preset_id, preset_name, environment_id, vault_id, agent_id, invite_token, created_at)
-         VALUES ($id, $owner_email, $conversation_id, $title, $runtime, $model, $skills, $connectors, $preset_id, $preset_name, $environment_id, $vault_id, $agent_id, $invite_token, $created_at)`,
+        `INSERT INTO chats (id, owner_email, conversation_id, title, runtime, model, skills, connectors, preset_id, preset_name, environment_id, vault_id, agent_id, invite_token, project_id, created_at)
+         VALUES ($id, $owner_email, $conversation_id, $title, $runtime, $model, $skills, $connectors, $preset_id, $preset_name, $environment_id, $vault_id, $agent_id, $invite_token, $project_id, $created_at)`,
       )
       .run(c as unknown as Record<string, string | null>);
   }
@@ -293,6 +340,70 @@ export class Db {
 
   chatByInvite(token: string): ChatRow | null {
     return (this.sql.query("SELECT * FROM chats WHERE invite_token = $t").get({ t: token }) as ChatRow | null) ?? null;
+  }
+
+  /** The chats started in a project, oldest first. */
+  chatsInProject(projectId: string): ChatRow[] {
+    return this.sql.query("SELECT * FROM chats WHERE project_id = $p ORDER BY created_at, id").all({ p: projectId }) as ChatRow[];
+  }
+
+  /** Forget which project chats were in, when the project goes; the chats stay. */
+  detachChatsFromProject(projectId: string): void {
+    this.sql.query("UPDATE chats SET project_id = NULL WHERE project_id = $p").run({ p: projectId });
+  }
+
+  // ── projects ─────────────────────────────────────────────────────────
+
+  getProject(id: string): ProjectRow | null {
+    return (this.sql.query("SELECT * FROM projects WHERE id = $id").get({ id }) as ProjectRow | null) ?? null;
+  }
+
+  /** Projects the user owns or is in, newest first. */
+  projectsFor(email: string): ProjectRow[] {
+    return this.sql
+      .query(
+        `SELECT p.* FROM projects p
+         WHERE p.owner_email = $email OR p.id IN (SELECT project_id FROM project_members WHERE email = $email)
+         ORDER BY p.created_at DESC, p.id`,
+      )
+      .all({ email }) as ProjectRow[];
+  }
+
+  projectRoleIn(projectId: string, email: string): Role | null {
+    const p = this.getProject(projectId);
+    if (!p) return null;
+    if (p.owner_email === email) return "owner";
+    const m = this.sql.query("SELECT 1 FROM project_members WHERE project_id = $p AND email = $e").get({ p: projectId, e: email });
+    return m ? "member" : null;
+  }
+
+  insertProject(p: ProjectRow): void {
+    this.sql
+      .query(
+        `INSERT INTO projects (id, owner_email, name, repo_url, base, mount_path, environment_id, has_token, setup, created_at)
+         VALUES ($id, $owner_email, $name, $repo_url, $base, $mount_path, $environment_id, $has_token, $setup, $created_at)`,
+      )
+      .run(p as unknown as Record<string, string | number>);
+  }
+
+  deleteProject(id: string): void {
+    this.sql.query("DELETE FROM projects WHERE id = $id").run({ id });
+  }
+
+  projectMembers(projectId: string): ProjectMemberRow[] {
+    return this.sql.query("SELECT * FROM project_members WHERE project_id = $p ORDER BY added_at, email").all({ p: projectId }) as ProjectMemberRow[];
+  }
+
+  addProjectMember(projectId: string, email: string, addedBy: string): boolean {
+    const r = this.sql
+      .query("INSERT OR IGNORE INTO project_members (project_id, email, added_by, added_at) VALUES ($p, $e, $by, $t)")
+      .run({ p: projectId, e: email, by: addedBy, t: now() });
+    return r.changes > 0;
+  }
+
+  removeProjectMember(projectId: string, email: string): boolean {
+    const r = this.sql.query("DELETE FROM project_members WHERE project_id = $p AND email = $e").run({ p: projectId, e: email });
+    return r.changes > 0;
   }
 
   // ── members ──────────────────────────────────────────────────────────

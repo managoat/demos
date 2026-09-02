@@ -14,8 +14,14 @@ export interface ChatSettings {
   /** Ids of the host's Fountain connections (`GET /api/connections`). */
   connectorIds: string[];
   /**
+   * A Salon project (shared/projects.ts): a repository the chat's computer
+   * starts with a checkout of. The server turns it into `environmentId`
+   * before the settings are keyed; the browser never sees that id.
+   */
+  projectId: string | null;
+  /**
    * Room for later — an agent to start from, a computer, secrets. Parsed and
-   * keyed, but nothing in the browser sets them and the menu does not offer them.
+   * keyed; the browser sets `environmentId` only through a project.
    */
   presetId: string | null;
   environmentId: string | null;
@@ -26,6 +32,7 @@ export const DEFAULT_SETTINGS: ChatSettings = {
   model: "anthropic/claude-opus-5",
   skills: [],
   connectorIds: [],
+  projectId: null,
   presetId: null,
   environmentId: null,
   vaultId: null,
@@ -49,6 +56,7 @@ export function parseSettings(v: unknown): ChatSettings | string {
     model,
     skills,
     connectorIds,
+    projectId: optId(r.projectId),
     presetId: optId(r.presetId),
     environmentId: optId(r.environmentId),
     vaultId: optId(r.vaultId),

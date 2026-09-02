@@ -43,6 +43,26 @@ export const SALON_NOTE =
   "everyone in the room as a collaborator. " +
   "Keep replies conversational unless asked for something else.";
 
+/** What a project's repository is, and how to work in it, for an agent derived on one. */
+export function codeNote(project: ProjectContext): string {
+  return (
+    `This chat has a repository: ${project.repoUrl}, checked out at ${project.repoPath}, on a branch of its own off ${project.base} ` +
+    "(the branch is made for you before your first turn; do not switch to another). Work there. Make the smallest change that " +
+    "does what was asked, and commit as you go with a clear message; push the branch when a piece of work is done, so nothing is " +
+    "lost if the computer goes away. When someone asks for a pull request, push and open one with `gh pr create` against " +
+    `${project.base}, and say its address. People in the chat can see every change you make beside the transcript, so describe ` +
+    "what you did in a sentence rather than pasting the code back. Where a message begins with \"[from someone]\", add " +
+    "`Co-authored-by: <their email>` to the commits their words led to."
+  );
+}
+
+export interface ProjectContext {
+  name: string;
+  repoUrl: string;
+  repoPath: string;
+  base: string;
+}
+
 export const GAMES_NOTE =
   "People here can play games with each other on a board the chat shows. When someone wants to play " +
   "(\"let's play tic-tac-toe\", \"me against Bob\"), call the start_game tool with the two players — the " +
@@ -68,7 +88,7 @@ export interface Materialised {
   created: boolean;
 }
 
-export async function agentFor(client: FountainClient, settings: ChatSettings, publicUrl: string | null): Promise<Materialised> {
+export async function agentFor(client: FountainClient, settings: ChatSettings, publicUrl: string | null, project: ProjectContext | null = null): Promise<Materialised> {
   // Connectors are resolved first: a stale or unusable one is refused before anything else is asked of Fountain.
   let connectors: ChosenConnector[] = [];
   let mcpServers: Record<string, unknown> = {};
@@ -79,7 +99,7 @@ export async function agentFor(client: FountainClient, settings: ChatSettings, p
 
   const runtime = runtimeFor(settings.model);
   const games = runtime === "claude" && publicUrl ? salonServer(publicUrl) : null;
-  const system = `${ROOM_PROMPT}\n\n${SALON_NOTE}${games ? `\n\n${GAMES_NOTE}` : ""}`;
+  const system = `${ROOM_PROMPT}\n\n${SALON_NOTE}${project ? `\n\n${codeNote(project)}` : ""}${games ? `\n\n${GAMES_NOTE}` : ""}`;
 
   const key = derivedKey(settings);
   const agents = await client.agents();
@@ -96,7 +116,7 @@ export async function agentFor(client: FountainClient, settings: ChatSettings, p
   const skills = settings.skills.map(skillById).flatMap((s) => (s ? [skillEntry(s)] : []));
   const parts = [...Object.keys(mcpServers), ...settings.skills].sort();
   // Fountain keeps agent names unique, and an environment is part of the key: name it, or the second pick is refused.
-  if (settings.environmentId) parts.push(`on ${settings.environmentId.slice(0, 8)}`);
+  if (settings.environmentId) parts.push(`on ${project?.name ?? settings.environmentId.slice(0, 8)}`);
   if (games) mcpServers = { ...mcpServers, salon: games };
   const body: Record<string, unknown> = {
     name: `Salon · ${modelLabel(settings.model)}${parts.length ? ` · ${parts.join(", ")}` : ""}`.slice(0, 200),
