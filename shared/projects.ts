@@ -21,6 +21,8 @@ export interface ProjectDto {
   base: string;
   /** True when a token was given, so a private repository clones and `gh` can open a pull request. */
   hasToken: boolean;
+  /** True when Salon refreshes access through its GitHub App. */
+  githubManaged: boolean;
   createdAt: string;
 }
 

@@ -92,6 +92,7 @@ async function whose(ctx: AppContext, key: string): Promise<string> {
 /** Where the hook lives in the computer. The claude runtime's home; codex shares it. */
 export const HOOK_DIR = "/home/sprite/.salon";
 export const HOOK_SCRIPT = `${HOOK_DIR}/changes.sh`;
+export const GITHUB_CREDENTIAL_SCRIPT = `${HOOK_DIR}/github-credential.sh`;
 /**
  * Claude Code's *local* project settings. Fountain writes `~/.claude/settings.json`
  * itself, after the setup script and whole, so a hook there would be lost;
@@ -126,6 +127,33 @@ export function hookSetupScript(o: HookOptions): string {
     `cat > ${q(LOCAL_SETTINGS)} <<'SALON_SETTINGS'`,
     JSON.stringify(localSettings(), null, 2),
     "SALON_SETTINGS",
+    "",
+  ].join("\n");
+}
+
+/**
+ * A git credential helper for GitHub-App projects. It asks Salon for a fresh
+ * one-repository installation token at each authenticated git operation, so
+ * a long-running session does not inherit the token's one-hour lifetime.
+ */
+export function githubCredentialSetupScript(publicUrl: string, repoPath: string): string {
+  return [
+    "# Salon: fresh GitHub credentials, scoped by the chat and repository.",
+    `mkdir -p ${q(HOOK_DIR)}`,
+    `cat > ${q(GITHUB_CREDENTIAL_SCRIPT)} <<'SALON_GITHUB_CREDENTIAL'`,
+    `#!/usr/bin/env bash
+set -u
+[ "\${1:-}" = get ] || exit 0
+[ -n "\${FOUNTAIN_TOKEN:-}" ] || exit 0
+[ -n "\${FOUNTAIN_CONVERSATION_ID:-}" ] || exit 0
+TOKEN=$(curl -sS -m 30 -X POST ${q(`${publicUrl}/hooks/github-token`)} \\
+  -H "Authorization: Bearer $FOUNTAIN_TOKEN" \\
+  -H "X-Fountain-Conversation-Id: $FOUNTAIN_CONVERSATION_ID" | jq -r '.token // empty')
+[ -n "$TOKEN" ] || exit 0
+printf 'username=x-access-token\\npassword=%s\\n' "$TOKEN"`,
+    "SALON_GITHUB_CREDENTIAL",
+    `chmod 700 ${q(GITHUB_CREDENTIAL_SCRIPT)}`,
+    `git -C ${q(repoPath)} config credential.helper ${q(GITHUB_CREDENTIAL_SCRIPT)}`,
     "",
   ].join("\n");
 }

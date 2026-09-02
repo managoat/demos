@@ -8,6 +8,9 @@
  *   DELETE /api/session                     sign out
  *   GET    /api/me
  *   GET    /api/me/menu                     the model catalog and my connections, for the composer's menus
+ *   GET    /api/github                      App configuration and my connection
+ *   POST   /api/github/callback             finish connecting my GitHub account
+ *   GET    /api/github/repos                installed repositories I can push to
  *   GET    /api/chats                       mine: hosted and invited to
  *   POST   /api/chats                       start one
  *   GET    /api/chats/:id
@@ -42,6 +45,7 @@
  *   DELETE /api/chats/:id/comments/:c       its author, or the host
  *   POST   /mcp                             the model's way to start a game, on the conversation's key (mcp.ts)
  *   POST   /hooks/changes                   the computer's way to report changes, on the same key (changes.ts)
+ *   POST   /hooks/github-token              a fresh one-repository token for that computer
  *   *      /f/:id/api/...                   Fountain, scoped to the chat (proxy.ts)
  */
 import { existsSync, statSync } from "node:fs";
@@ -53,6 +57,7 @@ import * as comments from "./comments";
 import type { AppContext } from "./context";
 import * as files from "./files";
 import * as games from "./games";
+import * as github from "./github-access";
 import { errorResponse, HttpError, json } from "./http";
 import * as hub from "./hub";
 import { handleMcp } from "./mcp";
@@ -98,6 +103,9 @@ export function buildApp(ctx: AppContext): (req: Request) => Promise<Response> {
   on("DELETE", "/api/session", (req) => auth.signOut(ctx, req));
   on("GET", "/api/me", (req) => auth.me(ctx, req));
   on("GET", "/api/me/menu", (req) => menu.show(ctx, req));
+  on("GET", "/api/github", (req) => github.info(ctx, req));
+  on("POST", "/api/github/callback", (req) => github.callback(ctx, req));
+  on("GET", "/api/github/repos", (req) => github.repos(ctx, req));
 
   on("GET", "/api/chats", (req) => chats.list(ctx, req));
   on("POST", "/api/chats", (req) => chats.create(ctx, req));
@@ -117,6 +125,8 @@ export function buildApp(ctx: AppContext): (req: Request) => Promise<Response> {
   on("DELETE", "/api/projects/:id", (req, p) => projects.remove(ctx, req, p.id!));
   on("POST", "/api/projects/:id/members", (req, p) => projects.addMember(ctx, req, p.id!));
   on("DELETE", "/api/projects/:id/members/:email", (req, p) => projects.removeMember(ctx, req, p.id!, p.email!));
+
+  on("POST", "/hooks/github-token", (req) => github.sandboxToken(ctx, req));
 
   on("GET", "/api/chats/:id/stream", (req, p) => hub.stream(ctx, req, p.id!));
   on("GET", "/api/chats/:id/games", (req, p) => games.list(ctx, req, p.id!));

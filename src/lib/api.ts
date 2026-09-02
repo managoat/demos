@@ -15,6 +15,23 @@ export interface Me {
   fountainUrl: string;
 }
 
+export interface GitHubInfo {
+  configured: boolean;
+  connected: boolean;
+  login: string | null;
+  clientId: string | null;
+  installUrl: string | null;
+}
+
+export interface GitHubRepo {
+  slug: string;
+  private: boolean;
+  archived: boolean;
+  defaultBranch: string;
+  description: string | null;
+  pushedAt: string | null;
+}
+
 /** One of the host's Fountain connections, as the Connectors submenu shows it. */
 export interface ConnectorDto {
   id: string;
@@ -94,6 +111,8 @@ export const api = {
   signIn: (apiKey: string) => call<Me>("POST", "/api/session", { apiKey }),
   signOut: () => call<{ ok: true }>("DELETE", "/api/session"),
   menu: () => data(call<{ data: MenuDto }>("GET", "/api/me/menu")),
+  github: () => data(call<{ data: GitHubInfo }>("GET", "/api/github")),
+  githubRepos: () => data(call<{ data: GitHubRepo[] }>("GET", "/api/github/repos")),
 
   chats: () => data(call<{ data: ChatDto[] }>("GET", "/api/chats")),
   createChat: (input: { prompt: string; images?: ImageInput[] | null; settings: ChatSettings; title?: string }) => data(call<{ data: ChatDto }>("POST", "/api/chats", input)),
@@ -112,7 +131,7 @@ export const api = {
   move: (chatId: string, gameId: string, cell: number) => data(call<{ data: GameDto }>("POST", `/api/chats/${chatId}/games/${gameId}/moves`, { cell })),
 
   projects: () => data(call<{ data: ProjectDto[] }>("GET", "/api/projects")),
-  createProject: (input: { repoUrl: string; base?: string; name?: string; token?: string; setup?: string }) => data(call<{ data: ProjectDto }>("POST", "/api/projects", input)),
+  createProject: (input: { repoUrl?: string; githubRepo?: string; base?: string; name?: string; token?: string; setup?: string }) => data(call<{ data: ProjectDto }>("POST", "/api/projects", input)),
   deleteProject: (id: string) => call<{ ok: true }>("DELETE", `/api/projects/${id}`),
   addProjectMember: (id: string, email: string) => data(call<{ data: ProjectDto }>("POST", `/api/projects/${id}/members`, { email })),
   removeProjectMember: (id: string, email: string) => call<{ ok?: true; left?: boolean; data?: ProjectDto }>("DELETE", `/api/projects/${id}/members/${encodeURIComponent(email)}`),

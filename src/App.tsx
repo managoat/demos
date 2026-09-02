@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, type Me } from "./lib/api";
 import { describeError } from "./lib/errors";
 import { completeLoginIfCallback } from "./lib/oauth";
+import { completeGitHubConnectIfCallback } from "./lib/github";
 import { SignIn } from "./components/SignIn";
 import { Sidebar } from "./components/Sidebar";
 import { Home } from "./pages/Home";
@@ -30,6 +31,12 @@ export function App() {
         error = describeError(err);
       }
       try {
+        const github = await completeGitHubConnectIfCallback();
+        if (github) {
+          const me = await api.me();
+          if (!cancelled) setPhase({ kind: "in", me });
+          return;
+        }
         const cb = await completeLoginIfCallback();
         if (cb) {
           // Keep the minted key even if the next step fails: it is stored the
