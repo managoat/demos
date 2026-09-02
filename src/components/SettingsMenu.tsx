@@ -4,13 +4,14 @@
  * desktop chat apps taught. Nothing here asks for an agent or a computer;
  * the server derives those from these picks (server/agents.ts).
  */
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { shortName } from "../../shared/author";
 import { groupByProvider, modelBlurb, modelLabel, providerLabel } from "../../shared/models";
-import { baseBranch, parseRepoUrl, type ProjectDto } from "../../shared/projects";
+import { baseBranch, type ProjectDto } from "../../shared/projects";
 import type { ChatSettings } from "../../shared/settings";
 import { SKILLS, skillNames } from "../../shared/skills";
-import { api, type MenuDto } from "../lib/api";
+import { api, type GitHubInfo, type GitHubRepo, type MenuDto } from "../lib/api";
+import { beginGitHubConnect } from "../lib/github";
 import { describeError } from "../lib/errors";
 import { useSession } from "../store";
 import { MenuBack, MenuHeading, MenuItem, Popover } from "./Menu";
@@ -123,7 +124,7 @@ export function AddMenu({
               }}
             />
             <div className="menu-sep" />
-            <MenuItem label="Projects" detail={project ? project.name : "A repository the chat works in"} arrow onClick={() => setView("projects")} />
+            <MenuItem label="Repository" detail={project ? project.name : "Open this session in a GitHub repository"} arrow onClick={() => setView("projects")} />
             <MenuItem label="Skills" detail={chosenSkills.length ? chosenSkills.join(", ") : "PDFs, spreadsheets, slides and more"} arrow onClick={() => setView("skills")} />
             <MenuItem
               label="Connectors"
@@ -150,7 +151,7 @@ export function AddMenu({
               />
             ))}
             <div className="menu-sep" />
-            <MenuItem label="Add a repository…" detail="GitHub, or any https git address" arrow onClick={() => setView("new-project")} />
+            <MenuItem label="Open another repository…" detail="Choose from the Salon GitHub App" arrow onClick={() => setView("new-project")} />
             {projects.length > 0 && <MenuHeading>Everyone in a project is in every chat started in it, and the project's owner pays for them.</MenuHeading>}
           </>
         )}
@@ -232,29 +233,56 @@ export function AddMenu({
 }
 
 /**
- * The form behind "Add a repository…": the address, the branch to start from,
- * a token for a private repository (and for opening pull requests), and a
- * setup command. The token goes to the server once and on to Fountain as a
- * write-only secret; this browser forgets it on submit.
+ * The form behind "Open another repository…". GitHub lists only repositories
+ * both this person and the Salon App installation can reach; no repository
+ * token is typed into or retained by the browser.
  */
 function NewProject({ onMade }: { onMade: (p: ProjectDto) => void }) {
   const { toast } = useSession();
-  const [repoUrl, setRepoUrl] = useState("");
-  const [base, setBase] = useState("main");
-  const [token, setToken] = useState("");
+  const [info, setInfo] = useState<GitHubInfo | null>(null);
+  const [repos, setRepos] = useState<GitHubRepo[] | null>(null);
+  const [slug, setSlug] = useState("");
+  const [base, setBase] = useState("");
   const [setup, setSetup] = useState("");
   const [busy, setBusy] = useState(false);
-  const repo = parseRepoUrl(repoUrl);
+  const [loading, setLoading] = useState(true);
+  const selected = repos?.find((r) => r.slug === slug) ?? null;
   const branch = baseBranch(base);
-  const problem = repoUrl.trim() && !repo ? "That is not a repository address." : base.trim() && !branch ? "That is not a branch name." : null;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const next = await api.github();
+      setInfo(next);
+      if (next.connected) {
+        const list = await api.githubRepos();
+        setRepos(list);
+        if (!slug && list[0]) {
+          setSlug(list[0].slug);
+          setBase(list[0].defaultBranch);
+        }
+      } else {
+        setRepos(null);
+      }
+    } catch (err) {
+      toast(describeError(err), "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [slug, toast]);
+
+  useEffect(() => {
+    void load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const problem = base.trim() && !branch ? "That is not a branch name." : selected?.archived ? "That repository is archived." : null;
 
   const submit = async () => {
-    if (!repo || !branch || busy) return;
+    if (!selected || !branch || busy) return;
     setBusy(true);
     try {
-      const made = await api.createProject({ repoUrl: repo.url, base: branch, token: token.trim() || undefined, setup: setup.trim() || undefined });
-      setToken("");
-      toast(`${made.name} is ready. Chats started in it work in a checkout of it.`);
+      const made = await api.createProject({ githubRepo: selected.slug, base: branch, setup: setup.trim() || undefined });
+      toast(`${made.name} is ready. This session will work in its checkout.`);
       onMade(made);
     } catch (err) {
       toast(describeError(err), "error");
@@ -262,6 +290,34 @@ function NewProject({ onMade }: { onMade: (p: ProjectDto) => void }) {
       setBusy(false);
     }
   };
+
+  if (loading && !info) return <MenuHeading>Checking GitHub…</MenuHeading>;
+  if (!info?.configured) return <MenuHeading>This Salon does not have its GitHub App configured yet.</MenuHeading>;
+  if (!info.connected) {
+    return (
+      <div className="menu-form project-form">
+        <MenuHeading>Connect GitHub to choose from repositories where the Salon App is installed. Salon never asks you to paste a repository token.</MenuHeading>
+        <button type="button" className="small" onClick={() => beginGitHubConnect(info.clientId!)}>
+          Connect GitHub
+        </button>
+      </div>
+    );
+  }
+  if (repos?.length === 0) {
+    return (
+      <div className="menu-form project-form">
+        <MenuHeading>GitHub is connected as {info.login}, but the Salon App cannot reach a repository you can push to yet.</MenuHeading>
+        {info.installUrl && (
+          <a className="small button-link" href={info.installUrl} target="_blank" rel="noreferrer">
+            Install or configure the App
+          </a>
+        )}
+        <button type="button" className="small" onClick={() => void load()} disabled={loading}>
+          {loading ? "Checking…" : "Refresh repositories"}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <form
@@ -273,25 +329,35 @@ function NewProject({ onMade }: { onMade: (p: ProjectDto) => void }) {
     >
       <label>
         <span>Repository</span>
-        <input value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/owner/repo" autoFocus spellCheck={false} />
+        <select
+          value={slug}
+          onChange={(e) => {
+            const next = repos?.find((r) => r.slug === e.target.value);
+            setSlug(e.target.value);
+            if (next) setBase(next.defaultBranch);
+          }}
+          autoFocus
+        >
+          {repos?.map((repo) => (
+            <option key={repo.slug} value={repo.slug} disabled={repo.archived}>
+              {repo.slug}{repo.private ? " · private" : ""}{repo.archived ? " · archived" : ""}
+            </option>
+          ))}
+        </select>
       </label>
       <label>
         <span>Branch to start from</span>
         <input value={base} onChange={(e) => setBase(e.target.value)} placeholder="main" spellCheck={false} />
       </label>
       <label>
-        <span>GitHub token</span>
-        <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Needed for a private repository, and to open pull requests" autoComplete="off" />
-      </label>
-      <label>
         <span>Setup command</span>
         <input value={setup} onChange={(e) => setSetup(e.target.value)} placeholder="npm install (optional, runs in the checkout)" spellCheck={false} />
       </label>
       {problem && <div className="menu-problem">{problem}</div>}
-      <button type="submit" className="small" disabled={!repo || !branch || busy}>
-        {busy ? "Setting up…" : "Add project"}
+      <button type="submit" className="small" disabled={!selected || !branch || !!problem || busy}>
+        {busy ? "Opening…" : "Use this repository"}
       </button>
-      <MenuHeading>The token is kept on your Fountain, write-only; Salon never stores it.</MenuHeading>
+      <MenuHeading>Salon gives the session a short-lived credential for this repository only, and refreshes it when the session starts.</MenuHeading>
     </form>
   );
 }

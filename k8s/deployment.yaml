@@ -36,6 +36,9 @@ spec:
               value: https://salon.demo.managoat.com
           envFrom:
             # SALON_SECRET, if provided: encrypts the stored Fountain keys.
+            # The same secret also carries GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY,
+            # GITHUB_APP_SLUG and the GITHUB_OAUTH_CLIENT_* pair. App installation
+            # tokens are minted at runtime and are never Kubernetes secrets.
             # Without it the server generates one into /data/secret — it works,
             # but the secret then lives beside the data it protects.
             - secretRef:

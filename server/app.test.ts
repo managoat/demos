@@ -6,6 +6,7 @@
  * how a green suite ships a null.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { generateKeyPairSync } from "node:crypto";
 import { DEFAULT_SETTINGS, derivedKey } from "../shared/settings";
 import { GAMES_NOTE, ROOM_PROMPT, SALON_NOTE, salonServer } from "./agents";
 import { buildApp } from "./app";
@@ -51,6 +52,7 @@ const PROVIDERS = [
   { id: "p-linear", slug: "mcp-linear-app", name: "mcp-linear-app", kind: "mcp", platform: false, mcp_url: "https://mcp.linear.app/mcp" },
 ];
 const OLD_KEY = derivedKey({ ...DEFAULT_SETTINGS });
+const GITHUB_PRIVATE_KEY = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 
 /** One machine's disk as the read-only sandbox routes see it: absolute path → bytes ("base64:…" for what is not text), and what `git diff` would print. */
 interface FakeSandbox {
@@ -79,6 +81,7 @@ const state = {
   agentPosts: [] as { key: string; body: Record<string, unknown> }[],
   agentPatches: [] as { key: string; id: string; body: Record<string, unknown> }[],
   terminated: [] as string[],
+  githubTokenBodies: [] as Record<string, unknown>[],
 };
 
 function reset(): void {
@@ -95,6 +98,7 @@ function reset(): void {
   state.agentPosts = [];
   state.agentPatches = [];
   state.terminated = [];
+  state.githubTokenBodies = [];
   state.agents.set("ftn_host", [
     { id: "a-coder", name: "Coder", runtime: "claude", model: "anthropic/claude-sonnet-5", system: "You write code.", environment_id: "e-1", skills: [{ name: "x", content: "SKILL" }], mcp_servers: { gh: { headers: { authorization: "Bearer secret" } } } },
     { id: "a-old", name: "Salon · leftover", runtime: "claude", model: "anthropic/claude-opus-5", metadata: { salon: { key: OLD_KEY } } },
@@ -114,9 +118,21 @@ beforeAll(() => {
     async fetch(req) {
       const url = new URL(req.url);
       const key = (req.headers.get("authorization") ?? "").replace(/^Bearer /, "");
+      const p = url.pathname;
+      // The same local server stands in for GitHub when a test enables the
+      // optional App. These are checked before Fountain's bearer boundary.
+      if (p === "/login/oauth/access_token") return json({ access_token: "ghu_host", expires_in: 28_800, refresh_token: "ghr_host", refresh_token_expires_in: 15_897_600 });
+      if (p === "/user" && key === "ghu_host") return json({ login: "octohost" });
+      if (p === "/user/installations" && key === "ghu_host") return json({ installations: [{ id: 77 }] });
+      if (p === "/user/installations/77/repositories" && key === "ghu_host")
+        return json({ repositories: [{ full_name: "acme/widgets", private: true, archived: false, default_branch: "trunk", pushed_at: "2026-09-01T00:00:00Z", description: "Widgets", permissions: { push: true } }] });
+      if (p === "/repos/acme/widgets/installation" && key.split(".").length === 3) return json({ id: 77 });
+      if (p === "/app/installations/77/access_tokens" && key.split(".").length === 3) {
+        state.githubTokenBodies.push((await req.json()) as Record<string, unknown>);
+        return json({ token: "ghs_widgets", expires_at: "2026-09-02T20:00:00Z" }, 201);
+      }
       const who = KEYS[key];
       if (!who) return json({ error: "unauthorized", message: "bad key" }, 401);
-      const p = url.pathname;
       if (p === "/api/auth/me") return json(who);
       if (p === "/api/catalog")
         return json({
@@ -275,6 +291,19 @@ beforeEach(async () => {
 /** The same server, reachable from a chat's computer — what production is. */
 function withPublicUrl(url = "https://salon.test"): void {
   ctx.config.publicUrl = url;
+  app = buildApp(ctx);
+}
+
+function withGitHubApp(): void {
+  ctx.config.githubApp = {
+    appId: "123",
+    privateKey: GITHUB_PRIVATE_KEY,
+    clientId: "Iv1.salon",
+    clientSecret: "github-client-secret",
+    slug: "salon-test",
+    api: fakeUrl,
+    oauthHost: fakeUrl,
+  };
   app = buildApp(ctx);
 }
 
@@ -965,6 +994,53 @@ describe("projects", () => {
     expect(state.deletedEnvironments).toEqual(["e-1"]);
     expect(((await (await call("GET", `/api/chats/${chat.id}`, { cookie: host })).json()) as { data: { chat: { project: unknown } } }).data.chat.project).toBeNull();
     expect((await call("POST", "/api/chats", { cookie: host, body: { prompt: "x", settings: { ...SETTINGS, projectId: project.id } } })).status).toBe(404);
+  });
+});
+
+describe("the GitHub App", () => {
+  test("connects an existing Salon user, lists only installed pushable repositories, and starts with a fresh single-repo token", async () => {
+    withPublicUrl();
+    withGitHubApp();
+    const host = await signIn("ftn_host");
+    const before = await call("GET", "/api/github", { cookie: host });
+    expect((await before.json()) as Record<string, unknown>).toMatchObject({ data: { configured: true, connected: false, clientId: "Iv1.salon" } });
+
+    const linked = await call("POST", "/api/github/callback", { cookie: host, body: { code: "good-code", redirectUri: "http://salon.test/" } });
+    expect(linked.status).toBe(200);
+    expect(((await linked.json()) as { data: { login: string } }).data.login).toBe("octohost");
+    const account = ctx.db.githubAccount("host@example.com")!;
+    expect(account.login).toBe("octohost");
+    expect(JSON.stringify(account)).not.toContain("ghu_host");
+
+    const repos = (await (await call("GET", "/api/github/repos", { cookie: host })).json()) as { data: Record<string, unknown>[] };
+    expect(repos.data).toEqual([{ slug: "acme/widgets", private: true, archived: false, defaultBranch: "trunk", description: "Widgets", pushedAt: "2026-09-01T00:00:00Z" }]);
+
+    const made = await call("POST", "/api/projects", { cookie: host, body: { githubRepo: "acme/widgets" } });
+    expect(made.status).toBe(201);
+    const project = ((await made.json()) as { data: Record<string, unknown> }).data;
+    expect(project).toMatchObject({ repoUrl: "https://github.com/acme/widgets", base: "trunk", hasToken: true, githubManaged: true });
+    expect(state.secrets.slice(-2).map((s) => [s.body.key, s.body.value])).toEqual([
+      ["GITHUB_TOKEN", "ghs_widgets"],
+      ["GH_TOKEN", "ghs_widgets"],
+    ]);
+    expect(state.githubTokenBodies[0]).toEqual({ repositories: ["widgets"], owner: "acme", permissions: { contents: "write", metadata: "read", pull_requests: "write", workflows: "write" } });
+    expect(JSON.stringify(ctx.db.getProject(project.id as string))).not.toContain("ghs_widgets");
+
+    await startChat(host, { ...SETTINGS, projectId: project.id });
+    expect(state.secrets.slice(-2).map((s) => s.body.value)).toEqual(["ghs_widgets", "ghs_widgets"]);
+    const script = state.environments.at(-1)!.body.setup_script as string;
+    expect(script).toContain("/hooks/github-token");
+    expect(script).toContain("credential.helper");
+  });
+
+  test("does not reveal App or repository credentials to a browser", async () => {
+    withGitHubApp();
+    const host = await signIn("ftn_host");
+    const info = await (await call("GET", "/api/github", { cookie: host })).text();
+    expect(info).not.toContain("github-client-secret");
+    expect(info).not.toContain("PRIVATE KEY");
+    expect((await call("GET", "/api/github/repos", { cookie: host })).status).toBe(409);
+    expect((await call("POST", "/hooks/github-token")).status).toBe(401);
   });
 });
 

@@ -22,8 +22,9 @@ import { baseBranch, mountPathFor, parseRepoUrl, projectName, type ProjectDto } 
 import { authenticate, userClient, type AppContext } from "./context";
 import { now, type ProjectRow, type UserRow } from "./db";
 import { FountainClient, FountainHttpError } from "./fountain";
+import { repoToken, reposFor } from "./github-access";
 import { HttpError, isEmail, json, normalizeEmail, readJson, str } from "./http";
-import { hookSetupScript } from "./sandbox";
+import { githubCredentialSetupScript, hookSetupScript } from "./sandbox";
 
 export function toDto(ctx: AppContext, p: ProjectRow, role: ProjectDto["role"]): ProjectDto {
   return {
@@ -35,6 +36,7 @@ export function toDto(ctx: AppContext, p: ProjectRow, role: ProjectDto["role"]):
     repoUrl: p.repo_url,
     base: p.base,
     hasToken: p.has_token === 1,
+    githubManaged: !!p.github_repo,
     createdAt: p.created_at,
   };
 }
@@ -54,7 +56,7 @@ export function projectAccess(ctx: AppContext, user: UserRow, id: string): { pro
  * in the checkout. A token names `GITHUB_TOKEN` as the clone's `secret_key`;
  * the secret itself is written separately, and never stored here.
  */
-export function environmentBody(p: Pick<ProjectRow, "name" | "repo_url" | "base" | "mount_path" | "setup" | "owner_email">, hasToken: boolean, publicUrl: string | null): Record<string, unknown> {
+export function environmentBody(p: Pick<ProjectRow, "name" | "repo_url" | "base" | "mount_path" | "setup" | "owner_email" | "github_repo">, hasToken: boolean, publicUrl: string | null): Record<string, unknown> {
   const repo: Record<string, unknown> = { url: p.repo_url, mount_path: p.mount_path, ref: p.base };
   if (hasToken) repo.secret_key = "GITHUB_TOKEN";
   const lines = [
@@ -62,6 +64,7 @@ export function environmentBody(p: Pick<ProjectRow, "name" | "repo_url" | "base"
     `git config --global user.name ${q(shortName(p.owner_email))} && git config --global user.email ${q(p.owner_email)}`,
     "command -v gh >/dev/null 2>&1 || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gh >/dev/null 2>&1 || true",
   ];
+  if (p.github_repo && publicUrl) lines.push(githubCredentialSetupScript(publicUrl, p.mount_path));
   if (p.setup.trim()) lines.push(`cd ${q(p.mount_path)} && (\n${p.setup.trim()}\n)`);
   return {
     name: `Salon · ${p.name}`.slice(0, 200),
@@ -92,11 +95,18 @@ export async function show(ctx: AppContext, req: Request, id: string): Promise<R
 export async function create(ctx: AppContext, req: Request): Promise<Response> {
   const user = await authenticate(ctx, req);
   const body = await readJson(req);
-  const repo = parseRepoUrl(str(body.repoUrl, 500));
+  const githubRepo = str(body.githubRepo, 300).trim();
+  let selected = null as Awaited<ReturnType<typeof reposFor>>[number] | null;
+  if (githubRepo) {
+    selected = (await reposFor(ctx, user)).find((r) => r.slug.toLowerCase() === githubRepo.toLowerCase()) ?? null;
+    if (!selected) throw new HttpError(404, "github_repo_unavailable", "That repository is not available through your Salon GitHub App installation.");
+    if (selected.archived) throw new HttpError(422, "github_repo_archived", "That repository is archived, so a session cannot push changes to it.");
+  }
+  const repo = parseRepoUrl(selected ? `https://github.com/${selected.slug}` : str(body.repoUrl, 500));
   if (!repo) throw new HttpError(422, "bad_repo", "That is not a repository address. Something like https://github.com/owner/repo.");
-  const base = baseBranch(body.base);
+  const base = baseBranch(body.base ?? selected?.defaultBranch);
   if (!base) throw new HttpError(422, "bad_branch", "That is not a branch name.");
-  const token = str(body.token, 400).trim();
+  const token = selected ? await repoToken(ctx, selected.slug) : str(body.token, 400).trim();
   const setup = str(body.setup, 4000);
   const row: ProjectRow = {
     id: crypto.randomUUID(),
@@ -107,6 +117,7 @@ export async function create(ctx: AppContext, req: Request): Promise<Response> {
     mount_path: mountPathFor(repo),
     environment_id: "",
     has_token: token ? 1 : 0,
+    github_repo: selected?.slug ?? null,
     setup,
     created_at: now(),
   };
@@ -182,6 +193,13 @@ export async function removeMember(ctx: AppContext, req: Request, id: string, ra
 export async function refreshEnvironment(ctx: AppContext, client: FountainClient, project: ProjectRow): Promise<boolean> {
   const want = environmentBody(project, project.has_token === 1, ctx.config.publicUrl);
   try {
+    // Installation tokens last one hour. Replace the write-only Fountain
+    // secrets immediately before every session so cloning and `gh` begin fresh.
+    if (project.github_repo) {
+      const token = await repoToken(ctx, project.github_repo);
+      await client.setEnvironmentSecret(project.environment_id, "GITHUB_TOKEN", token);
+      await client.setEnvironmentSecret(project.environment_id, "GH_TOKEN", token);
+    }
     const have = await client.environment(project.environment_id);
     if (!have) return false;
     const same = have.setup_script === want.setup_script && JSON.stringify(have.repositories ?? []) === JSON.stringify(want.repositories);

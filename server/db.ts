@@ -54,9 +54,21 @@ export interface ProjectRow {
   mount_path: string;
   environment_id: string;
   has_token: 0 | 1;
+  /** `owner/name` when credentials come from the GitHub App; null for legacy/public projects. */
+  github_repo: string | null;
   /** The project's own setup command, appended after Salon's. */
   setup: string;
   created_at: string;
+}
+
+export interface GitHubAccountRow {
+  email: string;
+  login: string;
+  token_enc: string;
+  refresh_token_enc: string | null;
+  expires_at: string | null;
+  refresh_expires_at: string | null;
+  updated_at: string;
 }
 
 export interface ProjectMemberRow {
@@ -153,6 +165,15 @@ CREATE TABLE IF NOT EXISTS sessions (
   last_seen_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS sessions_email ON sessions(email);
+CREATE TABLE IF NOT EXISTS github_accounts (
+  email TEXT PRIMARY KEY REFERENCES users(email) ON DELETE CASCADE,
+  login TEXT NOT NULL,
+  token_enc TEXT NOT NULL,
+  refresh_token_enc TEXT,
+  expires_at TEXT,
+  refresh_expires_at TEXT,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS chats (
   id TEXT PRIMARY KEY,
   owner_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
@@ -211,6 +232,7 @@ CREATE TABLE IF NOT EXISTS projects (
   mount_path TEXT NOT NULL,
   environment_id TEXT NOT NULL,
   has_token INTEGER NOT NULL DEFAULT 0,
+  github_repo TEXT,
   setup TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
@@ -283,6 +305,8 @@ export class Db {
     if (!have.has("archived_at")) this.sql.exec("ALTER TABLE chats ADD COLUMN archived_at TEXT");
     const changes = new Set((this.sql.query("PRAGMA table_info(changes)").all() as { name: string }[]).map((c) => c.name));
     if (!changes.has("ahead")) this.sql.exec("ALTER TABLE changes ADD COLUMN ahead INTEGER");
+    const projects = new Set((this.sql.query("PRAGMA table_info(projects)").all() as { name: string }[]).map((c) => c.name));
+    if (!projects.has("github_repo")) this.sql.exec("ALTER TABLE projects ADD COLUMN github_repo TEXT");
   }
 
   close(): void {
@@ -305,6 +329,22 @@ export class Db {
       )
       .run({ email, fountain_id: fountainId, key_enc: keyEnc, t });
     return this.getUser(email)!;
+  }
+
+  githubAccount(email: string): GitHubAccountRow | null {
+    return (this.sql.query("SELECT * FROM github_accounts WHERE email = $email").get({ email }) as GitHubAccountRow | null) ?? null;
+  }
+
+  putGitHubAccount(row: GitHubAccountRow): void {
+    this.sql
+      .query(
+        `INSERT INTO github_accounts (email, login, token_enc, refresh_token_enc, expires_at, refresh_expires_at, updated_at)
+         VALUES ($email, $login, $token_enc, $refresh_token_enc, $expires_at, $refresh_expires_at, $updated_at)
+         ON CONFLICT(email) DO UPDATE SET login = excluded.login, token_enc = excluded.token_enc,
+           refresh_token_enc = excluded.refresh_token_enc, expires_at = excluded.expires_at,
+           refresh_expires_at = excluded.refresh_expires_at, updated_at = excluded.updated_at`,
+      )
+      .run(row as unknown as Record<string, string | null>);
   }
 
   // ── sessions ─────────────────────────────────────────────────────────
@@ -430,8 +470,8 @@ export class Db {
   insertProject(p: ProjectRow): void {
     this.sql
       .query(
-        `INSERT INTO projects (id, owner_email, name, repo_url, base, mount_path, environment_id, has_token, setup, created_at)
-         VALUES ($id, $owner_email, $name, $repo_url, $base, $mount_path, $environment_id, $has_token, $setup, $created_at)`,
+        `INSERT INTO projects (id, owner_email, name, repo_url, base, mount_path, environment_id, has_token, github_repo, setup, created_at)
+         VALUES ($id, $owner_email, $name, $repo_url, $base, $mount_path, $environment_id, $has_token, $github_repo, $setup, $created_at)`,
       )
       .run(p as unknown as Record<string, string | number>);
   }

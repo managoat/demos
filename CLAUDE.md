@@ -34,7 +34,8 @@ server/   Bun. app.ts is the route table; index.ts boots it.
           connectors.ts a connection → the mcp_servers entry an agent uses, and the menu row
           agents.ts    settings → the agent Fountain runs (the seam, see below)
           chats.ts     chats, members, invites, join; a chat in a project is hosted by the project's owner
-          projects.ts  projects: a repository → an Environment on the owner's Fountain (clone, hook, token as a secret)
+          github.ts / github-access.ts  the GitHub App: OAuth repo picker, one-repo installation tokens
+          projects.ts  a selected repository → an Environment on the owner's Fountain (clone, hook, App token as a secret)
           proxy.ts     /f/<chat>/api/conversations/<id>/… on the host's key
           games.ts     a chat's games: start, move
           changes.ts   the repository's changes: the hook's POST, the latest record, `record` (the one way in)
@@ -177,14 +178,23 @@ k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) ap
    real ones.
 
 7. **A project is the owner's environment, and its chats are the owner's.**
-   `server/projects.ts` turns a repository address into one Environment on
+   The normal path starts in `server/github-access.ts`: a Fountain-signed-in
+   user connects the GitHub App, the OAuth token is encrypted in
+   `github_accounts`, and the picker is the intersection of repositories
+   GitHub says both the person and the App installation can reach. On create,
+   Salon mints an installation token narrowed to one repository with contents
+   and pull-request access; the App private key and OAuth secret never leave
+   the server. `server/projects.ts` turns that selection into one Environment on
    the *creator's* Fountain: `repositories: [{url, mount_path:
    /home/sprite/work/<repo>, ref: <base>, secret_key: GITHUB_TOKEN}]`,
    `packages.apt: [jq]`, and a `setup_script` that is the changes hook,
    the owner's git identity, `gh` best-effort, then the project's own
-   command in the checkout. A token is written as `GITHUB_TOKEN` and
-   `GH_TOKEN` (the clone reads one, `gh` the other) and Salon keeps only
-   `has_token`. Settings carry `projectId`; `chats.ts#create` swaps it for
+   command in the checkout. The short-lived token is written as `GITHUB_TOKEN`
+   and `GH_TOKEN` (the clone reads one, `gh` the other), refreshed before each
+   chat, and Salon keeps only the `github_repo` slug. The setup also installs a
+   git credential helper that calls `/hooks/github-token` on the conversation's
+   Fountain key for long-running sessions. Settings carry `projectId`;
+   `chats.ts#create` swaps it for
    the project's `environmentId` *and for the project owner as host* — a
    member who starts a chat in a project starts it on the owner's key, and
    is a member of it, tagged from the first prompt. The project's people

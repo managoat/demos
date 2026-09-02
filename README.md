@@ -51,11 +51,14 @@ nothing about agents, environments or runtimes anywhere.
   stream, never a turn. The `+` at the foot of a chat starts one without
   the model too. Anthropic models only for now: the claude runtime is the
   one that carries an MCP server with headers into the computer.
-- **Projects: a repository the chat works in.** *Projects ›* in the `+`
-  menu: paste a repository address, a branch, a token for a private one,
-  and the chat's computer starts with a checkout of it, on a branch of its
-  own. Behind it is an environment on your Fountain (`server/projects.ts`);
-  the token is a write-only secret there and Salon never keeps it.
+- **A session in a repository, through a GitHub App.** *Repository ›* in the
+  `+` menu: connect GitHub, choose one of the repositories both you and the
+  Salon App installation can reach, and the chat's computer starts with a
+  checkout of it on a branch of its own. No personal access token is pasted
+  into Salon. The server mints a one-hour installation token narrowed to that
+  one repository, refreshes Fountain's write-only clone secrets before every
+  session, and installs a credential helper that can refresh a long-running
+  session (`server/github.ts`, `server/github-access.ts`, `server/projects.ts`).
   Everyone in a project is in every chat started in it, and every such
   chat runs on the project owner's account, whoever starts it.
 - **Changes, beside the transcript.** What the computer did to the
@@ -116,6 +119,8 @@ server serving the SPA itself. `build.yml` builds it multi-arch on push to
 | `FOUNTAIN_URL` | the Fountain every user signs in with (`https://managoat.com`) |
 | `DATA_DIR` | where `salon.sqlite` (and a generated secret) live; a volume |
 | `SALON_SECRET` | encrypts stored Fountain keys; generated into `DATA_DIR/secret` when unset |
+| `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_SLUG` | the Salon GitHub App |
+| `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET` | connect a signed-in Salon user to the App so GitHub can list their installed repositories |
 | `PORT`, `STATIC_DIR` | `8080`, `dist/` |
 
 The Fountain it talks to needs two things (`docs/configuration.md` there):

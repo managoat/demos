@@ -37,6 +37,15 @@ export function describeError(err: unknown): string {
       return "Connectors are not switched on for this Fountain account.";
     case "bad_invite":
       return "That invite link is not valid any more.";
+    case "github_not_configured":
+      return "This Salon does not have its GitHub App configured yet.";
+    case "github_not_connected":
+    case "github_connection_expired":
+      return "Connect GitHub again to choose a repository.";
+    case "github_repo_unavailable":
+      return "That repository is no longer available through the Salon GitHub App.";
+    case "github_repo_archived":
+      return "That repository is archived, so a session cannot push changes to it.";
     case "sandbox_not_ready":
       return "The computer is parked. Send it a message to wake it, then try again.";
     case "sandbox_unreachable":
