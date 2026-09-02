@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { shortName } from "../../shared/author";
+import { changesLine } from "../../shared/changes";
 import { modelLabel } from "../../shared/models";
 import { skillNames } from "../../shared/skills";
 import { api, ApiError, settingsLine, type ChatDto, type SendDto } from "../lib/api";
 import { describeError } from "../lib/errors";
+import { useChatLive } from "../lib/live";
 import { navigate } from "../router";
 import { useSession } from "../store";
 import { Avatar } from "../components/Avatar";
@@ -18,6 +20,8 @@ export function Chat({ id }: { id: string }) {
   const [people, setPeople] = useState(false);
   const [more, setMore] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
+  const live = useChatLive(id);
+  const [changesOpen, setChangesOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -100,6 +104,12 @@ export function Chat({ id }: { id: string }) {
           </div>
         </div>
         <div className="chat-tools">
+          {live.changes && (
+            <button type="button" className={`changes-btn${changesOpen ? " on" : ""}`} onClick={() => setChangesOpen((o) => !o)} aria-pressed={changesOpen} title={`${live.changes.branch || live.changes.head.slice(0, 7)} against ${live.changes.base}`}>
+              <span>Changes</span>
+              <span className="muted">{changesLine(live.changes.files)}</span>
+            </button>
+          )}
           <div className="pill-wrap">
             <button type="button" className={`people-btn${people ? " on" : ""}`} onClick={() => setPeople((p) => !p)} aria-haspopup="dialog" aria-expanded={people}>
               <span className="stack">
@@ -130,7 +140,7 @@ export function Chat({ id }: { id: string }) {
           )}
         </div>
       </header>
-      <Thread chat={chat} sends={sends} onSent={() => void load()} />
+      <Thread chat={chat} sends={sends} onSent={() => void load()} live={live} changesOpen={changesOpen} onCloseChanges={() => setChangesOpen(false)} />
     </div>
   );
 }

@@ -12,8 +12,8 @@ import { buildApp } from "./app";
 import type { AppContext } from "./context";
 import { Cipher } from "./crypto";
 import { Db } from "./db";
-import { hub } from "./games";
-import { resetMcpCache } from "./mcp";
+import { hub } from "./hub";
+import { hookSetupScript, resetSandboxCache } from "./sandbox";
 
 // ── the fake Fountain ────────────────────────────────────────────────────
 
@@ -164,7 +164,7 @@ let ctx: AppContext;
 
 beforeEach(async () => {
   reset();
-  resetMcpCache();
+  resetSandboxCache();
   ctx = {
     db: new Db(":memory:"),
     cipher: await Cipher.from("a-test-secret-that-is-long-enough"),
@@ -457,16 +457,17 @@ describe("games on the agent", () => {
   });
 });
 
-describe("playing", () => {
-  async function room(): Promise<{ host: string; guest: string; other: string; chat: Record<string, any> }> {
-    const host = await signIn("ftn_host");
-    const guest = await signIn("ftn_guest");
-    const other = await signIn("ftn_other");
-    const chat = await startChat(host);
-    await call("POST", `/api/chats/${chat.id}/members`, { cookie: host, body: { email: "guest@example.com" } });
-    return { host, guest, other, chat };
-  }
+/** A host, a guest in the host's chat, and a stranger. */
+async function room(): Promise<{ host: string; guest: string; other: string; chat: Record<string, any> }> {
+  const host = await signIn("ftn_host");
+  const guest = await signIn("ftn_guest");
+  const other = await signIn("ftn_other");
+  const chat = await startChat(host);
+  await call("POST", `/api/chats/${chat.id}/members`, { cookie: host, body: { email: "guest@example.com" } });
+  return { host, guest, other, chat };
+}
 
+describe("playing", () => {
   test("two people in the chat play; the server keeps the rules and everyone else watches", async () => {
     const { host, guest, other, chat } = await room();
     // Only people in the chat, and two different ones.
@@ -516,9 +517,9 @@ describe("playing", () => {
 
   test("the game stream carries every change to whoever is in the chat", async () => {
     const { host, guest, other, chat } = await room();
-    expect((await call("GET", `/api/chats/${chat.id}/games/stream`, { cookie: other })).status).toBe(404);
+    expect((await call("GET", `/api/chats/${chat.id}/stream`, { cookie: other })).status).toBe(404);
     const ctrl = new AbortController();
-    const res = await app(new Request(`http://salon.test/api/chats/${chat.id}/games/stream`, { headers: { cookie: guest }, signal: ctrl.signal }));
+    const res = await app(new Request(`http://salon.test/api/chats/${chat.id}/stream`, { headers: { cookie: guest }, signal: ctrl.signal }));
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("text/event-stream");
     expect(hub.listening(chat.id)).toBe(1);
@@ -631,5 +632,116 @@ describe("the MCP server", () => {
     const r = await toolCall(chat.conversationId as string, "game_state", {});
     expect(r.isError).toBe(true);
     expect(r.text).toContain("No game");
+  });
+});
+
+describe("changes from the computer", () => {
+  const DIFF = [
+    "diff --git a/README.md b/README.md",
+    "index 1111111..2222222 100644",
+    "--- a/README.md",
+    "+++ b/README.md",
+    "@@ -1,2 +1,3 @@ # Hi",
+    " # Hi",
+    "-old",
+    "+new",
+    "+more",
+    "diff --git a/new.txt b/new.txt",
+    "new file mode 100644",
+    "--- /dev/null",
+    "+++ b/new.txt",
+    "@@ -0,0 +1 @@",
+    "+hello",
+    "",
+  ].join("\n");
+  const snapshot = (over: Record<string, unknown> = {}) => ({ branch: "salon/abcd1234", head: "deadbeefcafe", base: "main", status: " M README.md\n?? new.txt\n", diff: DIFF, reason: "stop", pr: null, ...over });
+  const forChat = (conversationId: string, key = "ftn_sprite") => ({ authorization: `Bearer ${key}`, "x-fountain-conversation-id": conversationId });
+
+  test("the hook posts on the conversation's key; the room reads it, sees it on the stream, and a stranger sees nothing", async () => {
+    const { host, guest, other, chat } = await room();
+    const conv = chat.conversationId as string;
+    expect((await call("POST", "/hooks/changes", { body: snapshot() })).status).toBe(401);
+    expect((await call("POST", "/hooks/changes", { body: snapshot(), headers: { authorization: "Bearer ftn_sprite" } })).status).toBe(400);
+    expect((await call("POST", "/hooks/changes", { body: snapshot(), headers: forChat("c-nope") })).status).toBe(404);
+    expect((await call("POST", "/hooks/changes", { body: snapshot(), headers: forChat(conv, "ftn_guest") })).status).toBe(404);
+    expect((await call("POST", "/hooks/changes", { body: { diff: DIFF }, headers: forChat(conv) })).status).toBe(422);
+    expect((await call("GET", "/hooks/changes", { headers: forChat(conv) })).status).toBe(405);
+
+    // A browser on the stream first, so the post is seen arriving.
+    const ctrl = new AbortController();
+    const res = await app(new Request(`http://salon.test/api/chats/${chat.id}/stream`, { headers: { cookie: guest }, signal: ctrl.signal }));
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let got = "";
+    const until = async (needle: string) => {
+      while (!got.includes(needle)) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        got += decoder.decode(value);
+      }
+    };
+    await until(": hello");
+
+    const posted = await call("POST", "/hooks/changes", { body: snapshot(), headers: forChat(conv) });
+    expect(posted.status).toBe(201);
+    expect(((await posted.json()) as { data: unknown }).data).toEqual({ seq: 1, files: 2, truncated: false });
+    await until("event: changes");
+    const onStream = JSON.parse(got.split("\n\n").find((e) => e.startsWith("event: changes"))!.split("\ndata: ")[1]!) as Record<string, unknown>;
+    expect(onStream).toMatchObject({ chatId: chat.id, seq: 1, branch: "salon/abcd1234", diff: "" });
+    ctrl.abort();
+
+    const latest = ((await (await call("GET", `/api/chats/${chat.id}/changes`, { cookie: guest })).json()) as { data: Record<string, any> }).data;
+    expect(latest).toMatchObject({ seq: 1, branch: "salon/abcd1234", head: "deadbeefcafe", base: "main", source: "hook", reason: "stop", truncated: false, pr: null, diff: DIFF });
+    expect(latest.files).toEqual([
+      { path: "README.md", oldPath: null, status: "modified", binary: false, additions: 2, deletions: 1 },
+      { path: "new.txt", oldPath: null, status: "added", binary: false, additions: 1, deletions: 0 },
+    ]);
+    expect((await call("GET", `/api/chats/${chat.id}/changes`, { cookie: other })).status).toBe(404);
+
+    // A second snapshot is newer; the history lists both, newest first, without their diffs.
+    await call("POST", "/hooks/changes", { body: snapshot({ reason: "tool", pr: { url: "https://github.com/x/y/pull/1", state: "OPEN", mergeable: "MERGEABLE" } }), headers: forChat(conv) });
+    const history = ((await (await call("GET", `/api/chats/${chat.id}/changes/history`, { cookie: host })).json()) as { data: Record<string, any>[] }).data;
+    expect(history.map((h) => [h.seq, h.reason, h.diff])).toEqual([
+      [2, "tool", ""],
+      [1, "stop", ""],
+    ]);
+    expect(history[0]!.pr).toEqual({ url: "https://github.com/x/y/pull/1", state: "OPEN", mergeable: "MERGEABLE" });
+
+    // Only the last twenty are kept.
+    for (let i = 0; i < 25; i++) await call("POST", "/hooks/changes", { body: snapshot(), headers: forChat(conv) });
+    const kept = ((await (await call("GET", `/api/chats/${chat.id}/changes/history`, { cookie: host })).json()) as { data: { seq: number }[] }).data;
+    expect(kept).toHaveLength(20);
+    expect(kept[0]!.seq).toBe(27);
+    expect(kept[19]!.seq).toBe(8);
+  });
+
+  test("an empty tree is a record too, and a diff over the cap is cut and says so", async () => {
+    const { host, chat } = await room();
+    const conv = chat.conversationId as string;
+    const empty = await call("POST", "/hooks/changes", { body: snapshot({ status: "", diff: "", reason: "session" }), headers: forChat(conv) });
+    expect(((await empty.json()) as { data: unknown }).data).toEqual({ seq: 1, files: 0, truncated: false });
+    const big = DIFF + "+".repeat(1_000_001);
+    const cut = await call("POST", "/hooks/changes", { body: snapshot({ diff: big }), headers: forChat(conv) });
+    expect(((await cut.json()) as { data: { truncated: boolean } }).data.truncated).toBe(true);
+    const latest = ((await (await call("GET", `/api/chats/${chat.id}/changes`, { cookie: host })).json()) as { data: { diff: string; truncated: boolean } }).data;
+    expect(latest.truncated).toBe(true);
+    expect(latest.diff.length).toBe(1_000_000);
+  });
+
+  test("the setup script installs a hook bash accepts, and settings Claude Code reads", async () => {
+    const script = hookSetupScript({ publicUrl: "https://salon.test", repoPath: "/home/sprite/work/app", base: "main" });
+    expect(script).toContain("/home/sprite/.claude/settings.local.json");
+    const settings = JSON.parse(script.split("<<'SALON_SETTINGS'\n")[1]!.split("\nSALON_SETTINGS")[0]!) as { hooks: Record<string, unknown[]> };
+    expect(Object.keys(settings.hooks).sort()).toEqual(["PostToolUse", "SessionStart", "Stop"]);
+    const hook = script.split("<<'SALON_HOOK'\n")[1]!.split("\nSALON_HOOK")[0]!;
+    expect(hook).toContain("URL='https://salon.test/hooks/changes'");
+    expect(hook).toContain("REPO='/home/sprite/work/app'");
+    for (const text of [script, hook]) {
+      const check = Bun.spawnSync(["bash", "-n"], { stdin: new TextEncoder().encode(text) });
+      expect(new TextDecoder().decode(check.stderr)).toBe("");
+      expect(check.exitCode).toBe(0);
+    }
+    // A path with a quote in it stays one word.
+    expect(hookSetupScript({ publicUrl: "https://s", repoPath: "/it's", base: "main" })).toContain(`REPO='/it'\\''s'`);
   });
 });

@@ -72,6 +72,25 @@ export interface GameRow {
   updated_at: string;
 }
 
+/** One snapshot of the repository in a chat's computer (shared/changes.ts). */
+export interface ChangesRow {
+  chat_id: string;
+  seq: number;
+  branch: string;
+  head: string;
+  base: string;
+  status: string;
+  /** JSON: `FileSummary[]`. */
+  files: string;
+  diff: string;
+  truncated: 0 | 1;
+  /** JSON: `PullRequest`, or null. */
+  pr: string | null;
+  source: string;
+  reason: string;
+  at: string;
+}
+
 export type Role = "owner" | "member";
 
 const SCHEMA = `
@@ -136,6 +155,22 @@ CREATE TABLE IF NOT EXISTS games (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS games_chat ON games(chat_id, created_at);
+CREATE TABLE IF NOT EXISTS changes (
+  chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  branch TEXT NOT NULL,
+  head TEXT NOT NULL,
+  base TEXT NOT NULL,
+  status TEXT NOT NULL,
+  files TEXT NOT NULL,
+  diff TEXT NOT NULL,
+  truncated INTEGER NOT NULL DEFAULT 0,
+  pr TEXT,
+  source TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  at TEXT NOT NULL,
+  PRIMARY KEY (chat_id, seq)
+);
 `;
 
 export function now(): string {
@@ -322,5 +357,40 @@ export class Db {
       .query("UPDATE games SET state = $state, status = $status, winner_email = $winner_email, seq = seq + 1, updated_at = $t WHERE id = $id")
       .run({ id, state: patch.state, status: patch.status, winner_email: patch.winner_email, t: now() });
     return this.getGame(id);
+  }
+
+  // ── changes ──────────────────────────────────────────────────────────
+
+  /** The next snapshot of the chat's repository; returns it with its seq. */
+  insertChanges(c: Omit<ChangesRow, "seq">): ChangesRow {
+    const row = this.sql.query("SELECT COALESCE(MAX(seq), 0) AS n FROM changes WHERE chat_id = $c").get({ c: c.chat_id }) as { n: number };
+    const seq = row.n + 1;
+    this.sql
+      .query(
+        `INSERT INTO changes (chat_id, seq, branch, head, base, status, files, diff, truncated, pr, source, reason, at)
+         VALUES ($chat_id, $seq, $branch, $head, $base, $status, $files, $diff, $truncated, $pr, $source, $reason, $at)`,
+      )
+      .run({ ...c, seq } as unknown as Record<string, string | number | null>);
+    return { ...c, seq };
+  }
+
+  latestChanges(chatId: string): ChangesRow | null {
+    return (this.sql.query("SELECT * FROM changes WHERE chat_id = $c ORDER BY seq DESC LIMIT 1").get({ c: chatId }) as ChangesRow | null) ?? null;
+  }
+
+  getChanges(chatId: string, seq: number): ChangesRow | null {
+    return (this.sql.query("SELECT * FROM changes WHERE chat_id = $c AND seq = $s").get({ c: chatId, s: seq }) as ChangesRow | null) ?? null;
+  }
+
+  /** Every snapshot kept, newest first, without the diffs. */
+  changesHistory(chatId: string): ChangesRow[] {
+    return this.sql
+      .query("SELECT chat_id, seq, branch, head, base, status, files, '' AS diff, truncated, pr, source, reason, at FROM changes WHERE chat_id = $c ORDER BY seq DESC")
+      .all({ c: chatId }) as ChangesRow[];
+  }
+
+  /** Keep the newest `keep` snapshots of a chat. */
+  pruneChanges(chatId: string, keep: number): void {
+    this.sql.query("DELETE FROM changes WHERE chat_id = $c AND seq <= (SELECT COALESCE(MAX(seq), 0) FROM changes WHERE chat_id = $c) - $keep").run({ c: chatId, keep });
   }
 }

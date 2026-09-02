@@ -2,6 +2,7 @@
  * Salon's own API (server/app.ts), same origin, session cookie. Fountain
  * itself is reached through the SDK at `/f/<chat>` — see store.tsx.
  */
+import type { ChangesDto } from "../../shared/changes";
 import type { ChatSettings } from "../../shared/settings";
 import type { GameDto, GameKind } from "../../shared/games";
 import type { ImageInput } from "../../shared/images";
@@ -102,11 +103,14 @@ export const api = {
   games: (chatId: string) => data(call<{ data: GameDto[] }>("GET", `/api/chats/${chatId}/games`)),
   startGame: (chatId: string, kind: GameKind, players: [string, string]) => data(call<{ data: GameDto }>("POST", `/api/chats/${chatId}/games`, { kind, players })),
   move: (chatId: string, gameId: string, cell: number) => data(call<{ data: GameDto }>("POST", `/api/chats/${chatId}/games/${gameId}/moves`, { cell })),
+
+  changes: (chatId: string) => data(call<{ data: ChangesDto | null }>("GET", `/api/chats/${chatId}/changes`)),
+  changesHistory: (chatId: string) => data(call<{ data: ChangesDto[] }>("GET", `/api/chats/${chatId}/changes/history`)),
 };
 
-/** The chat's game stream (server/games.ts): same origin, so the session cookie goes with it. */
-export function gamesStreamUrl(chatId: string): string {
-  return `/api/chats/${chatId}/games/stream`;
+/** The chat's own stream (server/hub.ts): games and changes, same origin, so the session cookie goes with it. */
+export function chatStreamUrl(chatId: string): string {
+  return `/api/chats/${chatId}/stream`;
 }
 
 /** The SDK's base URL for one chat: Fountain as seen from inside it, on the host's key. */

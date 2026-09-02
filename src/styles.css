@@ -270,3 +270,42 @@ pre.err { color: var(--bad); }
 .toasts { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 100; pointer-events: none; }
 .toast { background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 12px; box-shadow: var(--shadow); font-size: 14px; max-width: min(520px, 90vw); }
 .toast.error { background: var(--bad); color: #fff; }
+
+/* changes: the repository beside the transcript */
+.thread-body { flex: 1; display: flex; min-height: 0; position: relative; }
+.thread-main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.changes-btn { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 4px 12px; font-size: 13px; }
+.changes-btn.on { background: var(--panel); border-color: var(--line-strong); }
+.changes-panel { width: min(560px, 48%); flex: none; border-left: 1px solid var(--line); background: var(--card); display: flex; flex-direction: column; min-height: 0; }
+@media (max-width: 760px) { .changes-panel { position: absolute; inset: 0; width: auto; border-left: 0; } }
+.changes-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px 8px; border-bottom: 1px solid var(--line); }
+.changes-title { display: flex; align-items: baseline; gap: 10px; font-size: 18px; min-width: 0; }
+.changes-where { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+.changes-where .mono { font-size: 12.5px; }
+.pr-link { color: var(--accent); text-decoration: none; }
+.pr-link:hover { text-decoration: underline; }
+.changes-note { padding: 6px 14px; color: var(--bad); border-bottom: 1px solid var(--line); }
+.changes-files { display: flex; flex-direction: column; padding: 6px 8px; border-bottom: 1px solid var(--line); max-height: 30%; overflow: auto; flex: none; }
+.changes-file { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 8px; text-decoration: none; font-size: 13px; }
+.changes-file:hover, .changes-file.on { background: var(--panel); }
+.file-status { font-family: var(--mono); font-size: 11px; width: 16px; text-align: center; border-radius: 4px; flex: none; color: var(--accent-ink); }
+.file-status.added { background: var(--ok); }
+.file-status.deleted { background: var(--bad); }
+.file-status.modified { background: #c98a2b; }
+.file-status.renamed { background: #5b7fd6; }
+.file-path { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.file-counts { display: inline-flex; gap: 6px; font-family: var(--mono); font-size: 12px; flex: none; }
+.file-counts .add, .diff tr.add .sign { color: var(--ok); }
+.file-counts .del, .diff tr.del .sign { color: var(--bad); }
+.changes-body { flex: 1; overflow: auto; min-height: 0; }
+.file { border-bottom: 1px solid var(--line); }
+.file-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: var(--panel); cursor: pointer; font-size: 13px; }
+.file-head .file-path { direction: ltr; }
+.diff { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; line-height: 1.45; table-layout: fixed; }
+.diff td { padding: 0 8px; vertical-align: top; }
+.diff td.no { width: 44px; text-align: right; color: var(--muted); user-select: none; white-space: nowrap; border-right: 1px solid var(--line); }
+.diff td.code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff .sign { display: inline-block; width: 12px; user-select: none; }
+.diff tr.add td { background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.diff tr.del td { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.diff tr.hunk td { background: var(--panel); color: var(--muted); padding-top: 4px; padding-bottom: 4px; }

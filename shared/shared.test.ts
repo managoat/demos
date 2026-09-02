@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { initials, shortName, splitAuthor, withAuthor } from "./author";
+import { changesLine, parseDiff, parseSnapshot, parseStatus, summarise } from "./changes";
 import { newTicTacToe, play, toMove, winnerEmail, type TicTacToe } from "./games";
 import { groupByProvider, modelLabel, modelProblem, runtimeFor } from "./models";
 import { canonical, DEFAULT_SETTINGS, derivedKey, fnv1a64, parseSettings } from "./settings";
@@ -138,5 +139,81 @@ describe("tic-tac-toe", () => {
     ] as const) step(`${who}@example.com`, cell);
     expect(s.winner).toBe("draw");
     expect(winnerEmail({ players: game.players, state: s })).toBeNull();
+  });
+});
+
+describe("changes", () => {
+  const DIFF = [
+    "diff --git a/src/a.ts b/src/a.ts",
+    "index 1111111..2222222 100644",
+    "--- a/src/a.ts",
+    "+++ b/src/a.ts",
+    "@@ -10,4 +10,5 @@ function a() {",
+    "   keep",
+    "-  gone",
+    "+  here",
+    "+  and here",
+    "   keep too",
+    "diff --git a/old.txt b/new.txt",
+    "similarity index 90%",
+    "rename from old.txt",
+    "rename to new.txt",
+    "--- a/old.txt",
+    "+++ b/new.txt",
+    "@@ -1 +1 @@",
+    "-x",
+    "+y",
+    "diff --git a/gone.txt b/gone.txt",
+    "deleted file mode 100644",
+    "--- a/gone.txt",
+    "+++ /dev/null",
+    "@@ -1,2 +0,0 @@",
+    "-a",
+    "-b",
+    "diff --git a/pic.png b/pic.png",
+    "new file mode 100644",
+    "Binary files /dev/null and b/pic.png differ",
+    "",
+  ].join("\n");
+
+  test("a unified diff parses into files, hunks and numbered lines", () => {
+    const files = parseDiff(DIFF);
+    expect(files.map((f) => [f.path, f.oldPath, f.status, f.binary, f.additions, f.deletions])).toEqual([
+      ["src/a.ts", null, "modified", false, 2, 1],
+      ["new.txt", "old.txt", "renamed", false, 1, 1],
+      ["gone.txt", null, "deleted", false, 0, 2],
+      ["pic.png", null, "added", true, 0, 0],
+    ]);
+    const h = files[0]!.hunks[0]!;
+    expect(h).toMatchObject({ oldStart: 10, oldLines: 4, newStart: 10, newLines: 5, heading: "function a() {" });
+    expect(h.lines.map((l) => [l.type, l.oldNo, l.newNo])).toEqual([
+      ["context", 10, 10],
+      ["del", 11, null],
+      ["add", null, 11],
+      ["add", null, 12],
+      ["context", 12, 13],
+    ]);
+    expect(summarise(DIFF)).toHaveLength(4);
+    expect(changesLine(summarise(DIFF))).toBe("+3 −4 in 4 files");
+    expect(changesLine([])).toBe("No changes");
+    // A diff cut mid-hunk keeps what it had.
+    expect(parseDiff(DIFF.slice(0, 150))[0]!.hunks[0]!.lines.length).toBeGreaterThan(0);
+    expect(parseDiff("")).toEqual([]);
+  });
+
+  test("git status --porcelain parses, renames included", () => {
+    expect(parseStatus(" M a.ts\n?? new/\nR  old.txt -> new.txt\nA  b.ts\n")).toEqual([
+      { code: " M", path: "a.ts", oldPath: null },
+      { code: "??", path: "new/", oldPath: null },
+      { code: "R ", path: "new.txt", oldPath: "old.txt" },
+      { code: "A ", path: "b.ts", oldPath: null },
+    ]);
+  });
+
+  test("a snapshot is checked before it is kept", () => {
+    expect(typeof parseSnapshot(null)).toBe("string");
+    expect(typeof parseSnapshot({ diff: "x" })).toBe("string");
+    expect(parseSnapshot({ branch: "b", head: "h", base: "main", status: "", diff: "", reason: "nope", pr: { url: "http://insecure" } })).toMatchObject({ reason: "manual", pr: null });
+    expect(parseSnapshot({ head: "h", base: "main", reason: "session", pr: { url: "https://github.com/x/y/pull/2", state: "OPEN" } })).toMatchObject({ branch: "", status: "", diff: "", reason: "session", pr: { url: "https://github.com/x/y/pull/2", state: "OPEN", mergeable: null } });
   });
 });
