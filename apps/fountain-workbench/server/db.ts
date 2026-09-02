@@ -1,0 +1,482 @@
+/**
+ * The workbench's own records, in SQLite (`bun:sqlite`): who has signed in
+ * (and the Fountain key each one's projects run on), sessions, projects with
+ * their owner and members, and work items.
+ *
+ * Fountain has no project or work-item primitive; this is the state that
+ * used to live in one browser's localStorage, now in one place so a project
+ * can be shared. Conversations themselves stay on Fountain — a project's
+ * conversations are the ones whose `channel_id` starts with
+ * `workbench:<project>/`, under the owner's key — which is also why the one
+ * thing recorded here *about* those conversations is what a work item has
+ * removed: Fountain keeps every conversation there has ever been, and the
+ * workbench decides which of them are still part of the work.
+ */
+import { Database } from "bun:sqlite";
+import { projectRemovedKey } from "../shared/computers";
+import { emptyCounts, parseItemStatus, type ItemCounts, type ItemStatus } from "../shared/status";
+
+export interface UserRow {
+  email: string;
+  fountain_id: string | null;
+  key_enc: string;
+  created_at: string;
+  key_updated_at: string;
+}
+
+export interface ProjectRow {
+  id: string;
+  owner_email: string;
+  name: string;
+  notes: string;
+  environment_id: string | null;
+  vault_id: string | null;
+  /** The teammate new work here starts with, when nobody says otherwise. A Fountain agent id, the owner's. */
+  default_agent_id: string | null;
+  created_at: string;
+}
+
+export interface MemberRow {
+  project_id: string;
+  email: string;
+  added_by: string;
+  added_at: string;
+}
+
+/**
+ * A computer a work item has removed: taken out of the item's tree, once its
+ * work was over. Fountain keeps the conversations that ran on it — the
+ * transcript and the bill are not the workbench's to delete — so this is the
+ * record of what the workbench stops showing, keyed by the computer's key
+ * (its sandbox id, or `conv:<id>` for one that never got a sandbox;
+ * shared/computers.ts).
+ */
+export interface RemovedComputerRow {
+  item_id: string;
+  key: string;
+  removed_by: string;
+  removed_at: string;
+}
+
+export interface ItemRow {
+  id: string;
+  project_id: string;
+  title: string;
+  notes: string;
+  status: ItemStatus;
+  agent_ids: string; // JSON array
+  created_at: string;
+  /** A verdict an agent proposed but nobody has acted on: '' | 'done' | 'wont' | 'icebox' (shared/status.ts). */
+  proposed_status: string;
+  /** Who proposed it: the agent, when it came from inside a conversation, and the account whose key it was. */
+  proposed_agent_id: string;
+  proposed_email: string;
+  proposed_at: string;
+}
+
+/** The proposal fields of an item nobody has proposed anything on — a new item, or one just decided. */
+export const NO_PROPOSAL: Pick<ItemRow, "proposed_status" | "proposed_agent_id" | "proposed_email" | "proposed_at"> = {
+  proposed_status: "",
+  proposed_agent_id: "",
+  proposed_email: "",
+  proposed_at: "",
+};
+
+/**
+ * The git state of one checkout on one of a work item's computers, as the
+ * hook inside the sandbox last posted it (server/snapshots.ts): branch, head,
+ * ahead/behind and porcelain status — the diff itself is read through Fountain.
+ * Latest only:
+ * the disk has one state, and the row is keyed the way the disk is —
+ * by the computer (shared/computers.ts) and the checkout's path on it.
+ */
+export interface SnapshotRow {
+  item_id: string;
+  computer: string;
+  repo: string;
+  conversation_id: string;
+  agent_id: string | null;
+  source: string;
+  branch: string;
+  head: string;
+  upstream: string;
+  ahead: number;
+  behind: number;
+  status: string;
+  meta: string;
+  taken_at: string;
+}
+
+export type Role = "owner" | "member";
+
+/** What an update to a work item may set. Its id, project and creation stand. */
+export type ItemPatch = Partial<Omit<ItemRow, "id" | "project_id" | "created_at">>;
+
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS users (
+  email TEXT PRIMARY KEY,
+  fountain_id TEXT,
+  key_enc TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  key_updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sessions_email ON sessions(email);
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  owner_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  environment_id TEXT,
+  vault_id TEXT,
+  default_agent_id TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS projects_owner ON projects(owner_email);
+CREATE TABLE IF NOT EXISTS project_members (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  added_by TEXT NOT NULL,
+  added_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, email)
+);
+CREATE INDEX IF NOT EXISTS project_members_email ON project_members(email);
+CREATE TABLE IF NOT EXISTS items (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  -- open | done | wont | icebox; free text, so a new state needs no migration
+  -- and an old row written by an older build still reads (shared/status.ts).
+  status TEXT NOT NULL DEFAULT 'open',
+  agent_ids TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL,
+  -- '' | done | wont | icebox: what an agent says should happen to this item,
+  -- which is not the same as it happening. Nothing is retired for a proposal.
+  proposed_status TEXT NOT NULL DEFAULT '',
+  proposed_agent_id TEXT NOT NULL DEFAULT '',
+  proposed_email TEXT NOT NULL DEFAULT '',
+  proposed_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS items_project ON items(project_id);
+CREATE TABLE IF NOT EXISTS removed_computers (
+  item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  removed_by TEXT NOT NULL,
+  removed_at TEXT NOT NULL,
+  PRIMARY KEY (item_id, key)
+);
+CREATE TABLE IF NOT EXISTS snapshots (
+  item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  computer TEXT NOT NULL,
+  repo TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
+  agent_id TEXT,
+  source TEXT NOT NULL,
+  branch TEXT NOT NULL DEFAULT '',
+  head TEXT NOT NULL DEFAULT '',
+  upstream TEXT NOT NULL DEFAULT '',
+  ahead INTEGER NOT NULL DEFAULT 0,
+  behind INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT '',
+  meta TEXT NOT NULL DEFAULT '',
+  taken_at TEXT NOT NULL,
+  PRIMARY KEY (item_id, computer, repo)
+);
+`;
+
+/**
+ * Columns added after their table existed. `CREATE TABLE IF NOT EXISTS`
+ * leaves a table that is already there alone, and the database is a file on a
+ * volume that outlives the image, so a database written by an older build
+ * needs them added. The defaults make an old row a row nobody has proposed
+ * anything on, in a project that asks every time who does the work.
+ */
+const ADDED_COLUMNS: [string, [string, string][]][] = [
+  [
+    "items",
+    [
+      ["proposed_status", "TEXT NOT NULL DEFAULT ''"],
+      ["proposed_agent_id", "TEXT NOT NULL DEFAULT ''"],
+      ["proposed_email", "TEXT NOT NULL DEFAULT ''"],
+      ["proposed_at", "TEXT NOT NULL DEFAULT ''"],
+    ],
+  ],
+  ["projects", [["default_agent_id", "TEXT"]]],
+];
+
+export function now(): string {
+  return new Date().toISOString();
+}
+
+export class Db {
+  readonly sql: Database;
+
+  constructor(path = ":memory:") {
+    this.sql = new Database(path, { create: true, strict: true });
+    this.sql.exec("PRAGMA journal_mode = WAL");
+    this.sql.exec("PRAGMA foreign_keys = ON");
+    this.sql.exec(SCHEMA);
+    this.migrate();
+  }
+
+  /** Bring a database written by an older build up to the schema above. */
+  private migrate(): void {
+    for (const [table, columns] of ADDED_COLUMNS) {
+      const have = new Set((this.sql.query(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name));
+      for (const [name, decl] of columns) {
+        if (!have.has(name)) this.sql.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${decl}`);
+      }
+    }
+  }
+
+  close(): void {
+    this.sql.close();
+  }
+
+  // ── users ────────────────────────────────────────────────────────────
+
+  getUser(email: string): UserRow | null {
+    return (this.sql.query("SELECT * FROM users WHERE email = $email").get({ email }) as UserRow | null) ?? null;
+  }
+
+  /** Create or refresh a user: every sign-in replaces the key their projects run on. */
+  upsertUser(email: string, fountainId: string | null, keyEnc: string): UserRow {
+    const t = now();
+    this.sql
+      .query(
+        `INSERT INTO users (email, fountain_id, key_enc, created_at, key_updated_at) VALUES ($email, $fountain_id, $key_enc, $t, $t)
+         ON CONFLICT(email) DO UPDATE SET fountain_id = excluded.fountain_id, key_enc = excluded.key_enc, key_updated_at = excluded.key_updated_at`,
+      )
+      .run({ email, fountain_id: fountainId, key_enc: keyEnc, t });
+    return this.getUser(email)!;
+  }
+
+  // ── sessions ─────────────────────────────────────────────────────────
+
+  createSession(tokenHash: string, email: string): void {
+    const t = now();
+    this.sql.query("INSERT INTO sessions (token_hash, email, created_at, last_seen_at) VALUES ($h, $email, $t, $t)").run({ h: tokenHash, email, t });
+  }
+
+  /** The user a session belongs to, touching `last_seen_at`. */
+  sessionUser(tokenHash: string): UserRow | null {
+    const row = this.sql.query("SELECT email FROM sessions WHERE token_hash = $h").get({ h: tokenHash }) as { email: string } | null;
+    if (!row) return null;
+    this.sql.query("UPDATE sessions SET last_seen_at = $t WHERE token_hash = $h").run({ t: now(), h: tokenHash });
+    return this.getUser(row.email);
+  }
+
+  deleteSession(tokenHash: string): void {
+    this.sql.query("DELETE FROM sessions WHERE token_hash = $h").run({ h: tokenHash });
+  }
+
+  /** Sessions older than `maxAgeMs` are gone. */
+  expireSessions(maxAgeMs: number): void {
+    const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
+    this.sql.query("DELETE FROM sessions WHERE last_seen_at < $cutoff").run({ cutoff });
+  }
+
+  // ── projects ─────────────────────────────────────────────────────────
+
+  getProject(id: string): ProjectRow | null {
+    return (this.sql.query("SELECT * FROM projects WHERE id = $id").get({ id }) as ProjectRow | null) ?? null;
+  }
+
+  /** Projects the user owns or is a member of, oldest first. */
+  projectsFor(email: string): ProjectRow[] {
+    return this.sql
+      .query(
+        `SELECT p.* FROM projects p
+         WHERE p.owner_email = $email OR p.id IN (SELECT project_id FROM project_members WHERE email = $email)
+         ORDER BY p.created_at, p.id`,
+      )
+      .all({ email }) as ProjectRow[];
+  }
+
+  /** Owner or member, or null when the user has no business with the project. */
+  roleIn(projectId: string, email: string): Role | null {
+    const p = this.getProject(projectId);
+    if (!p) return null;
+    if (p.owner_email === email) return "owner";
+    const m = this.sql.query("SELECT 1 FROM project_members WHERE project_id = $p AND email = $e").get({ p: projectId, e: email });
+    return m ? "member" : null;
+  }
+
+  insertProject(p: ProjectRow): boolean {
+    const r = this.sql
+      .query(
+        `INSERT OR IGNORE INTO projects (id, owner_email, name, notes, environment_id, vault_id, default_agent_id, created_at)
+         VALUES ($id, $owner_email, $name, $notes, $environment_id, $vault_id, $default_agent_id, $created_at)`,
+      )
+      .run(p as unknown as Record<string, string | null>);
+    return r.changes > 0;
+  }
+
+  updateProject(id: string, patch: Partial<Pick<ProjectRow, "name" | "notes" | "environment_id" | "vault_id" | "default_agent_id">>): void {
+    const cur = this.getProject(id);
+    if (!cur) return;
+    const next = { ...cur, ...patch };
+    this.sql
+      .query("UPDATE projects SET name = $name, notes = $notes, environment_id = $environment_id, vault_id = $vault_id, default_agent_id = $default_agent_id WHERE id = $id")
+      .run({ id, name: next.name, notes: next.notes, environment_id: next.environment_id, vault_id: next.vault_id, default_agent_id: next.default_agent_id });
+  }
+
+  deleteProject(id: string): void {
+    this.sql.query("DELETE FROM projects WHERE id = $id").run({ id });
+  }
+
+  // ── members ──────────────────────────────────────────────────────────
+
+  members(projectId: string): MemberRow[] {
+    return this.sql.query("SELECT * FROM project_members WHERE project_id = $p ORDER BY added_at, email").all({ p: projectId }) as MemberRow[];
+  }
+
+  addMember(projectId: string, email: string, addedBy: string): boolean {
+    const r = this.sql
+      .query("INSERT OR IGNORE INTO project_members (project_id, email, added_by, added_at) VALUES ($p, $e, $by, $t)")
+      .run({ p: projectId, e: email, by: addedBy, t: now() });
+    return r.changes > 0;
+  }
+
+  removeMember(projectId: string, email: string): boolean {
+    const r = this.sql.query("DELETE FROM project_members WHERE project_id = $p AND email = $e").run({ p: projectId, e: email });
+    return r.changes > 0;
+  }
+
+  // ── items ────────────────────────────────────────────────────────────
+
+  items(projectId: string): ItemRow[] {
+    return this.sql.query("SELECT * FROM items WHERE project_id = $p ORDER BY created_at, id").all({ p: projectId }) as ItemRow[];
+  }
+
+  getItem(id: string): ItemRow | null {
+    return (this.sql.query("SELECT * FROM items WHERE id = $id").get({ id }) as ItemRow | null) ?? null;
+  }
+
+  insertItem(w: ItemRow): boolean {
+    const r = this.sql
+      .query(
+        `INSERT OR IGNORE INTO items (id, project_id, title, notes, status, agent_ids, created_at, proposed_status, proposed_agent_id, proposed_email, proposed_at)
+         VALUES ($id, $project_id, $title, $notes, $status, $agent_ids, $created_at, $proposed_status, $proposed_agent_id, $proposed_email, $proposed_at)`,
+      )
+      .run(w as unknown as Record<string, string>);
+    return r.changes > 0;
+  }
+
+  updateItem(id: string, patch: ItemPatch): void {
+    const cur = this.getItem(id);
+    if (!cur) return;
+    const next = { ...cur, ...patch };
+    this.sql
+      .query(
+        `UPDATE items SET title = $title, notes = $notes, status = $status, agent_ids = $agent_ids,
+           proposed_status = $proposed_status, proposed_agent_id = $proposed_agent_id, proposed_email = $proposed_email, proposed_at = $proposed_at
+         WHERE id = $id`,
+      )
+      .run({
+        id,
+        title: next.title,
+        notes: next.notes,
+        status: next.status,
+        agent_ids: next.agent_ids,
+        proposed_status: next.proposed_status,
+        proposed_agent_id: next.proposed_agent_id,
+        proposed_email: next.proposed_email,
+        proposed_at: next.proposed_at,
+      });
+  }
+
+  deleteItem(id: string): void {
+    this.sql.query("DELETE FROM items WHERE id = $id").run({ id });
+  }
+
+  // ── removed computers ────────────────────────────────────────────────
+
+  /** What one work item has taken out of its tree, oldest first. */
+  removedComputers(itemId: string): RemovedComputerRow[] {
+    return this.sql.query("SELECT * FROM removed_computers WHERE item_id = $i ORDER BY removed_at, key").all({ i: itemId }) as RemovedComputerRow[];
+  }
+
+  /** Every removal in one project, in one query: what the conversation list has to leave out. */
+  removedInProject(projectId: string): RemovedComputerRow[] {
+    return this.sql
+      .query("SELECT r.* FROM removed_computers r JOIN items i ON i.id = r.item_id WHERE i.project_id = $p ORDER BY r.removed_at, r.key")
+      .all({ p: projectId }) as RemovedComputerRow[];
+  }
+
+  /** Removals across a set of projects, keyed by `projectRemovedKey` — one query for the whole feed. */
+  removedKeys(projectIds: string[]): Set<string> {
+    const out = new Set<string>();
+    if (projectIds.length === 0) return out;
+    const rows = this.sql
+      .query(`SELECT i.project_id, r.item_id, r.key FROM removed_computers r JOIN items i ON i.id = r.item_id WHERE i.project_id IN (${projectIds.map(() => "?").join(",")})`)
+      .all(...projectIds) as { project_id: string; item_id: string; key: string }[];
+    for (const r of rows) out.add(projectRemovedKey(r.project_id, r.item_id, r.key));
+    return out;
+  }
+
+  /** Take a computer out of a work item. False when it was already out. */
+  removeComputer(itemId: string, key: string, by: string): boolean {
+    const r = this.sql
+      .query("INSERT OR IGNORE INTO removed_computers (item_id, key, removed_by, removed_at) VALUES ($i, $k, $by, $t)")
+      .run({ i: itemId, k: key, by, t: now() });
+    return r.changes > 0;
+  }
+
+  /** Put one back. False when it was not removed. */
+  restoreComputer(itemId: string, key: string): boolean {
+    const r = this.sql.query("DELETE FROM removed_computers WHERE item_id = $i AND key = $k").run({ i: itemId, k: key });
+    return r.changes > 0;
+  }
+
+  // ── snapshots ────────────────────────────────────────────────────────
+
+  /** The latest state of one checkout on one computer replaces the one before it. */
+  upsertSnapshot(r: SnapshotRow): void {
+    this.sql
+      .query(
+        `INSERT INTO snapshots (item_id, computer, repo, conversation_id, agent_id, source, branch, head, upstream, ahead, behind, status, meta, taken_at)
+         VALUES ($item_id, $computer, $repo, $conversation_id, $agent_id, $source, $branch, $head, $upstream, $ahead, $behind, $status, $meta, $taken_at)
+         ON CONFLICT(item_id, computer, repo) DO UPDATE SET
+           conversation_id = excluded.conversation_id, agent_id = excluded.agent_id, source = excluded.source,
+           branch = excluded.branch, head = excluded.head, upstream = excluded.upstream, ahead = excluded.ahead, behind = excluded.behind,
+           status = excluded.status, meta = excluded.meta, taken_at = excluded.taken_at`,
+      )
+      .run({ ...r });
+  }
+
+  /** Every checkout on every computer of the item, newest first. */
+  snapshots(itemId: string): SnapshotRow[] {
+    return this.sql.query("SELECT * FROM snapshots WHERE item_id = $i ORDER BY taken_at DESC, computer, repo").all({ i: itemId }) as SnapshotRow[];
+  }
+
+  /** Item counts per project for a user's list, in one query. */
+  itemCounts(projectIds: string[]): Map<string, ItemCounts> {
+    const out = new Map<string, ItemCounts>();
+    if (projectIds.length === 0) return out;
+    const rows = this.sql
+      .query(`SELECT project_id, status, COUNT(*) AS n FROM items WHERE project_id IN (${projectIds.map(() => "?").join(",")}) GROUP BY project_id, status`)
+      .all(...projectIds) as { project_id: string; status: string; n: number }[];
+    for (const r of rows) {
+      const c = out.get(r.project_id) ?? emptyCounts();
+      c[parseItemStatus(r.status)] += r.n;
+      out.set(r.project_id, c);
+    }
+    return out;
+  }
+}
+
+export function parseAgentIds(json: string): string[] {
+  try {
+    const v = JSON.parse(json);
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}

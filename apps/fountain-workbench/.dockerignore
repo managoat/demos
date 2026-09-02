@@ -1,0 +1,8 @@
+node_modules
+.git
+src
+data
+*.md
+**/*.test.ts
+test
+bunfig.toml

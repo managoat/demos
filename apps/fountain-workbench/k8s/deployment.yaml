@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workbench
+  namespace: workbench
+  labels:
+    app: workbench
+spec:
+  # One replica: the state is a SQLite file on a ReadWriteOnce volume, and
+  # project event fan-out is in-process.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: workbench
+  template:
+    metadata:
+      labels:
+        app: workbench
+    spec:
+      containers:
+        - name: web
+          # Pinned to an immutable sha tag by .github/workflows/build.yml.
+          image: ghcr.io/managoat/fountain-workbench:sha-ed075b3304abc01df67b3e3d2a07655c3abd5775
+          ports:
+            - containerPort: 8080
+          env:
+            - name: FOUNTAIN_URL
+              value: https://fountain.inevitable.fyi
+            - name: DATA_DIR
+              value: /data
+            - name: STATIC_DIR
+              value: /app/dist
+          envFrom:
+            # WORKBENCH_SECRET, if provided: encrypts the stored Fountain keys.
+            # Without it the server generates one into /data/secret — it works,
+            # but the secret then lives beside the data it protects.
+            - secretRef:
+                name: workbench-secrets
+                optional: true
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 20m, memory: 96Mi }
+            limits: { memory: 256Mi }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: workbench-data

@@ -1,0 +1,38 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: workbench
+  namespace: workbench
+  labels:
+    app: workbench
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`fountain-workbench.demo.managoat.com`)"
+      kind: Rule
+      services:
+        - name: workbench
+          port: 80
+  tls:
+    secretName: workbench-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: workbench-http
+  namespace: workbench
+  labels:
+    app: workbench
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: "Host(`fountain-workbench.demo.managoat.com`)"
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: workbench
+          port: 80

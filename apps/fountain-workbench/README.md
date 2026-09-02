@@ -1,0 +1,748 @@
+# Fountain Workbench
+
+A dev workstation on the [Fountain](https://github.com/BinaryBourbon/fountain) API,
+shared between people.
+
+**Projects → work items → teammates.** A project is an environment and a
+vault — the computer its work gets. You work on "fix foo" in project Fountain,
+pull teammates into it, and talk to each one. The team is simply the project
+owner's Fountain agents; adding a teammate to a work item is picking an agent,
+and then you prompt.
+
+**Assigning is one step, not four.** Starting a conversation is what puts a
+teammate on a work item — the server does it (`server/proxy.ts`) — so nothing
+has to be added first. The new-work-item form takes a teammate and a first
+prompt, so "fix foo, Coder, here is the repro" is one submit and lands you in
+the thread. On an item that already exists, the whole team is a row of chips
+under its teammates: click one and write the prompt. ("+" on a chip only
+earmarks them, for an item you are staffing before there is anything to say.)
+
+**A default teammate makes it no steps at all.** The new-project form asks
+*Default teammate* — who new work here starts with — beside the environment
+and vault, and Settings & sharing changes it afterwards. It is asked at create
+time because that is when it saves the most: a project made without one starts
+on the slow path, which is exactly the moment a default would have helped. When
+the owner has exactly one agent, the field does not offer a list of one — it
+says whose name it is and lets you decline in a click. Changing the environment
+or the vault under a pick that no longer fits drops the pick and says so,
+rather than creating a project that looks like it starts with somebody and
+does not. Both places are the same field
+(`src/components/DefaultTeammateField.tsx`). With one set, the
+explorer's composer stops being a title box: type what needs doing, press
+Enter, and the item is filed *and* they are on it, with the thread open. The
+first line names the item, the rest is its notes, and what you typed is what
+they get (`splitAsk`, `itemAsPrompt` in `src/lib/start.ts`); leaving the
+project form's prompt box empty does the same, because the work item is the
+ask. That Enter spends the owner's money and boots a computer, so the composer
+says whose name is on it — `↵ starts Coder on it` — and never guesses one: no
+default, no start, just the item. A default naming an agent that has left the
+owner's Fountain, or that the project's environment and vault no longer admit,
+counts as none (`defaultTeammate` in `src/lib/workbench.ts`). Filing over MCP
+still starts nobody: recording work is not spending money.
+
+**The notes are the briefing.** A work item's notes are what whoever picks it
+up starts from — a person reading the item, or a teammate reading
+`list_work_items` over MCP — so they render as markdown: headings, a fenced
+repro, `- [ ]` checklists, links. It is the app's own allow-list renderer
+(`src/lib/markdown.tsx`, React nodes, never innerHTML), so nothing written
+into an item can become markup. Writing them stays a plain textarea, and the
+save follows a pause in the typing rather than every keystroke
+(`src/lib/draft.ts`).
+
+**A screenshot is a prompt.** Paste one into a composer, drop it on the
+thread, or press **🖼** and pick it, and it goes with the words — "here is
+what it looks like, fix it" beats describing a layout in prose. Thumbnails
+sit above what you are typing until you send, each with an × ; the transcript
+shows the images back on the turn they went with. The rules are Fountain's
+own (`shared/images.ts`): PNG, JPEG, GIF or WebP, 10 MB an image, and a file
+that breaks them is refused in the composer, by name, rather than as a failed
+POST. A big one is also sent *smaller*: base64 is 4/3, so a 4K screenshot is
+megabytes of JSON body for pixels nobody reads, and over 2 MB the browser
+redraws it to 2000px on its long edge and sends that instead. Never a GIF — a
+canvas keeps one frame — and never the re-encode when it came back bigger
+than the file. It is not a way past the ceiling: a 12 MB image is still
+refused, not resized into the limit. The start-a-conversation forms take them
+too, on that first prompt.
+
+The button is there because the other two ways leave people out: a touch
+device has no drag and usually nothing on the clipboard, a keyboard cannot
+drop a file, and a screen reader had nothing to find at all when the only
+sign attaching was possible was placeholder text. It is a plain focusable
+button in front of a hidden file input (`AttachButton` in
+`src/components/Attachments.tsx`), on all three composers, calling the same
+`useAttachments` `add` a paste and a drop call.
+
+**Sharing.** A project has an owner and members. Everyone signs in with
+Fountain; the owner shares a project by email, and it appears for that person
+the next time they sign in. Members see the same work items and the same
+conversations, and start their own — and every conversation in the project
+runs on the **owner's** Fountain account: the owner's agents, environments,
+vaults, computers and bill. A member never holds the owner's key; the
+workbench server does, and lets the member through only to that project's
+conversations.
+
+**The owner pays, so the owner can see it.** Because every conversation in a
+project runs on the owner's account, the owner is billed for work members
+started, and had no view of what that came to. **Cost** (on the projects page,
+and on a project you own) is that view: your Fountain bill for the period —
+plan, turn hours, sandbox minutes — and underneath it, where the work went,
+per project and per work item, so "this item burned a day of Opus" is visible
+before it burns two. It is your own account and only the projects you own; a
+member sees their own, never yours. It hangs off `/api/me/cost` and
+deliberately not off the project proxy — that is the boundary a member
+crosses, and a bill does not belong on the far side of it.
+
+The breakdown is in the bill's own unit over the bill's own window, so it is a
+division of the account figure rather than a second number beside it. A
+Fountain turn carries `started_at` and `ended_at`; summing those intervals
+clipped to the billing period, grouped by the work item each conversation's
+channel names, is per-project **turn hours this period** — and the page shows
+each project's share of the turn hours Fountain reports for the whole account,
+with the difference called what it is: work on your key that no project of
+yours accounts for. The arithmetic deliberately copies Fountain's own meter
+(`Fountain.Billing.turn_hours_used/2`): intervals summed rather than unioned,
+because two conversations each running an hour on one machine are two hours of
+work; a turn still in flight accruing only as far as *now*. Tokens stay on the
+page as the second unit they are — lifetime per project, and per period the
+turns that finished inside it — and sandbox minutes Fountain attributes to
+nothing, so neither does the page.
+
+That costs a request per conversation: turns are per conversation and the
+endpoint takes no window, so it is `GET /api/me/cost/period`, a second route
+the page fetches after it has painted, rather than more of the first. Three
+things keep the fan-out down, and each one reports what it did instead of
+quietly shrinking the answer — only projects you own are fetched (what ran
+elsewhere is the bill's figure minus this one, which is subtraction); a
+conversation whose last activity predates the period cannot hold a turn inside
+it and is never asked about; and turns are cached per conversation against its
+turn count and last activity, so a reload re-reads only what moved. A
+conversation with a turn still running is never cached — its figure grows with
+the clock.
+
+Each teammate's conversation gets its own computer, and a computer belongs
+to the work item it was started for — the checkout and the disk are that
+item's context, so the sidebar reads work item → computers → conversations.
+That tree holds still: every level ranks on when it *started*, not on which
+row last printed a line, so two agents talking at once no longer shuffle the
+explorer under your pointer. A turn in flight shows as a dot on its row, and
+things move only when you move them. The row at the top of the tree starts a
+work item where you read them: type a title, press Enter, and it is in the
+list — the composer stays open for the next one, and the page you are on does
+not move.
+When a Fountain supports it (ADR 0023, *one sandbox, many conversations*),
+"**+**" on a computer that is already up opens a second conversation with
+the same teammate on the same machine, on the same item: shared checkout and
+disk, separate transcript. (Fountain itself would share the machine by
+identity alone; the item rule is the workbench's, enforced by its server.) Against an older
+Fountain the button still works; the conversation starts on a new computer and
+the app says so. The sandbox identity `(owner, agent, environment, vault)`
+falls out of the tree — same project, same agent — which is what makes sharing
+a computer legal, whichever member opens the second conversation.
+
+**And what is inside the machine.** A transcript says what an agent said; it
+never said what it was *running with*. So a teammate reaches for a tool you did
+not know it had, or fails to reach one you were sure it had, and there is
+nowhere to look. **Details** — the top bar's ◨ while you are on a conversation,
+opening a panel down the right — is that place: the teammate and model behind
+the thread, the computer under it (sprite, provider, and whether it is this
+conversation's own machine or the teammate's), the skills and MCP servers
+loaded into it, and the permission policy actually in force. All of it was
+already on the wire and none of it was on a screen. It is the explorer's
+mirror, down to the dragged edge and the remembered width, because the tree
+says what there is and this says what one of them is made of.
+
+Two of those lists are the *teammate's* rather than the machine's, and the
+panel says so rather than letting you assume otherwise (`src/lib/details.ts`).
+Skills are written onto a sprite once, when it is built, so editing the
+teammate does not reach a computer that is already up; MCP servers are re-read
+at every turn, so those do follow an edit, from the next turn. And Fountain
+adds to both sets without reporting either. Every sprite gets bundled skills
+that are in no teammate's definition — the panel lists them, rather than
+implying a shorter set than is on the disk — and a conversation whose *vault*
+carries a Buzz identity gets a server of Fountain's own that no endpoint will
+name, which is the one thing the panel says outright that it cannot show. (The
+other two Fountain injects, the team pair, reach only a conversation on
+Fountain's own `fountain:team` channel, which a workbench conversation never
+is.) The policy is the merge Fountain itself performs, recomputed here: the
+teammate's and the launch's, tool by tool, whichever withholds more — so a
+launch can tighten it and never loosen it.
+
+The panel is also why `GET /api/agents` stopped being a straight forward.
+Fountain renders an agent whole, `mcp_servers` included, and an MCP server
+configured the way this README configures one carries `Authorization: Bearer
+ftn_…` in its headers — so a member's browser held the owner's key from the
+moment they opened the project. Nothing read the field, so nothing showed it;
+a panel that lists what is plugged in is what made an already-crossed line
+visible. The proxy now replaces the values of every server's `env` and
+`headers` on the way out, for the owner as much as for a member, and keeps the
+names. The names are the question — what is this teammate plugged into — and
+the values are the answer to nobody's.
+
+Two more fields go the same way, for two different reasons, and the reasons are
+worth keeping apart. An inline skill's `content` is the whole SKILL.md body:
+nothing renders it, the panel lists a skill by name, and this list is refetched
+on every project mount — so a few kilobytes per skill per agent were riding
+along on every page load for no reader. It is withheld for everyone, the owner
+included, because the weight is the same in her browser; if the panel ever
+wants to show a body it should ask for one on a route of its own, when a skill
+is expanded. Then `system` and `metadata`, which are withheld from a **member**
+and not from the owner. That route is the owner's whole *account* — the team
+picker needs agents that do not fit this project, so the list is forwarded
+unfiltered — and sharing one project should not hand over the standing
+instructions of every agent on the account, including ones no project of yours
+uses. A member gets the teammate: name, model, runtime, which skills, which
+servers. The owner gets their own account whole, exactly as they already do for
+environments and vaults. The role in that rule is not a softening of the MCP
+rule's refusal to have one: a credential is a secret from everybody and the
+owner reading it back changes nothing, while a system prompt is the owner's own
+writing and her key would fetch it from Fountain anyway.
+
+Which leaves two rules that hold whoever is asking and one that does not, and
+that split is a function rather than a habit. The proxy is no longer the only
+way an agent leaves this server: the create-project form needs the same list
+before there is a project to ask through, so `GET /api/me/resources` carries
+the caller's own agents beside their environments and vaults. It went out under
+the MCP rule alone at first and shipped every skill body with it for a day —
+which is the argument for naming the roleless set (`agentForEveryone` in
+`server/proxy.ts`) and having both routes start from it. A rule spread across
+two call sites is a rule one of them can be missing.
+
+**And what is on its disk.** The Details panel says what a computer runs
+with; nothing said what the work on it had come to — which files an agent had
+touched, whether it had committed, how far ahead of `origin/main` it was.
+**Changes**, on the work item, is that: per computer, per checkout, the branch
+and how far ahead, the files that moved, and the diff, following the agent's
+edits as they happen. It is two sources joined, because neither alone is
+enough.
+
+The *bytes* come from Fountain. `GET /api/sandboxes/:id/{files,file,diff}`
+(ADR 0039) reads a sandbox's disk over the API — a directory, a file, `git
+diff` — and the project proxy forwards the three on the owner's key, for the
+project's computers only, exactly as it does the sandbox record. Fountain
+redacts the sandbox's environment and vault values on the way out, pages by
+`max_bytes`, and hands over the whole file beside a hunk when a review wants
+it. Two limits are Fountain's and the view says so rather than showing a
+blank: it reads a `ready` computer only and does not wake a parked one, so an
+asleep machine shows the last state reported and says it is asleep; and it
+reads under `/home/sprite` only, so **environments mount their repositories
+under `/home/sprite/work`** (the manifests in `fountain/` do), and a checkout
+anywhere else is named as the reason there is no diff.
+
+The *state* comes from a hook inside the sandbox, because three things the
+reads cannot tell are the ones a review starts from: which branch, how far
+ahead of upstream, which files are untracked (`git diff` never shows one), and
+*when* anything changed — nothing on Fountain announces a write. The
+environment's setup script installs it in one line, `curl …/hook/install.sh |
+bash`, served by this server so there is one copy (`server/hook.ts`,
+`server/hook.sh`). It wires a script to Claude Code's `Stop` and `PostToolUse`
+hooks and to git's `post-commit`; each posts branch, head, upstream,
+ahead/behind and porcelain status to `POST /api/snapshots`, and never a diff
+— a hook posting raw bytes would carry a secret an agent pasted into a file,
+and Fountain's read would not. The hook is a child of the agent's process, so
+it inherits the per-conversation identity Fountain gives that process,
+`$FOUNTAIN_TOKEN` and `$FOUNTAIN_CONVERSATION_ID`, and authenticates exactly
+as `POST /mcp` does (`server/callers.ts`); nothing new is issued. The server
+keeps the latest per work item, computer and checkout (`server/snapshots.ts`),
+members read it under the item, and a `snapshot` record on the project stream
+is the browser's cue to pull the diff again. Two facts about Fountain fix the
+hook's paths and are written up at the top of `server/hook.ts`: Fountain
+overwrites `~/.claude/settings.json` *after* the setup script whenever the
+agent has an MCP server, and claude's cwd is its HOME, so the hook lives in
+`settings.local.json`; and the identity is spawn env, not disk, so a daemon
+started by the setup script would have neither variable. All of it was proved
+live on 2026-09-02 (`fountain/snapshot-smoke.yml`).
+
+**What happened while you were away.** A work item opens on a digest of
+itself: turns finished, turns that failed, computers that went away, and —
+loudest — how many agents are blocked on a permission request, each one a
+click from the tool it is asking about and how long before Fountain refuses
+it for you. Everything is folded out of the `stage` stream the project
+already carries, so this is a client reading what it had. Counts are measured
+from when this browser last opened the item (kept per item, so a reload does
+not lose your place); a held request is not, because a glance at the page
+must not be what makes "3 agents are blocked waiting on you" disappear.
+
+**And what happened while you were in another project.** The digest above is
+a work item's, folded out of the stream the page already holds — and that
+stream is one *project's* (`/f/<project>/api/events/stream`, filtered per
+project by the proxy), of which a browser holds exactly the one it is looking
+at. So a teammate finishing in your other project had no wire into this tab
+at all: you found out by going there. The **🔔** in the top bar is the wire.
+It is on every page, in a project or not, and it carries a count.
+
+What lands in it is one rule: **a conversation that has stopped, with something
+nobody has read.** Stopped is `idle` or `failed` — `running` and `pending` are
+still working, which the projects list already counts as live and which is not
+news; `terminated` is a conversation whose work is over, and since closing a
+work item retires every conversation on it, counting those would turn "done"
+into a screenful of notifications. Unread is Fountain's own — `last_active_at`
+later than `last_read_at` — so opening the thread is what clears the row, and
+nothing in the panel dismisses without reading. That is deliberate: a "clear
+all" would let the one screen that says an agent is waiting be silenced by
+somebody who never looked, which is where this started. It also means the mark
+is not this browser's, unlike the digest's: read state lives on the
+conversation, shared by everyone in the project the way everything else in a
+project is, so answering a teammate on your laptop does not leave the same row
+waiting on your desk.
+
+It is a **poll**, once a minute — fifteen seconds while somebody is blocked,
+see below — and only while the tab is on screen, unless you have asked it to
+speak up on your desktop, also below. It costs a conversation-list call per distinct project
+owner, which is what the projects list already spends on every visit, and both
+facts come out of that one listing: `GET /api/projects/activity` answers what
+is live per project *and* the feed across all of them. Rows are grouped by
+project, because "which project is this in" is the fact the reader is missing;
+the project you are standing in sinks to the bottom, labelled, since what is in
+front of you is the one thing you did not need telling about. The list is
+capped at 50 and the panel says how many it is not showing, rather than
+implying there is no more.
+
+**The louder half of the bell is who is blocked.** A finished conversation
+waits for you indefinitely; an agent held on an `ask` permission is on a clock —
+Fountain denies an unanswered request after five minutes. So those go first in
+the panel, oldest first, each with its countdown and a link to the thread; the
+bell counts them and says so in words ("2 agents are blocked waiting on you"),
+and the survey quickens to fifteen seconds while any of them is up. It is a
+link and not a pair of buttons on purpose: answering "Bash — `rm -rf build/`"
+off a summary row, in a project you are not even in, is a worse decision than
+answering it under the transcript that explains it, and a countdown makes that
+pressure worse rather than better.
+
+That half cannot be surveyed, and it is the one place the server keeps a
+connection open. A held request is on no conversation record — Fountain writes
+it to the *turn* and announces it on the `stage` stream — and the conversation
+holding one is `running`, which the rule above excludes as "still working, not
+news". It is the one running conversation that is news. So the server follows
+one user-wide `?streams=stage` stream per project *owner* and folds it into the
+map the survey joins against (`server/watch.ts`, which argues the choice out in
+full). What it deliberately does not do is merge those streams into one SSE for
+the browser: Fountain's event ids are per account, so a merged `id:` field would
+break `Last-Event-ID` replay for anybody who is in two owners' projects. Each
+owner's cursor stays in the server, where the two id spaces never meet. And
+because a stream cannot say what was already true when it opened, a running
+conversation this process has never seen has its stage history read once,
+directly, before the stream is joined onto the end of it — once, not once a
+minute. The right shape is still a held-request count on the conversation
+record, which would delete all of this; that is filed as an ask on Fountain.
+
+**And all of it on your desktop, when the tab is not in front of you.** The
+bell's limit is that it is on a screen: a badge is only a notification to
+somebody looking at the window it is in, and being somewhere else is the case
+the whole feed is for. That matters most for the half that expires — an agent
+can sit blocked for its whole five minutes behind a tab you are not looking at,
+and be denied by Fountain before you ever see the number go up. The switch in
+the panel's head — **desktop · off** — turns each survey's news into the
+browser's own notification, over whatever you are actually doing.
+
+It is off until you click it, because a browser will not let a page announce
+anything until somebody has said yes and the asking has to happen in a click;
+if the browser refuses, the switch reads **blocked** and says where to change
+that, rather than snapping back to off and leaving you wondering why nothing
+arrives. The preference is this browser's, like the theme: saying "notify me
+here" is a fact about here, and it should not follow you to the laptop.
+
+Only what is *new since the last survey* is announced. Everything in a feed is
+unread by definition, so a browser that spoke about what it found on arrival
+would ring once for every conversation you had already looked at and decided to
+leave — every time you opened a tab. A blocked agent is announced ahead of
+anything that merely finished, says what it wants to run and how long is left,
+and is announced again if it is still blocked a couple of minutes later — the
+one repeat in here, because that one is running out and the first notice may
+have been missed. More than three finishes between two surveys and it says how
+many instead of stacking them up: eight notifications in a corner is not eight
+times the news, it is a wall somebody swipes away with the feed inside it.
+
+Each carries an id as its tag, so two open tabs replace each other rather than
+saying everything twice, and clicking one brings the window forward and opens
+that thread. With this on, the survey keeps running while the tab is hidden —
+that being exactly the stretch it exists to cover, though a hidden tab's timers
+are throttled to about a minute whatever the interval says, so the fifteen-second
+cadence is for a tab on screen. What it cannot do is reach a browser that is
+*closed*: that wants a service worker and a push subscription, which wants a
+server holding them, and none of that is here. This is the open tab telling you
+about itself while you look elsewhere.
+
+**And you can unblock it where it asked.** An agent under an `ask` permission
+stops before the tool runs, and Fountain puts the ask on the conversation as a
+`permission_request` block. The transcript renders it as a card with buttons —
+**exactly the options that block carried, in the runtime's order**, because
+Fountain refuses an option id the runtime did not offer and the three runtimes
+disagree about theirs (gemini's are `proceed_once` and `cancel`). Clicking one
+is `POST /f/<project>/api/conversations/<id>/requests/<request_id>`, the same
+proxy every other conversation call crosses.
+
+The first answer wins. Another member, an editor over `fountain acp`, or the
+five-minute timeout may get there first, which is a 409 — the card says so and
+does not try again. It does not poll to find out, either: the resolution comes
+back down the stream the page already holds open, as `request · done`, and
+`src/lib/blocks.ts` folds it onto the block on `request_id` the way it already
+pairs a `tool_result` to its `tool_use`. So a card closes itself whoever
+answered, and one whose close was missed — a tab that was shut when it
+happened — closes on the deadline instead, rather than offering buttons for a
+request Fountain refused twenty minutes ago.
+
+**Done means done.** Marking a work item done retires every conversation
+still live on it, which is what takes its computers down — Fountain destroys
+a sprite with the last live conversation on it, so a machine something
+outside the item still holds stays up. The work is over; the disks and the
+bill for them do not outlive it. The button asks first when there is
+something to lose, and the app says what actually went. Reopening an item
+brings nothing back: it is new conversations from there.
+
+**Retiring a computer is not being finished with it.** Fountain keeps a
+terminated conversation for good — the transcript is the record of what was
+done, and the bill is the owner's — so an item worked on all week ends up a
+column of dead machines with the live one somewhere in it, and nothing in the
+app could say "this one is over". **Remove** is the other half: it retires
+whatever is still running on that machine and takes it out of the item — out
+of the explorer, out of the palette, out of the feed. It is on the computer's
+row on the work item, and, because the clutter is felt in the tree rather
+than on the page, as **×** on a dead computer's row in the explorer — the
+same slot "+" has on a live one, for the opposite reason. A week's worth goes
+in one go: **Remove N gone** beside the item's conversations takes every
+machine already down and nothing else. Removing is not deleting, and the app never pretends otherwise:
+the conversations stay on Fountain, a link straight to one still opens (and
+⌘F still searches inside it), `/api/me/cost` still counts every token they
+spent, and the item's own **"N computers removed"** fold puts any of them
+back. It is the project's tree, not one reader's: a member removes, and
+everybody in the project sees it gone. What it will not do is leave a machine
+running where nobody can see it — the retire happens first, and if Fountain
+refuses, the app says so rather than implying the computer went with the row.
+
+**Not everything gets done, and the list has to say so.** An item closes one
+of three ways: **done**, "we did this", **won't do**, "we decided not to do
+this", or **icebox**, "we looked at it, and not now". A list that spells any
+of them like another cannot be read — "12 done" means nothing if some of the
+twelve were abandoned — so they are separate states (`shared/status.ts`), the
+project list counts them apart, and a closed item carries which one it was
+wherever it appears. Otherwise they are the same act: each ends the work, so
+each retires the item's conversations and takes its computers down exactly as
+done does, asks the same question first, and reopens the same way. Switching a
+closed item from one to another costs nothing — the machines went when it was
+first closed.
+
+**The icebox is for the item you keep reading and keep leaving.** It is real
+work, so `done` is a lie; nobody decided against it, so `won't do` is a verdict
+that was never reached; and left `open` it sits in the list for a year and
+takes the list's meaning with it. So there is a state for having looked: the
+row reads **on ice**, the project's fold counts it beside the other two, the
+board gives it a column of its own, and `list_work_items` filters on it — which
+is how an agent answers "is this already known about" without the item being
+open work. What it is *not* is the cheap door out. Parking an item retires its
+conversations and takes its computers down exactly as the other two do, and
+asks first when there is something to lose, because a machine kept up for work
+nobody is doing is the bill this app exists to keep off the owner. The
+difference is in what it says, not what it costs: on ice is the one closed
+state that expects to be reopened, and reopening it is how it ends rather than
+an admission that closing it was wrong.
+
+**The one who finds out is not the one who can close it.** An agent is usually
+what discovers an item should not be done — or should not be done *now*: it
+reads the code, the premise is wrong or the thing it depends on has not landed,
+and the verdict is real work already done. It is also the one thing it cannot
+record — closing an item retires every conversation on it, its own included —
+so it used to end up as "we should not do this, because…" in the notes, sitting
+there until a person read it: prose nothing counts and nothing sorts, which is
+the problem `won't do` and `icebox` exist to fix, one level up. So a verdict is
+a state the item carries before anyone acts on it. `update_work_item` takes
+`propose: "done" | "wont" | "icebox"` (and `"none"` to withdraw one), the row
+reads **"Coder says: won't do"**, and a person answers it —
+**Confirm**, which is the ordinary close and asks first when something is
+running, or **Dismiss**, which clears it and leaves the item open. Deciding
+the status either way settles the proposal, because the question has been
+answered. A proposal retires nothing and takes no computer down; that is why
+it is a field of its own and not the status, and why the list still counts the
+item as open work until a person agrees. The cheaper-looking alternative —
+letting an item close while its computers stay up — is exactly what "Done
+means done" is there to prevent, so it is not a shortcut, it is a different
+promise.
+
+**The board answers where the work stands.** The list says what is there;
+**Board**, the other half of the toggle on a project, says where each item has
+got to — one column per state, cards you can drag between them. The columns
+are the point, because an item carries only four statuses and a board with
+four columns is a list with gaps in it. So the open half is split by what the
+app already knows from the conversation list and the item's own proposal
+(`src/lib/board.ts`): **To do**, open with nothing running on it · **In
+progress**, a conversation still live · **Needs you**, a teammate has proposed
+a verdict nobody has answered · **Done** · **Won't do** · **Icebox**. That
+third column is what the board is for: a proposal is a question standing on an
+item, and until now the only place it was counted was the row it was written
+on. The last one is where work goes to stop being read, and the board is the
+honest place to see how much of it there is. To do holds
+two different things — never started, and started and stopped without anyone
+closing it — so each card says which, because its column cannot.
+
+Deriving the columns is what stops them lying about the state, and the cost is
+that most drags have no field behind them. The board is straight about which:
+a column that cannot take the card you are holding says so **in the column,
+while you hold it** — "In progress is not a field: an item is there while a
+conversation is live on it. Start a teammate on it and it moves itself." The
+refusal has to arrive before you let go rather than after, because a `dragover`
+that withholds the drop is a drag the browser never fires `drop` for; there is
+no later to explain in. What is left is real: dropping on **Done** or **Won't
+do** closes the item, dragging a closed card back into the open half reopens
+it, and dragging a verdict out of **Needs you** is the Dismiss button. When a
+close would retire something live, the drag stops on a bar naming the item and
+what it costs — the pointer makes that far too easy to do by accident for the
+`Sure?` on a button to be enough. And dragging is never the only way: every
+card carries the same close controls as a list row, so the board works from a
+keyboard, and on a touch screen, which has no drag at all.
+
+Which view you read a project in is a setting rather than a place, so it is
+remembered per browser and every link back to the project — the breadcrumb,
+the picker, the last tab closing — lands you in the one you chose. Naming one
+(`#/p/<project>/board`) is what the toggle does, so a board is still a link you
+can send.
+
+**A teammate can file the work itself.** `POST /mcp` is the work-item tree as
+MCP tools — `list_projects`, `list_work_items`, `create_work_item`,
+`update_work_item` — so "split this into three items" is something the agent
+you are talking to can just do, and the sidebar fills in while it answers.
+Authentication is a Fountain key in `Authorization: Bearer …`, which is what a
+sandbox already holds in `$FOUNTAIN_TOKEN`: the workbench asks Fountain whose
+key it is and gets that person's projects, exactly as sign-in does. A key
+whose email has never signed in here is refused. Send
+`X-Fountain-Conversation-Id` as well and the session is pinned to that
+conversation's project — read off its `channel_id` — so a sandbox reaches only
+the work it is on and no tool has to be told which project it means. Closing
+an item — **done**, **won't do** or **icebox** — is deliberately not a tool:
+every one of them retires the item's conversations and takes its computers
+down, quite possibly the caller's own. An agent that concludes an item should
+not be done, or not be done now, proposes that (`propose`, above) and says why
+in the notes; a person confirms it.
+
+**⌘K finds anything said in the project.** A workbench whose shape is many
+conversations needs one box that reaches across them, and this is it:
+conversation names match locally as you type, off the list the app already
+holds, and Fountain's full text over titles, prompts and replies arrives a
+beat behind. Enter opens the hit — a reply or a prompt lands on the turn it
+matched, marked in the margin, not at the bottom of the thread.
+
+**⌘F finds it in the thread you are reading.** The other half, and the one a
+long transcript needs: a strip under the conversation's head searches that
+conversation alone, and walking the hits — ↵/⇧↵, n/N, ↑↓ — moves the transcript
+to the turn that matched and marks it, rather than navigating anywhere. The
+rest of the hits keep a fainter mark in the margin, so you can see what is left
+to walk. It is `GET /api/search` with `conversation_id`, the tight path: the
+proxy checks the id is this project's and lets Fountain scope the query, so a
+keystroke fetches nothing outside the conversation. Two things it says out
+loud, because neither is guessable — a reply is only searchable once its turn
+*ends*, so the turn still running will not match; and matching is whole words
+with `websearch` syntax (`"a quoted phrase"`, `-excluded`, `or`), which is
+sharp for an identifier and blunt for prose. ⌘F is the browser's whenever the
+reader is not in the thread, and always while the palette is up.
+
+Search is the sharpest edge of running on the owner's key: `GET /api/search`
+answers for the owner's *whole account* — their other projects, and personal
+conversations that are nobody else's business. So the proxy narrows it, and
+the decision it turns on is recorded in `server/proxy.ts`. In short: a hit is
+kept only when its conversation's `channel_id` places it in this project,
+which is the rule the event stream already crosses this proxy under. Fountain
+can scope a query to one conversation but not to a set, so scoping on the way
+out would be a request per conversation per keystroke; it *is* used for the
+one case it fits, a search inside a named conversation. Because Fountain's
+`limit`/`offset` count the owner's hits rather than the project's, the proxy
+pages upstream itself and serves its own window — and says so rather than
+saying "no results" when it stops digging.
+
+**Themes.** The top bar's ☀/☾/◐ opens a colour-scheme menu the way an editor
+has one: follow the OS, or pick a palette — solarized, nord, dracula, gruvbox,
+tokyo night, one dark, catppuccin latte. Hovering a line previews it on the
+whole app; the choice is per browser. Every colour in the app comes from the
+tokens at the top of `src/styles.css`, so a new theme is one block of them
+there plus an entry in `src/lib/theme.ts`.
+
+Hosted at **https://fountain-workbench.demo.managoat.com/** against
+`https://fountain.inevitable.fyi` — sign in with your account there.
+
+## How it works
+
+```
+browser ──(session cookie)──▶ workbench server ──(owner's Fountain key)──▶ Fountain
+```
+
+- **Sign-in** is Fountain's: "Sign in with Fountain" (OAuth 2.0 authorization
+  code + PKCE) or a pasted API key. The browser hands the key to the server
+  once (`POST /api/session`); the server asks Fountain who it belongs to
+  (`GET /api/auth/me`), records the user by that email, keeps the key
+  (AES-GCM under `WORKBENCH_SECRET`) and answers with an HttpOnly session
+  cookie. Signing out ends the session but keeps the key, so a shared project
+  does not stop when its owner closes a tab; every sign-in replaces it, and it
+  is revocable in Fountain under Account → API keys.
+- **The tree** — projects (owner, members, environment, vault, default
+  teammate) and work items (teammates) — lives in the server's SQLite
+  database, `server/db.ts`. That file outlives the image it is served from, so
+  a column added later is added by `Db.migrate`, not by the schema.
+- **Fountain through a project.** The browser's SDK client for a project has
+  base URL `/f/<project>`; the server (`server/proxy.ts`) forwards to Fountain
+  on the owner's key and admits only conversations whose `channel_id` starts
+  with `workbench:<project>/`: it filters the list, checks every
+  per-conversation call (a conversation's egress log — what its sandbox
+  reached through the credential broker, and which secret went with each
+  request, by name — included), lets the project's computers' disks be read
+  (`/api/sandboxes/:id/{files,file,diff}`) and no others', forces the project's environment and vault
+  on a new conversation, cuts full-text search down to hits in the project's
+  conversations, lets a member see only the project's environment and
+  vault (the owner sees all), and shapes every agent on the way out: the values
+  of every MCP `env` and `headers` withheld from everyone — the two fields that
+  exist to hold credentials — while their names are kept, every inline skill's
+  body withheld from everyone because nothing reads it, and `system` and
+  `metadata` withheld from a member because that list is the owner's whole
+  account and not this project's team. The owner's user-wide event stream
+  (`GET /api/events/stream`) is proxied the same way, filtered per project,
+  with `event: workbench` records mixed in when another member changes an
+  item or a setting — so every open screen follows along.
+- **The MCP server** (`server/mcp.ts`) is `POST /mcp`: streamable HTTP, one
+  JSON-RPC message per POST, the shape Fountain's own MCP endpoints use. It
+  reaches Fountain only to ask who a key belongs to (`GET /api/auth/me`) and,
+  when the caller names a conversation, to read that one conversation on the
+  caller's own key; everything else it answers from the workbench's own
+  database. It is not a second way into Fountain — `server/proxy.ts` stays the
+  only boundary a member's conversations cross.
+
+  Point a teammate at it by putting it on the Fountain agent, which gives the
+  key-holder's whole tree (tools take a `project` argument):
+
+  ```json
+  { "mcp_servers": { "workbench": {
+      "type": "http",
+      "url": "https://fountain-workbench.demo.managoat.com/mcp",
+      "headers": { "Authorization": "Bearer ftn_…" }
+  } } }
+  ```
+
+  The pinned mode is the better one and needs Fountain to inject the server
+  per conversation, the way it already does for the team tools
+  (`Fountain.Team.conversation_mcp_servers/2`): only there do the sandbox's own
+  per-conversation token and `X-Fountain-Conversation-Id` reach the headers.
+  This side is ready for it.
+
+- **Recovery.** A conversation's membership is also recorded on Fountain, in
+  its `channel_id`, as `workbench:<project>/<item>/<tag>` — one channel per
+  conversation, because a Fountain channel binds a single conversation and a
+  second one opened on it would unbind the first. So the tree is recoverable
+  from the conversation list alone: "Recover from Fountain" rebuilds any project and item your
+  conversations name, and listing a project's conversations fills in items
+  and teammates it did not know about. A browser that held the tree from
+  before the server existed is offered a one-time import (ids are kept, so
+  the channels line up).
+
+The API is reached through [`@agentshit/fountain-sdk`](https://www.npmjs.com/package/@agentshit/fountain-sdk)
+in the browser (`src/lib/sse.ts` reads the user-wide stream by hand, which
+the SDK does not do for a browser). The server uses plain `fetch`.
+
+## Deploy
+
+`.github/workflows/build.yml` builds the bundle on the runner, packages it
+with the server as a Bun image (`Dockerfile`, multi-arch), pushes
+`ghcr.io/managoat/fountain-workbench:sha-<commit>` and pins that tag into
+`k8s/deployment.yaml`. [home-cloud](https://github.com/jhgaylor/home-cloud)
+runs a Flux `GitRepository` + `Kustomization` over `k8s/` (namespace, PVC,
+Deployment, Service, Traefik IngressRoutes, cert-manager Certificate), so a
+push to `main` is a deploy.
+
+One replica: the database is a SQLite file on a `ReadWriteOnce` Longhorn
+volume at `/data`. Configuration is by environment:
+
+| variable           | default                          |                                                                |
+| ------------------ | -------------------------------- | -------------------------------------------------------------- |
+| `FOUNTAIN_URL`     | `https://fountain.inevitable.fyi` | the one Fountain everyone signs in with                         |
+| `DATA_DIR`         | `./data`                         | the SQLite file, and a generated secret when none is given      |
+| `WORKBENCH_SECRET` | *(generated into `DATA_DIR/secret`)* | encrypts stored Fountain keys; set it (k8s: Secret `workbench-secrets`) to keep it apart from the data |
+| `PORT`             | `8080`                           |                                                                |
+| `STATIC_DIR`       | `dist` if present                | the built SPA to serve; empty serves none                       |
+
+Fountain must register the `fountain-workbench` OAuth client with this app's
+origin as a redirect URI. The browser no longer calls Fountain directly, so
+`API_CORS_ORIGINS` is not involved.
+
+## Develop
+
+Bun is the toolchain.
+
+```bash
+bun install
+bun run server                       # the API + proxy on :8080 (bun --watch), data in ./data
+bun run dev                          # Vite on :5173, forwarding /api and /f to :8080
+bun test
+bun run build                        # typecheck + bundle to dist/
+bun run start                        # serve dist/ + API from one process, as in production
+```
+
+`FOUNTAIN_URL=… bun run server` points a local server at another Fountain.
+
+### Test
+
+`bun test` runs three kinds of test. Pure functions — most of `src/lib` and
+all of `shared/` — are tested directly. The server is tested against a fake
+Fountain stood up with `Bun.serve` in `server/app.test.ts`; anything that
+changes what the proxy admits belongs there. And the browser half runs in a
+document: `bunfig.toml` preloads happy-dom (`test/preload.ts`), so a test can
+mount a tree, drive it, and unmount it.
+
+`test/render.tsx` is what mounting looks like — `mount` for a component,
+`renderHook` for a hook, `step` for doing something to a mounted tree and
+`wait` for letting a real timer fire. Each wraps React's `act`, so by the time
+a call returns the effects it scheduled have run. `src/lib/draft.hook.test.tsx`
+is the worked example: `useDraft`'s three rules, each of which needs a second
+render to show at all. So a hook's behaviour is a test now — it does not have
+to be pinned in a comment and hoped for.
+
+The pure-function tests stay as they are. The point of the document is to
+reach the other half, not to move what already works.
+
+## Layout
+
+```
+server/
+  index.ts           Bun.serve
+  app.ts             the route table
+  auth.ts            sign-in: verify the key with Fountain, keep it, issue the session
+  projects.ts        projects, members, items; recovery and import
+  cost.ts            your bill, the projects you own that it paid for, and their turn hours inside its period
+  proxy.ts           Fountain as seen from inside one project, on the owner's key
+  watch.ts           one stage stream per owner, folded into who is blocked on a permission request
+  callers.ts         who is calling from inside a sandbox: the sprite key and the conversation header, shared by /mcp and /api/snapshots
+  snapshots.ts       the git state of a work item's checkouts, posted by the hook in the sandbox; latest per computer and repo
+  hook.ts, hook.sh   the hook's installer, served at /hook/install.sh with this server's URL written in
+  mcp.ts             the work items as MCP tools, for an agent holding a Fountain key
+  db.ts              SQLite: users, sessions, projects, members, items
+  crypto.ts          keys at rest, session token hashing
+fountain/
+  manifest.yml       the environment and agent for working on the workbench itself, on Fountain
+  snapshot-smoke.yml the smoke for the snapshot hook: an environment that installs it, an agent that edits and commits
+shared/
+  channel.ts         workbench:<project>/<item> — read and written by both sides
+  images.ts          an image on a prompt: the four media types, the 10 MB ceiling, the size worth re-encoding at
+  status.ts          a work item's state: open, done, won't do, on ice — and the verdict a teammate proposes
+src/
+  App.tsx            sign-in gate, OAuth callback, route switch
+  store.tsx          WorkbenchProvider (me, projects) and ProjectProvider (one project's Fountain view + stream)
+  router.ts          hash routes
+  lib/api.ts         the server's API
+  lib/workbench.ts   the model; the legacy-state import
+  lib/start.ts       starting a conversation on an item — the request that also assigns the teammate
+  lib/images.ts      a pasted or dropped file, downscaled if it is worth it, read into the payload a prompt takes
+  lib/search.ts      what ⌘K and ⌘F search: names locally, messages through the proxy
+  lib/turns.ts       fold a log feed into turns for the chat view
+  lib/digest.ts      a work item's stage stream → what happened since you last looked
+  lib/feed.ts        the same question across every project: what stopped unread and who is blocked, and where
+  lib/notify.ts      that feed on the desktop: what is new since the last survey, and the permission behind it
+  lib/details.ts     what a conversation runs with: its computer, its skills and MCP servers, the policy in force
+  lib/board.ts       the items as columns, and which drags between them are real writes
+  lib/diff.ts        a unified diff and a porcelain status, parsed for the Changes view
+  lib/blocks.ts      arrange server-parsed blocks (from fountain-conversations)
+  lib/markdown.tsx   allow-list markdown → React nodes, no innerHTML
+  lib/draft.ts       a field's draft and the debounced save behind it
+  lib/theme.ts       the palette list; the blocks themselves are in styles.css
+  pages/             Projects, Project (items as a list or a board, people), WorkItem, Team, Cost
+  components/        Thread, ThreadFind (⌘F), DetailsPanel, Changes, Board, ItemDigest, Feed (🔔), Palette (⌘K), StartDialog, Attachments, EnvVaultFields, DefaultTeammateField, Blocks, ItemStatus, SignIn, Layout
+test/
+  preload.ts         a document for the test run (happy-dom), loaded by bunfig.toml
+  render.tsx         mount a component or a hook and drive it, inside React's act
+```
+
+## Licence
+
+MIT.

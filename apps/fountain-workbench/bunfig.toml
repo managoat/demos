@@ -1,0 +1,4 @@
+# The test run gets a document. See test/preload.ts for what that costs and
+# what is handed back to Bun afterwards.
+[test]
+preload = ["./test/preload.ts"]

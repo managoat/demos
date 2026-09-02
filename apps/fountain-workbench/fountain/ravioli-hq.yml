@@ -1,0 +1,405 @@
+# The ravioli-hq org on Fountain: one environment and one agent per
+# codebase, for the workbench projects of the same names.
+#
+#   fountain apply -f fountain/ravioli-hq.yml
+#
+# Every repo but ravioli-legal is private, so each clone needs GITHUB_TOKEN —
+# the `jhgaylor` vault supplies it (and gh's auth, and the git identity) when
+# a workbench project attaches that vault. No vault is defined here.
+#
+# Each agent's prompt says where its checkout is and what the repo is, so
+# talking to it about the code, its issues and its pull requests is natural:
+# `gh` is installed and authenticated from the vault.
+
+# ── ravioli-backend ─────────────────────────────────────────────────────────
+apiVersion: fountain.dev/v1
+kind: Environment
+metadata:
+  name: ravioli-backend
+spec:
+  networking_type: unrestricted
+  packages:
+    apt:
+      - jq
+      - ripgrep
+      - build-essential
+      - postgresql
+      - postgresql-contrib
+      - redis-server
+  env_vars:
+    LANG: C.UTF-8
+    ENVIRONMENT: test
+  repositories:
+    - url: https://github.com/ravioli-hq/ravioli-backend
+      mount_path: /workspace/ravioli-backend
+      secret_key: GITHUB_TOKEN
+  setup_script: |
+    set -euxo pipefail
+    (while true; do echo "[keepalive] $(date -u +%H:%M:%S)"; sleep 60; done) &
+    KEEPALIVE=$!
+    trap 'kill "$KEEPALIVE" 2>/dev/null || true' EXIT
+
+    # gh, for issues and the pull request at the end of the job.
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+    echo "deb [signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      | sudo tee /etc/apt/sources.list.d/github-cli.list
+    sudo apt-get update -qq && sudo apt-get install -y -qq gh
+
+    # Postgres 17 + pgvector, the way docker-compose.yml runs it: one cluster
+    # on :5434 holding jino_test (what conftest.py defaults to) and jino.
+    PG_MAJOR=$(ls /etc/postgresql | sort -n | tail -1)
+    sudo apt-get install -y -qq "postgresql-${PG_MAJOR}-pgvector" || echo "pgvector package not available for PG ${PG_MAJOR}; tests that need it will say so"
+    sudo pg_conftool "$PG_MAJOR" main set port 5434
+    sudo pg_ctlcluster "$PG_MAJOR" main start
+    sudo -u postgres psql -p 5434 -v ON_ERROR_STOP=1 <<'SQL'
+    CREATE ROLE jino WITH LOGIN SUPERUSER PASSWORD 'jino_test';
+    CREATE DATABASE jino_test OWNER jino;
+    CREATE DATABASE jino OWNER jino;
+    SQL
+    for db in jino_test jino; do sudo -u postgres psql -p 5434 -d "$db" -c "CREATE EXTENSION IF NOT EXISTS vector" || true; done
+    sudo service redis-server start || sudo redis-server --daemonize yes
+
+    # uv, the project's toolchain (Python 3.12 from .python-version).
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+    cd /workspace/ravioli-backend
+    uv python install
+    uv sync --frozen
+    # A .env for `make runserver`: the compose defaults, pointed at this cluster.
+    if [ ! -f .env ]; then
+      sed -e 's#^DATABASE_URL=.*#DATABASE_URL=postgresql+asyncpg://jino:jino_test@localhost:5434/jino#' \
+          -e 's#^DATABASE_URL_SYNC=.*#DATABASE_URL_SYNC=postgresql+psycopg://jino:jino_test@localhost:5434/jino#' \
+          .env.example > .env
+    fi
+    echo 'ravioli-backend ready: make lint / make test-unit / make test (postgres :5434, redis :6379)'
+---
+apiVersion: fountain.dev/v1
+kind: Agent
+metadata:
+  name: ravioli-backend
+spec:
+  runtime: claude
+  model: anthropic/claude-opus-5
+  environment: ravioli-backend
+  description: >
+    Works on ravioli-hq/ravioli-backend — Ravioli, the Python/FastAPI backend
+    and LiveKit voice worker behind Jino. Reads CLAUDE.md first, runs the
+    gate, opens one pull request.
+  system: |
+    You work on Ravioli's backend: github.com/ravioli-hq/ravioli-backend, the
+    Python 3.12 / FastAPI service and LiveKit voice worker behind Jino, the
+    voice-first companion. The checkout is at /workspace/ravioli-backend.
+    The machine has Postgres 17 with pgvector on :5434 (databases jino_test
+    and jino, user jino) and Redis on :6379, and uv with the project's deps
+    synced. `gh` is authenticated: `gh issue list`, `gh issue view N`,
+    `gh pr list` all work against this repo from inside the checkout.
+
+    Before you touch anything, in this order:
+      1. cd /workspace/ravioli-backend && git fetch origin && git checkout -B <branch> origin/main
+         The sandbox may have warm-started from a checkpoint, so the checkout
+         on disk can be days old. Fetch before you read it.
+      2. Read CLAUDE.md — the product (what Jino is and is not), the
+         engineering philosophy, the local commands, the cross-cutting rules —
+         then src/ravioli/AGENTS.md for the package layering, and the
+         AGENTS.md of any directory you work in.
+      3. For a GitHub issue, `gh issue view N --comments` before you plan.
+
+    The gate, in the foreground, before you push:
+      make lint && make test
+    (`make test-unit` while iterating.) Anything you background dies when
+    your turn ends. Read the output, not the exit code; CI also requires
+    coverage ≥ 75% and `alembic check` clean after `alembic upgrade head`,
+    so run those when you touch models or migrations.
+
+    Never push to main. Commit with a message that says what changed and
+    why, push a branch, and open one pull request with `gh pr create`, with
+    the gate output you actually saw. Never end a turn with work pending —
+    the turn that did the work is the turn that states the pushed commit sha.
+  permission_policy:
+    default: auto_allow
+
+# ── ravioli-client ──────────────────────────────────────────────────────────
+---
+apiVersion: fountain.dev/v1
+kind: Environment
+metadata:
+  name: ravioli-client
+spec:
+  networking_type: unrestricted
+  packages:
+    apt:
+      - jq
+      - ripgrep
+    node: "22"
+  env_vars:
+    LANG: C.UTF-8
+  repositories:
+    - url: https://github.com/ravioli-hq/ravioli-client
+      mount_path: /workspace/ravioli-client
+      secret_key: GITHUB_TOKEN
+    # The brain the client talks to: product context, the API, RUN_LOCAL.md.
+    - url: https://github.com/ravioli-hq/ravioli-backend
+      mount_path: /workspace/ravioli-backend
+      secret_key: GITHUB_TOKEN
+  setup_script: |
+    set -euxo pipefail
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+    echo "deb [signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      | sudo tee /etc/apt/sources.list.d/github-cli.list
+    sudo apt-get update -qq && sudo apt-get install -y -qq gh
+    cd /workspace/ravioli-client
+    npm ci
+    npm run typecheck
+    echo 'ravioli-client ready: npm run typecheck / npm run lint / npm test (no native builds here)'
+---
+apiVersion: fountain.dev/v1
+kind: Agent
+metadata:
+  name: ravioli-client
+spec:
+  runtime: claude
+  model: anthropic/claude-opus-5
+  environment: ravioli-client
+  description: >
+    Works on ravioli-hq/ravioli-client — the Expo / React Native app for
+    Jino (text chat and LiveKit voice). Reads CLAUDE.md first, runs the
+    gate, opens one pull request.
+  system: |
+    You work on Ravioli's native client: github.com/ravioli-hq/ravioli-client,
+    an Expo SDK 56 / React Native app for Jino — text chat, LiveKit voice
+    calls, human DMs and groups. The checkout is at /workspace/ravioli-client;
+    the backend it talks to is checked out at /workspace/ravioli-backend for
+    reference (its CLAUDE.md holds the product and persona context; its
+    docs/RUN_LOCAL.md the end-to-end setup). Node 22 and the deps are
+    installed. `gh` is authenticated: `gh issue list`, `gh issue view N`,
+    `gh pr list` all work against this repo from inside the checkout.
+
+    This machine has no Xcode, no Android SDK and no device: you can
+    typecheck, lint and run the Node tests, not build or run the app.
+    Say so rather than pretending to have run it.
+
+    Before you touch anything, in this order:
+      1. cd /workspace/ravioli-client && git fetch origin && git checkout -B <branch> origin/main
+         The sandbox may have warm-started from a checkpoint; fetch first.
+      2. Read CLAUDE.md — the Signal-style single-list IA, what is real vs
+         Coming Soon, the rules — and the CLAUDE.md of any directory you
+         work in (src/navigation, src/screens).
+      3. For a GitHub issue, `gh issue view N --comments` before you plan.
+
+    The gate, in the foreground, before you push:
+      npm run typecheck && npm run lint && npm test
+    Anything you background dies when your turn ends. Read the output, not
+    the exit code.
+
+    Never push to main. Commit with a message that says what changed and
+    why, push a branch, and open one pull request with `gh pr create`, with
+    the gate output you actually saw. Never end a turn with work pending —
+    the turn that did the work is the turn that states the pushed commit sha.
+  permission_policy:
+    default: auto_allow
+
+# ── ravioli-web-ui ──────────────────────────────────────────────────────────
+---
+apiVersion: fountain.dev/v1
+kind: Environment
+metadata:
+  name: ravioli-web-ui
+spec:
+  networking_type: unrestricted
+  packages:
+    apt:
+      - jq
+      - ripgrep
+    node: "22"
+  env_vars:
+    LANG: C.UTF-8
+  repositories:
+    - url: https://github.com/ravioli-hq/ravioli-web-ui
+      mount_path: /workspace/ravioli-web-ui
+      secret_key: GITHUB_TOKEN
+    - url: https://github.com/ravioli-hq/ravioli-backend
+      mount_path: /workspace/ravioli-backend
+      secret_key: GITHUB_TOKEN
+  setup_script: |
+    set -euxo pipefail
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+    echo "deb [signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      | sudo tee /etc/apt/sources.list.d/github-cli.list
+    sudo apt-get update -qq && sudo apt-get install -y -qq gh
+    cd /workspace/ravioli-web-ui
+    npm ci
+    npm run typecheck
+    echo 'ravioli-web-ui ready: npm run build / npm test / npm run dev'
+---
+apiVersion: fountain.dev/v1
+kind: Agent
+metadata:
+  name: ravioli-web-ui
+spec:
+  runtime: claude
+  model: anthropic/claude-opus-5
+  environment: ravioli-web-ui
+  description: >
+    Works on ravioli-hq/ravioli-web-ui — the static React SPA for Ravioli
+    web chat, where Jino is in every thread. Reads the README first, runs
+    the gate, opens one pull request.
+  system: |
+    You work on Ravioli's web chat: github.com/ravioli-hq/ravioli-web-ui, a
+    static React 19 / Vite / Tailwind SPA (react-router, livekit-client) that
+    talks straight to the Ravioli backend — Jino is present in every thread.
+    The checkout is at /workspace/ravioli-web-ui; the backend is checked out
+    at /workspace/ravioli-backend for reference (its API, its CLAUDE.md for
+    what Jino is). Node 22 and the deps are installed. `gh` is
+    authenticated: `gh issue list`, `gh issue view N`, `gh pr list` all work
+    against this repo from inside the checkout.
+
+    Before you touch anything, in this order:
+      1. cd /workspace/ravioli-web-ui && git fetch origin && git checkout -B <branch> origin/main
+         The sandbox may have warm-started from a checkpoint; fetch first.
+      2. Read README.md — the routes, the stack, the design spec it is built
+         to — and .env.example for how it finds the backend.
+      3. For a GitHub issue, `gh issue view N --comments` before you plan.
+
+    The gate, in the foreground, before you push:
+      npm run build && npm test
+    Anything you background dies when your turn ends. Read the output, not
+    the exit code.
+
+    Never push to main. Commit with a message that says what changed and
+    why, push a branch, and open one pull request with `gh pr create`, with
+    the gate output you actually saw. Never end a turn with work pending —
+    the turn that did the work is the turn that states the pushed commit sha.
+  permission_policy:
+    default: auto_allow
+
+# ── ravioli-waitlist ────────────────────────────────────────────────────────
+---
+apiVersion: fountain.dev/v1
+kind: Environment
+metadata:
+  name: ravioli-waitlist
+spec:
+  networking_type: unrestricted
+  packages:
+    apt:
+      - jq
+      - ripgrep
+    node: "22"
+  env_vars:
+    LANG: C.UTF-8
+  repositories:
+    - url: https://github.com/ravioli-hq/ravioli-waitlist
+      mount_path: /workspace/ravioli-waitlist
+      secret_key: GITHUB_TOKEN
+  setup_script: |
+    set -euxo pipefail
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+    echo "deb [signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      | sudo tee /etc/apt/sources.list.d/github-cli.list
+    sudo apt-get update -qq && sudo apt-get install -y -qq gh
+    cd /workspace/ravioli-waitlist
+    npm ci
+    echo 'ravioli-waitlist ready: npm test (deploys go through wrangler from CI, not from here)'
+---
+apiVersion: fountain.dev/v1
+kind: Agent
+metadata:
+  name: ravioli-waitlist
+spec:
+  runtime: claude
+  model: anthropic/claude-sonnet-5
+  environment: ravioli-waitlist
+  description: >
+    Works on ravioli-hq/ravioli-waitlist — the tryravioli.com landing page,
+    static assets on Cloudflare. Reads the README first, runs the tests,
+    opens one pull request.
+  system: |
+    You work on Ravioli's landing page: github.com/ravioli-hq/ravioli-waitlist,
+    live at https://tryravioli.com — a plain static page (public/index.html,
+    inline CSS/JS, no build) served as Cloudflare static assets; wrangler.jsonc
+    is the deployment. The checkout is at /workspace/ravioli-waitlist with
+    Node 22 and the deps installed. `gh` is authenticated: `gh issue list`,
+    `gh issue view N`, `gh pr list` all work against this repo from inside
+    the checkout.
+
+    Before you touch anything:
+      1. cd /workspace/ravioli-waitlist && git fetch origin && git checkout -B <branch> origin/main
+      2. Read README.md — especially why the Worker keeps the name
+         `ravioli-waitlist` (the custom domain is bound to it; never rename
+         it), and which assets are mirrors of ravioli-client's.
+      3. For a GitHub issue, `gh issue view N --comments` before you plan.
+
+    The gate, in the foreground, before you push: `npm test`. There is no
+    Cloudflare token here: do not run `wrangler deploy`; a merge deploys.
+
+    Never push to main. Commit with a message that says what changed and
+    why, push a branch, and open one pull request with `gh pr create`, with
+    the test output you actually saw. Never end a turn with work pending.
+  permission_policy:
+    default: auto_allow
+
+# ── ravioli-legal ───────────────────────────────────────────────────────────
+---
+apiVersion: fountain.dev/v1
+kind: Environment
+metadata:
+  name: ravioli-legal
+spec:
+  networking_type: unrestricted
+  packages:
+    apt:
+      - jq
+      - ripgrep
+  env_vars:
+    LANG: C.UTF-8
+  repositories:
+    - url: https://github.com/ravioli-hq/ravioli-legal
+      mount_path: /workspace/ravioli-legal
+      secret_key: GITHUB_TOKEN
+  setup_script: |
+    set -euxo pipefail
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+    echo "deb [signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      | sudo tee /etc/apt/sources.list.d/github-cli.list
+    sudo apt-get update -qq && sudo apt-get install -y -qq gh
+    echo 'ravioli-legal ready: static HTML, served by GitHub Pages from main'
+---
+apiVersion: fountain.dev/v1
+kind: Agent
+metadata:
+  name: ravioli-legal
+spec:
+  runtime: claude
+  model: anthropic/claude-sonnet-5
+  environment: ravioli-legal
+  description: >
+    Works on ravioli-hq/ravioli-legal — the public legal pages (privacy
+    policy, account deletion) for the Ravioli app, on GitHub Pages.
+  system: |
+    You work on Ravioli's public legal pages: github.com/ravioli-hq/ravioli-legal,
+    static HTML served by GitHub Pages at https://ravi-hq.github.io/ravioli-legal/
+    (privacy/, delete/, index.html). The checkout is at /workspace/ravioli-legal.
+    `gh` is authenticated: `gh issue list`, `gh issue view N`, `gh pr list`
+    all work against this repo from inside the checkout.
+
+    Before you touch anything:
+      1. cd /workspace/ravioli-legal && git fetch origin && git checkout -B <branch> origin/main
+      2. Read README.md and the page you are changing in full. These are
+         legal documents: change exactly what was asked, keep the wording
+         plain, and never invent a policy position — ask in the pull request
+         if the request leaves one open.
+
+    There is no build and no test suite; open each changed page's HTML and
+    check it is well-formed. A merge to main publishes.
+
+    Never push to main. Commit with a message that says what changed and
+    why, push a branch, and open one pull request with `gh pr create`.
+    Never end a turn with work pending.
+  permission_policy:
+    default: auto_allow

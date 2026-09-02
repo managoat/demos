@@ -1,0 +1,669 @@
+/**
+ * Two stores.
+ *
+ * `WorkbenchProvider` is the signed-in user's: who they are, their projects
+ * (owned and shared with them), and toasts. It talks to the workbench
+ * server (src/lib/api.ts).
+ *
+ * `ProjectProvider` is one project's: the project record and its items
+ * (from the server), and Fountain as seen from inside the project — an SDK
+ * client whose base URL is `/f/<project>`, where the server forwards to
+ * Fountain on the owner's key and admits only this project's conversations.
+ * Plus the conversation list, the agent/environment/vault catalogs, and one
+ * SSE stream every open thread reads from; the server mixes `workbench`
+ * events into that stream when another member changes something.
+ */
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fountain } from "@agentshit/fountain-sdk";
+import type { Agent, Conversation, Environment, SandboxRecord, UserEvent, Vault } from "./types";
+import { computersOf } from "./lib/sidebar";
+import { api, ApiError, projectFountainBase, type ActivityDto, type ItemDto, type ItemPatch, type Me, type ProjectDto } from "./lib/api";
+import { startBody, type StartInput } from "./lib/start";
+import { readSse } from "./lib/sse";
+import { describeError } from "./lib/errors";
+import { feedRead, NO_ACTIVITY } from "./lib/feed";
+import { useDesktopNotify, type DesktopNotify } from "./lib/notify";
+import { removedMessage, retiredMessage } from "./lib/workbench";
+
+export type EventHandler = (ev: UserEvent) => void;
+
+const THREAD_STREAMS = ["acp", "stdout", "stage"];
+const LAST_PROJECT = "fountain-workbench.lastProject";
+
+/**
+ * How often the survey is re-read, and why it is a poll at all.
+ *
+ * The event stream this app runs on is a *project's* — `/f/<project>/…`,
+ * filtered per project by server/proxy.ts — and a browser holds exactly the
+ * one it is looking at. So there is no wire down which "the agent in your
+ * other project just finished" could arrive, and one request a minute is what
+ * tells this tab instead. It costs one Fountain conversation-list call per
+ * distinct project owner, which is what the projects list already spends on
+ * every visit, and it stops while the tab is in the background — a survey
+ * nobody can see is a request nobody asked for.
+ *
+ * Unless desktop notifications are on (lib/notify.ts), which is precisely the
+ * case where somebody has asked. A browser that stopped surveying the moment
+ * you looked away would be silent for the whole of the time it exists to
+ * cover; a background tab is throttled to about a minute anyway, which is
+ * what this already is.
+ */
+const SURVEY_MS = 60_000;
+
+/**
+ * How often to survey while an agent somewhere is blocked on a permission
+ * request. Fountain denies an unanswered one after five minutes, so the
+ * countdown on that row is the only thing in this app with a deadline, and a
+ * minute of it can be spent finding out. It is the same one request per owner;
+ * it goes back to a minute the moment nobody is waiting.
+ */
+const BLOCKED_MS = 15_000;
+
+/** The project this browser was in last, to land there again. */
+export function loadLastProject(): string | null {
+  try {
+    return localStorage.getItem(LAST_PROJECT);
+  } catch {
+    return null;
+  }
+}
+
+// ── the user's store ───────────────────────────────────────────────────────
+
+export interface Workbench {
+  me: Me;
+  projects: ProjectDto[];
+  projectsLoaded: boolean;
+  /** Every project you are in, surveyed: what is live in each, and what stopped unread across all of them. */
+  activity: ActivityDto;
+  /** The feed on the desktop as well as the bell: what the switch shows, and the switch. */
+  notify: DesktopNotify;
+  refreshProjects: () => Promise<ProjectDto[] | null>;
+  refreshActivity: () => Promise<void>;
+  /** This browser has just read a conversation, so take it out of the feed now rather than at the next survey. */
+  markRead: (conversationId: string) => void;
+  toast: (text: string, kind?: "info" | "error") => void;
+  signOut: () => void;
+}
+
+const WorkbenchCtx = createContext<Workbench | null>(null);
+
+export function useWorkbench(): Workbench {
+  const w = useContext(WorkbenchCtx);
+  if (!w) throw new Error("useWorkbench outside WorkbenchProvider");
+  return w;
+}
+
+interface Toast {
+  id: number;
+  text: string;
+  kind: "info" | "error";
+}
+
+export function WorkbenchProvider({ me, onSignOut, children }: { me: Me; onSignOut: () => void; children: ReactNode }) {
+  const [projects, setProjects] = useState<ProjectDto[]>([]);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
+  const [activity, setActivity] = useState<ActivityDto>(NO_ACTIVITY);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const toast = useCallback((text: string, kind: Toast["kind"] = "info") => {
+    const id = Date.now() + Math.random();
+    setToasts((ts) => [...ts, { id, text, kind }]);
+    setTimeout(() => setToasts((ts) => ts.filter((t) => t.id !== id)), 5000);
+  }, []);
+
+  const refreshProjects = useCallback(async () => {
+    try {
+      const list = await api.projects();
+      setProjects(list);
+      setProjectsLoaded(true);
+      return list;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) onSignOut();
+      else toast(describeError(err), "error");
+      return null;
+    }
+  }, [onSignOut, toast]);
+
+  const refreshActivity = useCallback(async () => {
+    try {
+      setActivity(await api.activity());
+    } catch {
+      // A survey that did not come back leaves the last one standing: a feed
+      // that emptied itself on one failed request would say "nothing waiting",
+      // which is the one thing it must never say wrongly.
+    }
+  }, []);
+
+  const markRead = useCallback((conversationId: string) => {
+    setActivity((a) => feedRead(a, conversationId));
+  }, []);
+
+  useEffect(() => {
+    void refreshProjects();
+    void refreshActivity();
+  }, [refreshProjects, refreshActivity]);
+
+  // Announcing what each survey turns up that the last did not, once asked to.
+  const notify = useDesktopNotify(activity);
+  const announcing = notify.state === "on";
+
+  // See SURVEY_MS: nothing streams across projects, so this is what notices.
+  // Coming back to the tab surveys straight away — that is the moment the
+  // question "what happened while I was away" is actually being asked — and
+  // it keeps running while the tab is hidden if there is a desktop
+  // notification waiting on it, which is the case somebody asked for.
+  //
+  // A hidden tab's timers are throttled to about a minute whatever this says,
+  // so BLOCKED_MS is a cadence for a tab on screen. Hidden, a blocked agent is
+  // found up to a minute late — still four of its five minutes left, and the
+  // notification is what makes that minute matter rather than the poll.
+  const blocked = activity.waiting.length > 0;
+  useEffect(() => {
+    const tick = () => {
+      if (announcing || document.visibilityState === "visible") void refreshActivity();
+    };
+    const timer = window.setInterval(tick, blocked ? BLOCKED_MS : SURVEY_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [refreshActivity, blocked, announcing]);
+
+  const signOut = useCallback(() => {
+    void api.signOut().catch(() => undefined);
+    onSignOut();
+  }, [onSignOut]);
+
+  const value = useMemo<Workbench>(
+    () => ({ me, projects, projectsLoaded, activity, notify, refreshProjects, refreshActivity, markRead, toast, signOut }),
+    [me, projects, projectsLoaded, activity, notify, refreshProjects, refreshActivity, markRead, toast, signOut],
+  );
+
+  return (
+    <WorkbenchCtx.Provider value={value}>
+      {children}
+      <div className="toasts">
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast ${t.kind}`}>
+            {t.text}
+          </div>
+        ))}
+      </div>
+    </WorkbenchCtx.Provider>
+  );
+}
+
+// ── one project's store ────────────────────────────────────────────────────
+
+export interface ProjectStore {
+  project: ProjectDto;
+  items: ItemDto[];
+  isOwner: boolean;
+  /** Fountain from inside this project: the owner's key, this project's conversations. */
+  fountain: Fountain;
+  conversations: Conversation[];
+  /** Sandbox records for the project's live computers, by id — the list carries only `sandbox_id`. */
+  sandboxes: Map<string, SandboxRecord>;
+  agents: Map<string, Agent>;
+  environments: Map<string, Environment>;
+  vaults: Map<string, Vault>;
+  resourcesLoaded: boolean;
+  connected: boolean;
+  error: string | null;
+  refresh: () => Promise<Conversation[] | null>;
+  refreshResources: () => Promise<void>;
+  reload: () => Promise<void>;
+  /** Events for one conversation, live. Returns the unsubscribe. */
+  subscribe: (conversationId: string, handler: EventHandler) => () => void;
+  /**
+   * The last `snapshot` notice off the stream: a hook in a sandbox posted the
+   * git state of a checkout (server/snapshots.ts). The Changes view on that
+   * item re-reads the state and pulls the diff for that computer.
+   */
+  lastSnapshot: SnapshotNotice | null;
+  toast: Workbench["toast"];
+  // Mutations go to the server; the stream (or the returned record) brings the change back.
+  updateProject: (patch: Partial<Pick<ProjectDto, "name" | "notes" | "environmentId" | "vaultId" | "defaultAgentId">>) => Promise<void>;
+  addMember: (email: string) => Promise<void>;
+  removeMember: (email: string) => Promise<void>;
+  createItem: (title: string, notes?: string) => Promise<ItemDto | null>;
+  /** Change one. `proposal: null` dismisses a teammate's proposal without closing anything. */
+  updateItem: (id: string, patch: ItemPatch) => Promise<void>;
+  removeItem: (id: string) => Promise<void>;
+  addTeammate: (itemId: string, agentId: string) => Promise<void>;
+  removeTeammate: (itemId: string, agentId: string) => Promise<void>;
+  /**
+   * Take computers out of a work item — their work is over and the rows are in
+   * the way. Whatever is still live on them is retired first, by the server,
+   * and the conversation list comes back without them. One key or a sweep's
+   * worth; either way it is one request.
+   */
+  removeComputers: (itemId: string, keys: string[]) => Promise<void>;
+  /** Put one back. Nothing was deleted, so its conversations simply return. */
+  restoreComputer: (itemId: string, key: string) => Promise<void>;
+  /**
+   * Start a conversation on a work item — which is also how a teammate gets
+   * onto one: the server puts them there. Throws on failure, so the caller
+   * can say so where it asked.
+   */
+  startConversation: (input: StartInput) => Promise<Conversation>;
+}
+
+export interface SnapshotNotice {
+  itemId: string;
+  computer: string;
+  repo: string;
+  source: string;
+  /** When this browser heard it, so two notices for one computer are two ticks. */
+  at: number;
+}
+
+const ProjectCtx = createContext<ProjectStore | null>(null);
+
+export function useProject(): ProjectStore {
+  const s = useContext(ProjectCtx);
+  if (!s) throw new Error("useProject outside ProjectProvider");
+  return s;
+}
+
+/** The project store when inside one; null on the projects list. */
+export function useProjectMaybe(): ProjectStore | null {
+  return useContext(ProjectCtx);
+}
+
+export function makeProjectClient(projectId: string): Fountain {
+  // The bearer is a placeholder: the server authenticates the session cookie and swaps in the owner's key.
+  // Retiring a conversation waits for Fountain to tear the computer down, which can take longer than the SDK's 30 s default.
+  return new Fountain({ baseUrl: projectFountainBase(projectId), apiKey: "session", appUrl: "", timeoutMs: 120_000 });
+}
+
+export function ProjectProvider({ projectId, children, fallback }: { projectId: string; children: ReactNode; fallback: (state: "loading" | "missing") => ReactNode }) {
+  const { toast, refreshProjects, signOut } = useWorkbench();
+  const fountain = useMemo(() => makeProjectClient(projectId), [projectId]);
+  const [project, setProject] = useState<ProjectDto | null>(null);
+  const [items, setItems] = useState<ItemDto[]>([]);
+  const [missing, setMissing] = useState(false);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [sandboxes, setSandboxes] = useState<Map<string, SandboxRecord>>(new Map());
+  const [lastSnapshot, setLastSnapshot] = useState<SnapshotNotice | null>(null);
+  const [agents, setAgents] = useState<Map<string, Agent>>(new Map());
+  const [environments, setEnvironments] = useState<Map<string, Environment>>(new Map());
+  const [vaults, setVaults] = useState<Map<string, Vault>>(new Map());
+  const [resourcesLoaded, setResourcesLoaded] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const handlers = useRef(new Map<string, Set<EventHandler>>());
+
+  const reload = useCallback(async () => {
+    try {
+      const { project, items } = await api.project(projectId);
+      setProject(project);
+      setItems(items);
+      setMissing(false);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) setMissing(true);
+      else if (err instanceof ApiError && err.status === 401) signOut();
+      else toast(describeError(err), "error");
+    }
+  }, [projectId, toast, signOut]);
+
+  const refresh = useCallback(async () => {
+    try {
+      const list = await fountain.conversations();
+      setConversations(list);
+      setError(null);
+      return list;
+    } catch (err) {
+      setError(describeError(err));
+      return null;
+    }
+  }, [fountain]);
+
+  const refreshResources = useCallback(async () => {
+    try {
+      const [a, e, v] = await Promise.all([fountain.agents.list(), fountain.environments.list(), fountain.vaults.list()]);
+      setAgents(new Map(a.map((x) => [x.id, x])));
+      setEnvironments(new Map(e.map((x) => [x.id, x])));
+      setVaults(new Map(v.map((x) => [x.id, x])));
+      setResourcesLoaded(true);
+    } catch (err) {
+      setError(describeError(err));
+    }
+  }, [fountain]);
+
+  useEffect(() => {
+    void reload();
+    void refresh();
+    void refreshResources();
+    try {
+      localStorage.setItem(LAST_PROJECT, projectId);
+    } catch {
+      // fine
+    }
+  }, [reload, refresh, refreshResources, projectId]);
+
+  // The list does not say what a computer is called or how it is doing; its
+  // record does. Read it for every live computer, and again whenever a
+  // conversation on one changes state — that is when starting becomes ready.
+  const liveKey = computersOf(conversations, sandboxes)
+    .filter((c) => c.sandboxId && c.live)
+    .map((c) => `${c.key}:${c.conversations.map((x) => x.status).join("")}`)
+    .join(",");
+  useEffect(() => {
+    if (!liveKey) return;
+    let cancelled = false;
+    for (const part of liveKey.split(",")) {
+      const id = part.split(":")[0]!;
+      fountain
+        .sandbox(id)
+        .then((rec) => {
+          if (cancelled) return;
+          setSandboxes((m) => new Map(m).set(rec.id, rec));
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [liveKey, fountain]);
+
+  // Debounced refreshes: stage events arrive in bursts, and so do workbench notices.
+  const timers = useRef<{ list: number | null; tree: number | null }>({ list: null, tree: null });
+  const scheduleRefresh = useCallback(() => {
+    if (timers.current.list !== null) return;
+    timers.current.list = window.setTimeout(() => {
+      timers.current.list = null;
+      void refresh();
+    }, 300);
+  }, [refresh]);
+  const scheduleReload = useCallback(() => {
+    if (timers.current.tree !== null) return;
+    timers.current.tree = window.setTimeout(() => {
+      timers.current.tree = null;
+      void reload();
+      void refreshProjects();
+    }, 300);
+  }, [reload, refreshProjects]);
+
+  const subscribe = useCallback((conversationId: string, handler: EventHandler) => {
+    let set = handlers.current.get(conversationId);
+    if (!set) {
+      set = new Set();
+      handlers.current.set(conversationId, set);
+    }
+    set.add(handler);
+    return () => {
+      set!.delete(handler);
+    };
+  }, []);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    let lastEventId: string | null = null;
+    let backoff = 1000;
+    let stopped = false;
+
+    const connect = () => {
+      if (stopped) return;
+      const qs = new URLSearchParams({ streams: THREAD_STREAMS.join(","), blocks: "true" });
+      void readSse(`${projectFountainBase(projectId)}/api/events/stream?${qs}`, {
+        lastEventId,
+        signal: ctrl.signal,
+        onOpen: () => {
+          setConnected(true);
+          backoff = 1000;
+          void refresh();
+        },
+        onMessage: (msg) => {
+          if (msg.id) lastEventId = msg.id;
+          if (msg.event === "conversations") {
+            scheduleRefresh();
+            return;
+          }
+          if (msg.event === "workbench") {
+            // A snapshot changes no record of the project's own — the item,
+            // its members, its settings stand — so it is not a reload; it is
+            // a cue to whoever is showing that computer's changes.
+            let note: Record<string, unknown> = {};
+            try {
+              note = JSON.parse(msg.data) as Record<string, unknown>;
+            } catch {
+              // an older server's notice carried no body
+            }
+            if (note.kind === "snapshot") {
+              setLastSnapshot({ itemId: String(note.itemId ?? ""), computer: String(note.computer ?? ""), repo: String(note.repo ?? ""), source: String(note.source ?? ""), at: Date.now() });
+              return;
+            }
+            scheduleReload();
+            return;
+          }
+          let ev: UserEvent;
+          try {
+            ev = JSON.parse(msg.data) as UserEvent;
+          } catch {
+            return;
+          }
+          if (msg.id) ev.id = Number(msg.id);
+          if (!ev.kind && (msg.event === "output" || msg.event === "stage")) ev.kind = msg.event;
+          handlers.current.get(ev.conversation_id)?.forEach((h) => h(ev));
+          if (ev.kind === "stage") {
+            scheduleRefresh();
+          } else if (ev.kind === "output") {
+            setConversations((cs) =>
+              cs.map((c) =>
+                c.id === ev.conversation_id ? { ...c, last_active_at: ev.ts, unread: c.unread || !openConversation(c.id) } : c,
+              ),
+            );
+          }
+        },
+        onClose: () => {
+          setConnected(false);
+          if (stopped) return;
+          window.setTimeout(connect, backoff);
+          backoff = Math.min(backoff * 2, 15000);
+        },
+      });
+    };
+    connect();
+    return () => {
+      stopped = true;
+      ctrl.abort();
+    };
+  }, [projectId, refresh, scheduleRefresh, scheduleReload]);
+
+  // ── mutations ──────────────────────────────────────────────────────────
+
+  const run = useCallback(
+    async (fn: () => Promise<unknown>) => {
+      try {
+        await fn();
+        await reload();
+      } catch (err) {
+        toast(describeError(err), "error");
+      }
+    },
+    [reload, toast],
+  );
+
+  const updateProject = useCallback<ProjectStore["updateProject"]>(
+    async (patch) => {
+      // One write per pause in the typing, not per keystroke — the page holds
+      // the draft (src/lib/draft.ts). Show the patch now so everywhere else a
+      // project is named keeps up, save it, let the reload settle it.
+      setProject((p) => (p ? { ...p, ...patch } : p));
+      await run(() => api.patchProject(projectId, patch));
+      void refreshProjects();
+    },
+    [projectId, run, refreshProjects],
+  );
+  const addMember = useCallback<ProjectStore["addMember"]>((email) => run(() => api.addMember(projectId, email)), [projectId, run]);
+  const removeMember = useCallback<ProjectStore["removeMember"]>((email) => run(() => api.removeMember(projectId, email)), [projectId, run]);
+  const createItem = useCallback<ProjectStore["createItem"]>(
+    async (title, notes = "") => {
+      try {
+        const w = await api.createItem(projectId, { title, notes });
+        setItems((ws) => (ws.some((x) => x.id === w.id) ? ws : [...ws, w]));
+        void refreshProjects();
+        return w;
+      } catch (err) {
+        toast(describeError(err), "error");
+        return null;
+      }
+    },
+    [projectId, toast, refreshProjects],
+  );
+  const updateItem = useCallback<ProjectStore["updateItem"]>(
+    async (id, patch) => {
+      // Deciding the status settles any proposal standing on the item, here as
+      // on the server — the question has been answered, so it stops being asked.
+      setItems((ws) => ws.map((w) => (w.id === id ? { ...w, ...patch, ...(patch.status === undefined ? {} : { proposal: null }) } : w)));
+      // Closing an item — done, won't do or on ice — retires its computers (server/projects.ts):
+      // say what went, and show the conversations as retired without waiting for Fountain's notice.
+      await run(async () => {
+        const { retired } = await api.patchItem(projectId, id, patch);
+        if (!retired) return;
+        const msg = retiredMessage(retired, patch.status);
+        if (msg) toast(msg.text, msg.kind);
+        if (retired.conversations > 0) void refresh();
+      });
+      void refreshProjects();
+    },
+    [projectId, run, refresh, refreshProjects, toast],
+  );
+  const removeItem = useCallback<ProjectStore["removeItem"]>(
+    async (id) => {
+      setItems((ws) => ws.filter((w) => w.id !== id));
+      await run(() => api.deleteItem(projectId, id));
+      void refreshProjects();
+    },
+    [projectId, run, refreshProjects],
+  );
+  const addTeammate = useCallback<ProjectStore["addTeammate"]>(
+    async (itemId, agentId) => {
+      const w = items.find((x) => x.id === itemId);
+      if (!w || w.agentIds.includes(agentId)) return;
+      await updateItem(itemId, { agentIds: [...w.agentIds, agentId] });
+    },
+    [items, updateItem],
+  );
+  const removeTeammate = useCallback<ProjectStore["removeTeammate"]>(
+    async (itemId, agentId) => {
+      const w = items.find((x) => x.id === itemId);
+      if (!w) return;
+      await updateItem(itemId, { agentIds: w.agentIds.filter((x) => x !== agentId) });
+    },
+    [items, updateItem],
+  );
+  const removeComputers = useCallback<ProjectStore["removeComputers"]>(
+    async (itemId, keys) => {
+      if (keys.length === 0) return;
+      await run(async () => {
+        const { retired, removed } = await api.removeComputers(projectId, itemId, keys);
+        // Always say something. The row leaving is the obvious half; where it
+        // went is not, and a removal is undone from a fold on the work item
+        // that nobody would think to look for unless told it is there.
+        const msg = removedMessage(retired, removed);
+        if (msg) toast(msg.text, msg.kind);
+      });
+      void refresh();
+    },
+    [projectId, run, refresh, toast],
+  );
+  const restoreComputer = useCallback<ProjectStore["restoreComputer"]>(
+    async (itemId, key) => {
+      await run(() => api.restoreComputer(projectId, itemId, key));
+      void refresh();
+    },
+    [projectId, run, refresh],
+  );
+  const startConversation = useCallback<ProjectStore["startConversation"]>(
+    async (input) => {
+      const conversation = await fountain.api.data<Conversation>("POST", "/api/conversations", { body: startBody(projectId, input) });
+      if (input.join && conversation.sandbox_id !== input.join.sandboxId) {
+        toast("This Fountain does not share a computer between conversations yet — started on a new one.", "error");
+      }
+      void refresh();
+      void reload(); // the server put the teammate on the item
+      return conversation;
+    },
+    [fountain, projectId, toast, refresh, reload],
+  );
+
+  const value = useMemo<ProjectStore | null>(
+    () =>
+      project
+        ? {
+            project,
+            items,
+            isOwner: project.role === "owner",
+            fountain,
+            conversations,
+            sandboxes,
+            agents,
+            environments,
+            vaults,
+            resourcesLoaded,
+            connected,
+            error,
+            refresh,
+            refreshResources,
+            reload,
+            subscribe,
+            lastSnapshot,
+            toast,
+            updateProject,
+            addMember,
+            removeMember,
+            createItem,
+            updateItem,
+            removeItem,
+            addTeammate,
+            removeTeammate,
+            removeComputers,
+            restoreComputer,
+            startConversation,
+          }
+        : null,
+    [
+      project,
+      items,
+      fountain,
+      conversations,
+      sandboxes,
+      agents,
+      environments,
+      vaults,
+      resourcesLoaded,
+      connected,
+      error,
+      refresh,
+      refreshResources,
+      reload,
+      subscribe,
+      lastSnapshot,
+      toast,
+      updateProject,
+      addMember,
+      removeMember,
+      createItem,
+      updateItem,
+      removeItem,
+      addTeammate,
+      removeTeammate,
+      removeComputers,
+      restoreComputer,
+      startConversation,
+    ],
+  );
+
+  if (missing) return <>{fallback("missing")}</>;
+  if (!value) return <>{fallback("loading")}</>;
+  return <ProjectCtx.Provider value={value}>{children}</ProjectCtx.Provider>;
+}
+
+/** Whether the conversation is the one open on screen (its unread state is being cleared). */
+function openConversation(id: string): boolean {
+  return window.location.hash.endsWith(`/c/${id}`);
+}

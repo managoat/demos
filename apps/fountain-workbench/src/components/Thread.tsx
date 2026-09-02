@@ -1,0 +1,434 @@
+/**
+ * One conversation: its transcript so far (SDK history), live events from the
+ * store's stream, and a composer. The Changes button opens the git state and
+ * diff for this conversation's computer beside the transcript; attribution
+ * stays at computer level because another conversation may share its disk.
+ *
+ * Two things land a reader on a turn rather than at the bottom: a ⌘K hit,
+ * which arrives as `focusTurnId` off the route, and ⌘F over this conversation
+ * (`ThreadFind`), which walks its own hits without leaving the page. Both end
+ * at the same place — the turn scrolled to and marked in the margin.
+ */
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useProject, useWorkbench } from "../store";
+import type { Stream } from "@agentshit/fountain-sdk";
+import type { Conversation, LogEvent, Turn, UserEvent } from "../types";
+import { arrange } from "../lib/blocks";
+import { fold, stageLine } from "../lib/turns";
+import { brokerStageDetail } from "../lib/egress";
+import { formatTime } from "../lib/format";
+import { describeError } from "../lib/errors";
+import { BlockView } from "./Blocks";
+import { StatusPill } from "./StatusPill";
+import { AgentAvatar } from "./AgentAvatar";
+import { AttachButton, AttachmentStrip, useAttachments } from "./Attachments";
+import { FindBar, useThreadFind } from "./ThreadFind";
+import { turnImageUrl } from "../lib/api";
+import { composerHint, coarsePointer } from "../lib/touch";
+import { computersOf, itemIdOf } from "../lib/sidebar";
+import { ConversationChanges, snapshotFileCount, useItemSnapshots } from "./Changes";
+
+const HISTORY_STREAMS: Stream[] = ["acp", "stdout", "stage"];
+
+export function Thread({ conversationId, onClose, context, focusTurnId }: { conversationId: string; onClose?: () => void; context?: ReactNode; focusTurnId?: string | null }) {
+  const { project, items, fountain, conversations, agents, sandboxes, subscribe, toast, refresh } = useProject();
+  // Reading a conversation is what takes it out of the feed in the top bar.
+  const { markRead } = useWorkbench();
+  const listed = conversations.find((c) => c.id === conversationId) ?? null;
+  const [fetched, setFetched] = useState<Conversation | null>(null);
+  // The list has the live status; the show has the sandbox (the list never embeds it).
+  const conversation = listed ? { ...listed, sandbox: listed.sandbox ?? fetched?.sandbox ?? null } : fetched;
+  const sandbox = conversation?.sandbox ?? (conversation?.sandbox_id ? sandboxes.get(conversation.sandbox_id) ?? null : null);
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [events, setEvents] = useState<LogEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showStdout, setShowStdout] = useState(false);
+  const [showChanges, setShowChanges] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const attachments = useAttachments(useCallback((message: string) => toast(message, "error"), [toast]));
+  const scroller = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLElement>(null);
+  // Arriving on a turn (a search hit) means reading there, not at the bottom.
+  const stickToBottom = useRef(!focusTurnId);
+  const landed = useRef<string | null>(null);
+  const find = useThreadFind({ conversationId, root });
+  // ⌘F wins over the turn the route named: it is where the reader is looking now.
+  const focus = find.at ?? focusTurnId ?? null;
+
+  const agent = conversation?.agent_id ? agents.get(conversation.agent_id) ?? null : null;
+  const who = agent?.name ?? conversation?.runtime ?? "agent";
+  const item = conversation ? items.find((w) => w.id === itemIdOf(conversation)) ?? null : null;
+  const computer = useMemo(() => {
+    if (!conversation || !item) return null;
+    const itemConversations = conversations.filter((c) => itemIdOf(c) === item.id);
+    if (!itemConversations.some((c) => c.id === conversation.id)) itemConversations.push(conversation);
+    return computersOf(itemConversations, sandboxes).find((c) => c.conversations.some((candidate) => candidate.id === conversation.id)) ?? null;
+  }, [conversation, item, conversations, sandboxes]);
+  const changeSnapshots = useItemSnapshots(item?.id ?? null);
+  const changedFiles = computer ? snapshotFileCount(changeSnapshots ?? [], computer.key) : 0;
+
+  // Load: the record if the list has not got it, the turns, and the history.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setTurns([]);
+    setEvents([]);
+    const handle = fountain.resume(conversationId);
+    void (async () => {
+      try {
+        const [record, ts, history] = await Promise.all([
+          handle.get(),
+          handle.turns(),
+          handle.history({ streams: HISTORY_STREAMS }),
+        ]);
+        if (cancelled) return;
+        if (record) setFetched(record);
+        setTurns(ts);
+        // Live events may have landed while the history was in flight; keep them.
+        setEvents((prev) => mergeById(history, prev));
+        // Fountain's read mark is what the feed is surveyed against, so move
+        // the local one with it rather than leaving the row up until the next
+        // survey — a minute of watching something you have just opened.
+        void handle.markRead().then(() => {
+          markRead(conversationId);
+          refresh();
+        });
+      } catch (err) {
+        if (!cancelled) toast(describeError(err), "error");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, fountain, toast, refresh, markRead]);
+
+  // Live: append what the user-wide stream delivers for this conversation.
+  useEffect(() => {
+    const seen = new Set<number>();
+    return subscribe(conversationId, (ev: UserEvent) => {
+      if (seen.has(ev.id)) return;
+      seen.add(ev.id);
+      setEvents((prev) => (prev.some((e) => e.id === ev.id) ? prev : [...prev, ev]));
+      if (ev.kind === "stage" && ev.stage === "turn") {
+        // A turn began or ended: re-read the turn list so the prompt and status show.
+        void fountain.resume(conversationId).turns().then(setTurns).catch(() => undefined);
+      }
+    });
+  }, [conversationId, subscribe, fountain]);
+
+  // The conversation changed under us (a status flip, a turn sent from
+  // elsewhere): re-read the turns, and the feed from where we have read to.
+  // The user-wide stream only follows unfinished conversations, so one that
+  // fails or finishes quickly can leave a gap the stream never fills.
+  useEffect(() => {
+    if (!conversation || loading) return;
+    const handle = fountain.resume(conversationId);
+    if ((conversation.turn_count ?? 0) > turns.length) {
+      void handle.turns().then(setTurns).catch(() => undefined);
+    }
+    const after = events.reduce((m, e) => Math.max(m, e.id), 0);
+    void handle
+      .history({ streams: HISTORY_STREAMS, after })
+      .then((more) => {
+        if (more.length) setEvents((prev) => mergeById(prev, more));
+      })
+      .catch(() => undefined);
+  }, [conversation?.turn_count, conversation?.status, conversation?.sandbox?.status, loading]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const folded = useMemo(() => fold(events, turns), [events, turns]);
+  const visible = useMemo(() => new Set(showStdout ? ["acp", "stdout"] : ["acp"]), [showStdout]);
+
+  // Follow the bottom unless the reader scrolled up.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || !stickToBottom.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [events, turns, loading]);
+
+  // A search hit names a turn: scroll to it once it is on screen — once, so
+  // that output arriving afterwards does not keep yanking the view back. Each
+  // landing is keyed, ⌘F's by which hit it is, so stepping between two hits on
+  // one turn (its prompt and its reply both matched) still counts as a move.
+  const routeLanding = focusTurnId ? `route:${focusTurnId}` : null;
+  const landing = find.at ? `find:${find.at}#${find.index}` : routeLanding;
+  useEffect(() => {
+    if (!focus || !landing || landed.current === landing) return;
+    const el = scroller.current?.querySelector<HTMLElement>(`[data-turn="${CSS.escape(focus)}"]`);
+    if (!el) return;
+    landed.current = landing;
+    el.scrollIntoView({ block: "center" });
+  }, [focus, landing, turns, events]);
+
+  // ⌘F moved the reader, so the turn the route named is no longer where they
+  // are: closing the box must leave them at the hit, not throw them back. A
+  // *new* turn on the route is a new landing and still scrolls.
+  useEffect(() => {
+    if (find.at && routeLanding) landed.current = routeLanding;
+  }, [find.at, routeLanding]);
+
+  const onScroll = useCallback(() => {
+    const el = scroller.current;
+    if (!el) return;
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  }, []);
+
+  async function send(e?: FormEvent) {
+    e?.preventDefault();
+    const prompt = draft.trim();
+    const images = attachments.payload;
+    // A screenshot on its own is a prompt: "here is what it looks like".
+    if ((!prompt && !images) || sending) return;
+    setSending(true);
+    try {
+      await fountain.request("POST", `/api/conversations/${conversationId}/prompts`, { body: images ? { prompt, images } : { prompt } });
+      setDraft("");
+      attachments.clear();
+      stickToBottom.current = true;
+      void refresh();
+    } catch (err) {
+      toast(describeError(err), "error");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  // Answering an `ask` permission the agent is held on. The card owns what to
+  // say about a refusal or a lost race (a 409 — the first answer wins), and
+  // the resolution arrives on the stream as `request · done` for every client
+  // watching, this one included, so nothing here has to re-read anything.
+  const answer = useCallback(
+    async (requestId: string, optionId: string) => {
+      await fountain.request("POST", `/api/conversations/${conversationId}/requests/${encodeURIComponent(requestId)}`, { body: { option_id: optionId } });
+    },
+    [fountain, conversationId],
+  );
+
+  // A soft keyboard has no Shift+Enter, so on one Enter writes the newline and
+  // the ⏎ button sends (src/lib/touch.ts).
+  const touch = useMemo(() => coarsePointer(), []);
+  function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
+    // Mid-composition Enter closes an IME's candidate list; it is not a send.
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === "Enter" && !e.shiftKey && !touch) {
+      e.preventDefault();
+      void send();
+    }
+  }
+
+  const running = conversation?.status === "running" || conversation?.status === "pending";
+  const lastTurn = folded.turns[folded.turns.length - 1];
+  const waiting = running && (!lastTurn || lastTurn.turn.status === "running" || lastTurn.turn.status === "pending");
+
+  const retired = conversation?.status === "terminated";
+
+  return (
+    <section ref={root} className={`thread${attachments.dragging && !retired ? " dropping" : ""}`} {...(retired ? {} : attachments.dropzone)}>
+      <header className="thread-head">
+        {onClose && (
+          <button className="icon" onClick={onClose} title="Close">
+            ×
+          </button>
+        )}
+        {agent && <AgentAvatar agent={agent} size={28} />}
+        <div className="thread-title">
+          <div className="name">{conversation?.title ?? who}</div>
+          <div className="sub muted small">
+            {context ? <>{context} · </> : null}
+            {who}
+            {sandbox ? ` · 🖥 ${sandbox.sprite_name.replace(/^fountain-[0-9a-f]{8}-/, "")} (${sandbox.status})` : ""}
+          </div>
+        </div>
+        {conversation && <StatusPill status={conversation.status} sandbox={sandbox?.status} />}
+        <button className={`icon${find.open ? " on" : ""}`} onClick={find.toggle} title="Find in this conversation (⌘F)" aria-label="Find in this conversation">
+          ⌕
+        </button>
+        <label className="check small">
+          <input type="checkbox" checked={showStdout} onChange={(e) => setShowStdout(e.target.checked)} /> stdout
+        </label>
+        {item && computer?.sandboxId && (
+          <button
+            type="button"
+            className={`secondary small changes-toggle${showChanges ? " on" : ""}`}
+            onClick={() => setShowChanges((open) => !open)}
+            aria-expanded={showChanges}
+            aria-controls="conversation-changes"
+          >
+            Changes{changedFiles > 0 ? ` ${changedFiles}` : ""}
+          </button>
+        )}
+        {running && (
+          <button
+            className="secondary small"
+            onClick={() => fountain.resume(conversationId).interrupt().then(() => toast("Interrupted")).catch((err) => toast(describeError(err), "error"))}
+          >
+            Interrupt
+          </button>
+        )}
+        {conversation && conversation.status !== "terminated" && (
+          <TwoStep label="Retire" onConfirm={() => fountain.resume(conversationId).terminate().then(() => refresh()).catch((err) => toast(describeError(err), "error"))} />
+        )}
+      </header>
+
+      {find.open && (
+        <FindBar
+          q={find.q}
+          onQ={find.setQ}
+          onKeyDown={find.onKeyDown}
+          input={find.input}
+          count={find.hits.length}
+          index={find.index}
+          onStep={find.step}
+          onClose={find.close}
+          searching={find.searching}
+          error={find.error}
+          hasMore={find.hasMore}
+          pending={waiting}
+        />
+      )}
+
+      <div className="thread-work">
+        <div className="thread-main">
+          <div className="transcript term" ref={scroller} onScroll={onScroll}>
+            {loading && <div className="term-line muted"># loading…</div>}
+            {folded.setup.length > 0 && <SetupLine events={folded.setup} done={folded.turns.length > 0} />}
+            {folded.turns.map(({ turn, events: evs }) => (
+              <div
+                className={`turn ${turn.status}${turn.id === focus ? " found" : find.marked.has(turn.id) ? " hit" : ""}`}
+                key={turn.id}
+                data-turn={turn.id}
+              >
+                <div className="term-prompt">
+                  <span className="ps1" aria-hidden="true">
+                    ❯
+                  </span>
+                  <span className="cmd">{turn.prompt}</span>
+                  <span className="term-meta">
+                    #{turn.turn_number} {formatTime(turn.started_at ?? turn.inserted_at)}
+                    {turn.status === "failed" ? " ✕ failed" : turn.status === "interrupted" ? " ⏹ interrupted" : ""}
+                  </span>
+                </div>
+                {(turn.image_count ?? 0) > 0 && (
+                  <div className="turn-images">
+                    {Array.from({ length: turn.image_count ?? 0 }, (_, i) => (
+                      <a key={i} href={turnImageUrl(project.id, conversationId, turn.id, i)} target="_blank" rel="noreferrer">
+                        <img src={turnImageUrl(project.id, conversationId, turn.id, i)} alt={`attachment ${i + 1}`} loading="lazy" />
+                      </a>
+                    ))}
+                  </div>
+                )}
+                <div className="term-out">
+                  {arrange(evs, visible).map((b, i) => (
+                    <BlockView key={`${turn.id}-${i}`} block={b} onAnswer={answer} />
+                  ))}
+                </div>
+              </div>
+            ))}
+            {folded.loose.length > 0 && <div className="term-line muted"># {stageLine(folded.loose)}</div>}
+            {waiting && (
+              <div className="term-line working" aria-label="working">
+                <span className="cursor">▍</span>
+              </div>
+            )}
+          </div>
+
+          <form className="composer term" onSubmit={send}>
+            <span className="ps1" aria-hidden="true">
+              ❯
+            </span>
+            <div className="composer-main">
+              <AttachmentStrip items={attachments.items} onRemove={attachments.remove} />
+              <textarea
+                rows={2}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={onKey}
+                onPaste={attachments.paste}
+                placeholder={retired ? "retired" : composerHint(who, touch)}
+                disabled={retired}
+                spellCheck={false}
+              />
+            </div>
+            <AttachButton add={attachments.add} disabled={retired} label="Attach an image to this prompt" />
+            <button className="send" type="submit" disabled={sending || (!draft.trim() && !attachments.payload) || retired} title="Send (Enter)">
+              ⏎
+            </button>
+          </form>
+        </div>
+        {showChanges && item && computer?.sandboxId && (
+          <div id="conversation-changes" className="conversation-changes-wrap">
+            <ConversationChanges item={item} computer={computer} snaps={changeSnapshots} onClose={() => setShowChanges(false)} />
+          </div>
+        )}
+      </div>
+      {attachments.dragging && !retired && <div className="drop-hint">Drop to attach</div>}
+    </section>
+  );
+}
+
+/** `base` first, then whatever in `extra` it does not already hold, in id order. */
+function mergeById(base: LogEvent[], extra: LogEvent[]): LogEvent[] {
+  if (extra.length === 0) return base;
+  const seen = new Set(base.map((e) => e.id));
+  const out = [...base];
+  for (const e of extra) if (!seen.has(e.id)) out.push(e);
+  return out.sort((a, b) => a.id - b.id);
+}
+
+function SetupLine({ events, done }: { events: LogEvent[]; done: boolean }) {
+  const line = stageLine(events);
+  const failure = [...events].reverse().find((e) => e.kind === "stage" && e.state === "failed");
+  const reason = failure ? failReason(failure) : null;
+  return (
+    <details className={`block init ${failure ? "error" : ""}`}>
+      <summary>{failure ? `✕ setup failed${reason ? ` — ${reason}` : ""}` : done ? "✓ sandbox ready" : `⏳ ${line ?? "setting up"}`}</summary>
+      <pre>
+        {events
+          .filter((e) => e.kind === "stage")
+          .map((e) => {
+            const detail = brokerStageDetail(e);
+            return `${formatTime(e.ts)}  ${e.stage ?? ""} ${e.state ?? ""}${e.duration_ms != null ? ` (${e.duration_ms} ms)` : ""}${detail ? ` — ${detail}` : ""}`;
+          })
+          .join("\n")}
+      </pre>
+    </details>
+  );
+}
+
+function failReason(ev: LogEvent): string | null {
+  if (!ev.data) return null;
+  try {
+    const r = (JSON.parse(ev.data) as { reason?: unknown }).reason;
+    return typeof r === "string" ? r : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A destructive button that asks once, inline — never a browser dialog. */
+export function TwoStep({ label, onConfirm, className = "danger small", title }: { label: string; onConfirm: () => void; className?: string; title?: string }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  return armed ? (
+    <button
+      className={className}
+      title={title}
+      onClick={() => {
+        setArmed(false);
+        onConfirm();
+      }}
+    >
+      Sure? {label}
+    </button>
+  ) : (
+    <button className={className.replace("danger", "secondary")} title={title} onClick={() => setArmed(true)}>
+      {label}
+    </button>
+  );
+}
