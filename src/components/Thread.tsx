@@ -33,7 +33,7 @@ const IDLE_POLL_MS = 60_000;
 
 export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges }: { chat: ChatDto; sends: SendDto[]; onSent: () => void; live: ChatLive; changesOpen: boolean; onCloseChanges: () => void }) {
   const { games, takeGame, changes, refreshChanges } = live;
-  const { me, toast } = useSession();
+  const { me, toast, workspace, refreshChats, refreshNotifications } = useSession();
   const fountain = useMemo(() => makeChatClient(chat.id), [chat.id]);
   const convId = chat.conversationId;
   const [record, setRecord] = useState<Conversation | null>(null);
@@ -189,6 +189,8 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
       attachments.clear();
       stick.current = true;
       onSent();
+      void refreshChats();
+      void refreshNotifications();
       window.setTimeout(() => void readRecord().catch(() => undefined), 500);
     } catch (err) {
       toast(describeError(err), "error");
@@ -200,6 +202,18 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
   const answer = useCallback((requestId: string, optionId: string) => fountain.resume(convId).answer(requestId, optionId), [fountain, convId]);
 
   const retired = record?.status === "terminated" || !!chat.archivedAt;
+  const mention = /(?:^|\s)@([^\s@]*)$/.exec(draft);
+  const mentionQuery = mention?.[1]?.toLowerCase() ?? null;
+  const mentionMatches = mentionQuery === null ? [] : workspace.filter((m) => {
+    const handle = m.email.split("@")[0]!.toLowerCase();
+    return !mentionQuery || handle.startsWith(mentionQuery) || m.email.toLowerCase().startsWith(mentionQuery);
+  }).slice(0, 5);
+
+  function chooseMention(email: string) {
+    const handle = email.split("@")[0]!;
+    setDraft(draft.replace(/@[^\s@]*$/, `@${handle} `));
+    window.setTimeout(() => composer.current?.focus(), 0);
+  }
 
   // A turn just ended in a project chat: read the repository through Fountain, unless the hook already reported (the server knows).
   const wasRunning = useRef(false);
@@ -311,6 +325,12 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
           disabled={retired}
           placeholder={chat.archivedAt ? "This chat is archived. Restore it to keep going." : retired ? "This chat has been retired." : `Message ${who}`}
           attachments={attachments}
+          suggestions={mentionMatches.length > 0 ? (
+            <div className="mention-menu">
+              <div className="muted tiny">Share this thread with</div>
+              {mentionMatches.map((m) => <button type="button" key={m.email} onClick={() => chooseMention(m.email)}><Avatar email={m.email} size={24} /><span><strong>@{m.email.split("@")[0]}</strong><small>{m.email}</small></span></button>)}
+            </div>
+          ) : null}
           left={
             <>
               <PlusMenu

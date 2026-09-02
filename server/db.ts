@@ -13,8 +13,25 @@ export interface UserRow {
   email: string;
   fountain_id: string | null;
   key_enc: string;
+  onboarding_complete: 0 | 1;
   created_at: string;
   key_updated_at: string;
+}
+
+export interface WorkspaceMemberRow {
+  owner_email: string;
+  email: string;
+  added_at: string;
+}
+
+export interface NotificationRow {
+  id: string;
+  user_email: string;
+  chat_id: string;
+  actor_email: string;
+  kind: "mention";
+  created_at: string;
+  read_at: string | null;
 }
 
 export interface ChatRow {
@@ -155,6 +172,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT PRIMARY KEY,
   fountain_id TEXT,
   key_enc TEXT NOT NULL,
+  onboarding_complete INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   key_updated_at TEXT NOT NULL
 );
@@ -202,6 +220,23 @@ CREATE TABLE IF NOT EXISTS chat_members (
   PRIMARY KEY (chat_id, email)
 );
 CREATE INDEX IF NOT EXISTS chat_members_email ON chat_members(email);
+CREATE TABLE IF NOT EXISTS workspace_members (
+  owner_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  added_at TEXT NOT NULL,
+  PRIMARY KEY (owner_email, email)
+);
+CREATE INDEX IF NOT EXISTS workspace_members_email ON workspace_members(email);
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  user_email TEXT NOT NULL,
+  chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  actor_email TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  read_at TEXT
+);
+CREATE INDEX IF NOT EXISTS notifications_user ON notifications(user_email, created_at DESC);
 CREATE TABLE IF NOT EXISTS sends (
   chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
   seq INTEGER NOT NULL,
@@ -298,6 +333,10 @@ export class Db {
 
   /** Columns added since the first release, for a database that predates them. */
   private migrate(): void {
+    const users = new Set((this.sql.query("PRAGMA table_info(users)").all() as { name: string }[]).map((c) => c.name));
+    // Existing accounts have already configured and used Salon, so do not
+    // force them through a newly introduced first-run flow.
+    if (!users.has("onboarding_complete")) this.sql.exec("ALTER TABLE users ADD COLUMN onboarding_complete INTEGER NOT NULL DEFAULT 1");
     const have = new Set((this.sql.query("PRAGMA table_info(chats)").all() as { name: string }[]).map((c) => c.name));
     if (!have.has("skills")) this.sql.exec("ALTER TABLE chats ADD COLUMN skills TEXT NOT NULL DEFAULT '[]'");
     if (!have.has("connectors")) this.sql.exec("ALTER TABLE chats ADD COLUMN connectors TEXT NOT NULL DEFAULT '[]'");
@@ -324,11 +363,55 @@ export class Db {
     const t = now();
     this.sql
       .query(
-        `INSERT INTO users (email, fountain_id, key_enc, created_at, key_updated_at) VALUES ($email, $fountain_id, $key_enc, $t, $t)
+        `INSERT INTO users (email, fountain_id, key_enc, onboarding_complete, created_at, key_updated_at) VALUES ($email, $fountain_id, $key_enc, 0, $t, $t)
          ON CONFLICT(email) DO UPDATE SET fountain_id = excluded.fountain_id, key_enc = excluded.key_enc, key_updated_at = excluded.key_updated_at`,
       )
       .run({ email, fountain_id: fountainId, key_enc: keyEnc, t });
     return this.getUser(email)!;
+  }
+
+  updateUserKey(email: string, fountainId: string | null, keyEnc: string): UserRow {
+    this.sql.query("UPDATE users SET fountain_id = $fountain_id, key_enc = $key_enc, key_updated_at = $t WHERE email = $email").run({ email, fountain_id: fountainId, key_enc: keyEnc, t: now() });
+    return this.getUser(email)!;
+  }
+
+  completeOnboarding(email: string): UserRow {
+    this.sql.query("UPDATE users SET onboarding_complete = 1 WHERE email = $email").run({ email });
+    return this.getUser(email)!;
+  }
+
+  // ── workspace ───────────────────────────────────────────────────────
+
+  workspaceMembers(ownerEmail: string): WorkspaceMemberRow[] {
+    return this.sql.query("SELECT * FROM workspace_members WHERE owner_email = $owner ORDER BY added_at, email").all({ owner: ownerEmail }) as WorkspaceMemberRow[];
+  }
+
+  addWorkspaceMember(ownerEmail: string, email: string): boolean {
+    const r = this.sql.query("INSERT OR IGNORE INTO workspace_members (owner_email, email, added_at) VALUES ($owner, $email, $t)").run({ owner: ownerEmail, email, t: now() });
+    return r.changes > 0;
+  }
+
+  removeWorkspaceMember(ownerEmail: string, email: string): boolean {
+    const r = this.sql.query("DELETE FROM workspace_members WHERE owner_email = $owner AND email = $email").run({ owner: ownerEmail, email });
+    return r.changes > 0;
+  }
+
+  // ── notifications ───────────────────────────────────────────────────
+
+  notificationsFor(email: string): NotificationRow[] {
+    return this.sql.query("SELECT * FROM notifications WHERE user_email = $email ORDER BY created_at DESC LIMIT 50").all({ email }) as NotificationRow[];
+  }
+
+  addMentionNotification(userEmail: string, chatId: string, actorEmail: string): NotificationRow {
+    const row: NotificationRow = { id: crypto.randomUUID(), user_email: userEmail, chat_id: chatId, actor_email: actorEmail, kind: "mention", created_at: now(), read_at: null };
+    this.sql.query(`INSERT INTO notifications (id, user_email, chat_id, actor_email, kind, created_at, read_at)
+      VALUES ($id, $user_email, $chat_id, $actor_email, $kind, $created_at, $read_at)`).run(row as unknown as Record<string, string | null>);
+    return row;
+  }
+
+  readNotification(id: string, email: string): boolean {
+    const r = this.sql.query("UPDATE notifications SET read_at = COALESCE(read_at, $t) WHERE id = $id AND user_email = $email").run({ id, email, t: now() });
+    return r.changes > 0;
   }
 
   githubAccount(email: string): GitHubAccountRow | null {

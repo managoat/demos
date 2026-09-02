@@ -13,7 +13,8 @@ import { Home } from "./pages/Home";
 import { Chat } from "./pages/Chat";
 import { Join } from "./pages/Join";
 import { useRoute } from "./router";
-import { SessionProvider } from "./store";
+import { SessionProvider, useSession } from "./store";
+import { Onboarding, Preferences } from "./components/AccountSetup";
 
 type Phase = { kind: "booting" } | { kind: "signin"; fountainUrl: string; error: string | null } | { kind: "in"; me: Me; error?: string | null };
 
@@ -77,8 +78,10 @@ export function App() {
 
 function Shell() {
   const route = useRoute();
+  const { me } = useSession();
   const [open, setOpen] = useState(false);
   useEffect(() => setOpen(false), [route]);
+  if (!me.onboardingComplete) return <Onboarding />;
   return (
     <div className={`shell${open ? " nav-open" : ""}`}>
       <Sidebar route={route} onClose={() => setOpen(false)} />
@@ -89,6 +92,7 @@ function Shell() {
         {route.page === "home" && <Home />}
         {route.page === "chat" && <Chat key={route.id} id={route.id} />}
         {route.page === "join" && <Join token={route.token} />}
+        {route.page === "preferences" && <Preferences />}
       </main>
       {open && <div className="scrim" onClick={() => setOpen(false)} />}
     </div>

@@ -7,6 +7,13 @@
  *   POST   /api/session { apiKey }          sign in; sets the cookie
  *   DELETE /api/session                     sign out
  *   GET    /api/me
+ *   POST   /api/me/token                  verify and replace my encrypted inference token
+ *   POST   /api/me/onboarding             finish first-run setup
+ *   GET    /api/workspace/members         people I can mention into a thread
+ *   POST   /api/workspace/members
+ *   DELETE /api/workspace/members/:email
+ *   GET    /api/notifications             mentions of me
+ *   POST   /api/notifications/:id/read
  *   GET    /api/me/menu                     the model catalog and my connections, for the composer's menus
  *   GET    /api/github                      App configuration and my connection
  *   POST   /api/github/callback             finish connecting my GitHub account
@@ -51,6 +58,7 @@
 import { existsSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
 import * as auth from "./auth";
+import * as account from "./account";
 import * as changes from "./changes";
 import * as chats from "./chats";
 import * as comments from "./comments";
@@ -102,6 +110,13 @@ export function buildApp(ctx: AppContext): (req: Request) => Promise<Response> {
   on("POST", "/api/session", (req) => auth.signIn(ctx, req));
   on("DELETE", "/api/session", (req) => auth.signOut(ctx, req));
   on("GET", "/api/me", (req) => auth.me(ctx, req));
+  on("POST", "/api/me/token", (req) => account.updateToken(ctx, req));
+  on("POST", "/api/me/onboarding", (req) => account.completeOnboarding(ctx, req));
+  on("GET", "/api/workspace/members", (req) => account.workspace(ctx, req));
+  on("POST", "/api/workspace/members", (req) => account.addWorkspaceMember(ctx, req));
+  on("DELETE", "/api/workspace/members/:email", (req, p) => account.removeWorkspaceMember(ctx, req, p.email!));
+  on("GET", "/api/notifications", (req) => account.notifications(ctx, req));
+  on("POST", "/api/notifications/:id/read", (req, p) => account.readNotification(ctx, req, p.id!));
   on("GET", "/api/me/menu", (req) => menu.show(ctx, req));
   on("GET", "/api/github", (req) => github.info(ctx, req));
   on("POST", "/api/github/callback", (req) => github.callback(ctx, req));

@@ -13,6 +13,23 @@ import type { ProjectDto } from "../../shared/projects";
 export interface Me {
   email: string;
   fountainUrl: string;
+  onboardingComplete: boolean;
+  inferenceToken: { connected: boolean; updatedAt: string };
+}
+
+export interface WorkspaceMemberDto {
+  email: string;
+  addedAt: string;
+}
+
+export interface NotificationDto {
+  id: string;
+  chatId: string;
+  chatTitle: string;
+  actorEmail: string;
+  kind: "mention";
+  createdAt: string;
+  readAt: string | null;
 }
 
 export interface GitHubInfo {
@@ -110,6 +127,13 @@ export const api = {
   me: () => call<Me>("GET", "/api/me"),
   signIn: (apiKey: string) => call<Me>("POST", "/api/session", { apiKey }),
   signOut: () => call<{ ok: true }>("DELETE", "/api/session"),
+  updateToken: (apiKey: string) => data(call<{ data: Me }>("POST", "/api/me/token", { apiKey })),
+  completeOnboarding: () => data(call<{ data: Me }>("POST", "/api/me/onboarding")),
+  workspace: () => data(call<{ data: WorkspaceMemberDto[] }>("GET", "/api/workspace/members")),
+  addWorkspaceMember: (email: string) => data(call<{ data: WorkspaceMemberDto[] }>("POST", "/api/workspace/members", { email })),
+  removeWorkspaceMember: (email: string) => call<{ ok: true }>("DELETE", `/api/workspace/members/${encodeURIComponent(email)}`),
+  notifications: () => data(call<{ data: NotificationDto[] }>("GET", "/api/notifications")),
+  readNotification: (id: string) => call<{ ok: true }>("POST", `/api/notifications/${encodeURIComponent(id)}/read`),
   menu: () => data(call<{ data: MenuDto }>("GET", "/api/me/menu")),
   github: () => data(call<{ data: GitHubInfo }>("GET", "/api/github")),
   githubRepos: () => data(call<{ data: GitHubRepo[] }>("GET", "/api/github/repos")),

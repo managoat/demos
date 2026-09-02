@@ -11,6 +11,14 @@ nothing about agents, environments or runtimes anywhere.
 
 ## What it does
 
+- **Setup that ends in a usable workspace.** First run walks through a
+  GitHub App repository, the encrypted Fountain inference token, and a reusable
+  teammate roster. Repositories, tokens, and teammates remain editable under
+  Preferences.
+- **Mention to share.** Type `@name` for someone in your workspace. Once the
+  turn is accepted, Salon adds them to the thread, puts it in their *Shared
+  with you* list, and gives them an in-app notification. An exact `@email`
+  works too; short handles are accepted only when they are unambiguous.
 - **Settings, not setup.** The model pill is one list grouped by brand
   (Anthropic / OpenAI / Google) from Fountain's catalog; the `+` menu is
   *Add photos*, *Skills ›* (PDFs, Word documents, Spreadsheets, Slides,
