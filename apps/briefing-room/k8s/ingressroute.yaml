@@ -1,0 +1,38 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: briefing-room
+  namespace: briefing-room
+  labels:
+    app: briefing-room
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`briefing-room.demo.managoat.com`)"
+      kind: Rule
+      services:
+        - name: briefing-room
+          port: 80
+  tls:
+    secretName: briefing-room-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: briefing-room-http
+  namespace: briefing-room
+  labels:
+    app: briefing-room
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: "Host(`briefing-room.demo.managoat.com`)"
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: briefing-room
+          port: 80

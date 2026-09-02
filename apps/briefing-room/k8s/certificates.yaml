@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: briefing-room-tls
+  namespace: briefing-room
+spec:
+  secretName: briefing-room-tls
+  issuerRef:
+    name: letsencrypt-production
+    kind: ClusterIssuer
+  dnsNames:
+    - briefing-room.demo.managoat.com
