@@ -17,21 +17,26 @@
  *   DELETE /api/chats/:id/members/:email    host, or yourself
  *   POST   /api/chats/:id/invite            host: a join link
  *   POST   /api/join/:token                 take the link up
+ *   GET    /api/chats/:id/stream            what Salon itself records, live, server-sent (hub.ts)
  *   GET    /api/chats/:id/games             the chat's games (games.ts)
  *   POST   /api/chats/:id/games             start one
- *   GET    /api/chats/:id/games/stream      live changes, server-sent
  *   GET    /api/chats/:id/games/:game
  *   POST   /api/chats/:id/games/:game/moves a move, from the player whose go it is
+ *   GET    /api/chats/:id/changes           the repository's latest changes, with the diff (changes.ts)
+ *   GET    /api/chats/:id/changes/history   the snapshots before it, without
  *   POST   /mcp                             the model's way to start a game, on the conversation's key (mcp.ts)
+ *   POST   /hooks/changes                   the computer's way to report changes, on the same key (changes.ts)
  *   *      /f/:id/api/...                   Fountain, scoped to the chat (proxy.ts)
  */
 import { existsSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
 import * as auth from "./auth";
+import * as changes from "./changes";
 import * as chats from "./chats";
 import type { AppContext } from "./context";
 import * as games from "./games";
 import { errorResponse, HttpError, json } from "./http";
+import * as hub from "./hub";
 import { handleMcp } from "./mcp";
 import * as menu from "./menu";
 import { handleProxy } from "./proxy";
@@ -85,13 +90,16 @@ export function buildApp(ctx: AppContext): (req: Request) => Promise<Response> {
   on("POST", "/api/chats/:id/invite", (req, p) => chats.invite(ctx, req, p.id!));
   on("POST", "/api/join/:token", (req, p) => chats.join(ctx, req, p.token!));
 
+  on("GET", "/api/chats/:id/stream", (req, p) => hub.stream(ctx, req, p.id!));
   on("GET", "/api/chats/:id/games", (req, p) => games.list(ctx, req, p.id!));
   on("POST", "/api/chats/:id/games", (req, p) => games.create(ctx, req, p.id!));
-  on("GET", "/api/chats/:id/games/stream", (req, p) => games.stream(ctx, req, p.id!));
   on("GET", "/api/chats/:id/games/:game", (req, p) => games.show(ctx, req, p.id!, p.game!));
   on("POST", "/api/chats/:id/games/:game/moves", (req, p) => games.makeMove(ctx, req, p.id!, p.game!));
+  on("GET", "/api/chats/:id/changes", (req, p) => changes.latest(ctx, req, p.id!));
+  on("GET", "/api/chats/:id/changes/history", (req, p) => changes.history(ctx, req, p.id!));
 
   on("*", "/mcp", (req) => handleMcp(ctx, req));
+  on("*", "/hooks/changes", (req) => changes.hook(ctx, req));
   on("*", "/f/:id/*", (req, p) => handleProxy(ctx, req, p.id!, "/" + (p.rest ?? "")));
 
   const staticDir = ctx.config.staticDir;

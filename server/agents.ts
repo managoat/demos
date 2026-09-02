@@ -95,6 +95,8 @@ export async function agentFor(client: FountainClient, settings: ChatSettings, p
 
   const skills = settings.skills.map(skillById).flatMap((s) => (s ? [skillEntry(s)] : []));
   const parts = [...Object.keys(mcpServers), ...settings.skills].sort();
+  // Fountain keeps agent names unique, and an environment is part of the key: name it, or the second pick is refused.
+  if (settings.environmentId) parts.push(`on ${settings.environmentId.slice(0, 8)}`);
   if (games) mcpServers = { ...mcpServers, salon: games };
   const body: Record<string, unknown> = {
     name: `Salon · ${modelLabel(settings.model)}${parts.length ? ` · ${parts.join(", ")}` : ""}`.slice(0, 200),

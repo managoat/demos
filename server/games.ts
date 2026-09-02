@@ -9,12 +9,14 @@
  *   POST /api/chats/:id/games                 { kind, players: [email, email] } — anyone in the chat
  *   GET  /api/chats/:id/games/:game
  *   POST /api/chats/:id/games/:game/moves     { cell } — the player whose move it is
- *   GET  /api/chats/:id/games/stream          text/event-stream: `game` events, the whole record each time
+ *
+ * Every change goes out as a `game` event on the chat's stream (server/hub.ts).
  */
 import { shortName } from "../shared/author";
 import { gameLabel, isGameKind, newTicTacToe, play, winnerEmail, type GameDto, type GameKind, type TicTacToe } from "../shared/games";
 import { authenticate, chatAccess, type AppContext } from "./context";
 import { now, type ChatRow, type GameRow } from "./db";
+import { hub } from "./hub";
 import { HttpError, json, readJson } from "./http";
 
 export function toDto(g: GameRow): GameDto {
@@ -65,7 +67,7 @@ export function startGame(ctx: AppContext, chat: ChatRow, kind: GameKind, player
   };
   ctx.db.insertGame(row);
   const dto = toDto(row);
-  hub.publish(chat.id, dto);
+  hub.publish(chat.id, "game", dto);
   return dto;
 }
 
@@ -82,7 +84,7 @@ export function move(ctx: AppContext, chat: ChatRow, gameId: string, email: stri
     winner_email: winnerEmail(after),
   });
   const dto = toDto(updated!);
-  hub.publish(chat.id, dto);
+  hub.publish(chat.id, "game", dto);
   return dto;
 }
 
@@ -140,72 +142,3 @@ export async function makeMove(ctx: AppContext, req: Request, chatId: string, ga
   const body = await readJson(req);
   return json({ data: move(ctx, chat, gameId, user.email, body.cell) });
 }
-
-/**
- * The chat's game stream. One `game` event per change, carrying the whole
- * record — small enough that a diff would cost more than it saves — and a
- * comment every 25 s so an idle proxy keeps the connection.
- */
-export async function stream(ctx: AppContext, req: Request, chatId: string): Promise<Response> {
-  const user = await authenticate(ctx, req);
-  const { chat } = chatAccess(ctx, user, chatId);
-  const encoder = new TextEncoder();
-  let unsubscribe: (() => void) | null = null;
-  let keepalive: ReturnType<typeof setInterval> | null = null;
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      const send = (text: string) => {
-        try {
-          controller.enqueue(encoder.encode(text));
-        } catch {
-          // closed under us; the cancel below tidies up
-        }
-      };
-      send(": hello\n\n");
-      unsubscribe = hub.subscribe(chat.id, (g) => send(`event: game\ndata: ${JSON.stringify(g)}\n\n`));
-      keepalive = setInterval(() => send(": keepalive\n\n"), 25_000);
-      req.signal.addEventListener("abort", () => {
-        unsubscribe?.();
-        if (keepalive) clearInterval(keepalive);
-        try {
-          controller.close();
-        } catch {
-          // already closed
-        }
-      });
-    },
-    cancel() {
-      unsubscribe?.();
-      if (keepalive) clearInterval(keepalive);
-    },
-  });
-  return new Response(body, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache", "x-accel-buffering": "no" } });
-}
-
-// ── who is listening ─────────────────────────────────────────────────────
-
-/** One process, one map: every browser on a chat's game stream. Fine on the one replica the volume allows. */
-class Hub {
-  private readonly listeners = new Map<string, Set<(g: GameDto) => void>>();
-
-  subscribe(chatId: string, fn: (g: GameDto) => void): () => void {
-    const set = this.listeners.get(chatId) ?? new Set();
-    set.add(fn);
-    this.listeners.set(chatId, set);
-    return () => {
-      set.delete(fn);
-      if (set.size === 0) this.listeners.delete(chatId);
-    };
-  }
-
-  publish(chatId: string, g: GameDto): void {
-    for (const fn of this.listeners.get(chatId) ?? []) fn(g);
-  }
-
-  /** For tests. */
-  listening(chatId: string): number {
-    return this.listeners.get(chatId)?.size ?? 0;
-  }
-}
-
-export const hub = new Hub();

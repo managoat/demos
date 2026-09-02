@@ -35,17 +35,22 @@ server/   Bun. app.ts is the route table; index.ts boots it.
           agents.ts    settings → the agent Fountain runs (the seam, see below)
           chats.ts     chats, members, invites, join
           proxy.ts     /f/<chat>/api/conversations/<id>/… on the host's key
-          games.ts     a chat's games: start, move, the server-sent game stream
+          games.ts     a chat's games: start, move
+          changes.ts   the repository's changes: the hook's POST, the latest record, `record` (the one way in)
+          hub.ts       GET /api/chats/:id/stream: what Salon itself records, live (game, changes events)
+          sandbox.ts   who a computer is (bearer = $FOUNTAIN_TOKEN + conversation id), and the hook setup script
           mcp.ts       POST /mcp: Salon as an MCP server for the chat's computer (start_game, game_state)
-          db.ts        SQLite: users, sessions, chats, chat_members, sends, games
-shared/   what both sides agree on: author.ts, models.ts, settings.ts, skills.ts, images.ts, games.ts (the rules)
-src/      Vite + React. store.tsx (session), router.ts (hash routes),
+          db.ts        SQLite: users, sessions, chats, chat_members, sends, games, changes
+shared/   what both sides agree on: author.ts, models.ts, settings.ts, skills.ts, images.ts, games.ts (the rules),
+          changes.ts (the snapshot shape, and the diff/status parsers both sides use)
+src/      Vite + React. store.tsx (session), router.ts (hash routes), lib/live.ts (the chat's own stream),
           components/Thread.tsx (transcript + composer), SettingsMenu.tsx (pill + `+`),
-          Game.tsx (the board), Blocks.tsx (a start_game tool block renders as the board)
+          Game.tsx (the board), Blocks.tsx (a start_game tool block renders as the board),
+          Changes.tsx (the repository panel beside the thread)
 k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) applies it
 ```
 
-## Four boundaries, easy to get wrong
+## Six boundaries, easy to get wrong
 
 1. **The proxy is the member boundary.** A guest's browser builds
    `new Fountain({ baseUrl: "<origin>/f/<chat>", apiKey: "session" })`; the
@@ -112,6 +117,29 @@ k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) ap
    `.mcp.json` copy is substituted correctly but the session copy wins.
    Fix it in Fountain and the tolerance becomes dead code.
 
+6. **Changes come out of the computer by a hook, and go in by one function.**
+   Fountain's API has no file, exec or diff route on a sandbox, so the
+   computer reports: `sandbox.ts#hookSetupScript` is the bash a project's
+   environment runs as its `setup_script`, writing `/home/sprite/.salon/changes.sh`
+   and Claude Code's `~/.claude/settings.local.json` with `SessionStart`,
+   `PostToolUse` (Edit|Write|MultiEdit|NotebookEdit|Bash) and `Stop` hooks.
+   It is the *local* settings file on purpose: Fountain's claude runtime
+   writes `~/.claude/settings.json` whole, after the setup script, and the
+   runtime's cwd is `/home/sprite`, so the "project" file is that same path;
+   claude-agent-acp loads `user`, `project` and `local`, and only local
+   survives. The hook runs as a child of the runtime, so it holds
+   `$FOUNTAIN_TOKEN` and `$FOUNTAIN_CONVERSATION_ID`; on `session` it moves a
+   checkout still on the base onto `salon/<conv id[0:8]>`; every run POSTs
+   branch, head, `git status --porcelain`, and `git diff <merge-base>` plus
+   untracked files, to `PUBLIC_URL/hooks/changes` (curl, through the
+   broker's proxy like everything else; the body goes through jq
+   `--rawfile` because one shell argument caps at 128 KB). Tool runs are
+   held to one post per two seconds. `changes.ts#record` is the one way a
+   snapshot gets in — a sandbox exec API on Fountain would be its second
+   caller, same table, same stream — it keeps the last twenty per chat,
+   cuts a diff at 1 MB and says so. The hook is claude-only, like games.
+   Verified end to end 2026-09-02 against `github.com/managoat/salon`.
+
 ## Run, test, ship
 
 ```bash
@@ -140,9 +168,18 @@ computer is released. `[default]` is brokered (connections exist);
 state — and it has no Anthropic credential, so a Claude turn there fails
 `Authentication required`; host with `[default]`.
 
-**Smoke the games tool:** the computer must reach this server, so run a
-tunnel (`cloudflared tunnel --url http://localhost:8080` prints a
-trycloudflare URL) and start the server with `PUBLIC_URL=<that url>`. A
+**Smoke the games tool, or the changes hook:** the computer must reach this
+server, so run a tunnel (`cloudflared tunnel --url http://localhost:8090`
+prints a trycloudflare URL; wait for "Registered tunnel connection") and
+start the server with `PUBLIC_URL=<that url>`. Two things bit on 2026-09-02:
+port 8080 is often held by the fountain-workbench server (its `/healthz`
+answers `ok` too, and its sign-in sets `wb_session`), so use 8090; and a
+server started with `&` from an agent's shell dies with that shell — run it
+detached. For the hook: create an Environment on `[default]` with
+`repositories: [{url, mount_path: "/home/sprite/work/<name>", ref: "main"}]`,
+`packages: {apt: ["jq"]}` and `setup_script` from `hookSetupScript`, then
+`POST /api/chats` with `settings.environmentId` set (curl can; the menu
+cannot yet). A missed POST is not retried: send another prompt. A
 brokered sandbox reaches it only through `HTTPS_PROXY`, which the runtime
 honours. Start a chat, add the guest, wait for the first turn to finish
 (a prompt during a turn is `conversation_busy`), then send "let's play
@@ -177,14 +214,20 @@ A change there rolls the Fountain pods — check nothing is provisioning first.
   Secret in the namespace would keep it apart from the data.
 - No presence or typing indicators; guests learn of a new turn from the
   conversation stream and a 30 s chat-list poll. The game stream
-  (`server/games.ts#hub`) is the first channel Salon owns; presence could
+  (`server/hub.ts`) is the channel Salon owns; presence could
   ride on it.
 - Games are Anthropic-only: codex and gemini get no `salon` server. The
   model never plays; a `move` tool would make each of its moves a turn.
   Tic-tac-toe is the only game; `shared/games.ts` is where a second one's
   rules go, keyed by `kind`.
 - Fountain sends the raw `mcp_servers` on the ACP session (boundary 5);
-  fix there, then delete `mcp.ts#unescaped`.
+  fix there, then delete `sandbox.ts#unescaped`.
+- Fountain has no exec or file route on a sandbox. Add `POST
+  /api/sandboxes/:id/exec` and `GET /api/sandboxes/:id/files?path=` there
+  (full-scope keys only), and `changes.ts#record` gets a second caller that
+  works on every runtime, plus Push / Open PR buttons that are not turns.
+- Fountain's claude runtime overwrites `~/.claude/settings.json` after the
+  setup script; a merge there would let the hook live in the user file.
 - Outlook, Slack and tenant `oauth2` connections show in Connectors as "not
   usable yet": the token is brokered as an env var, so using one means
   shipping an MCP server in the sandbox that reads it.

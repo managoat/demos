@@ -4,19 +4,21 @@
  * on the host's key; every person in the chat reads the same feed.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { gameLabel, type GameDto } from "../../shared/games";
+import { gameLabel } from "../../shared/games";
 import { modelLabel } from "../../shared/models";
 import type { ChatDto, SendDto } from "../lib/api";
-import { api, gamesStreamUrl, turnImageUrl } from "../lib/api";
+import { api, turnImageUrl } from "../lib/api";
 import { arrange, gameOf } from "../lib/blocks";
 import { describeError } from "../lib/errors";
 import { formatTime } from "../lib/format";
 import { useAttachments } from "../lib/images";
+import type { ChatLive } from "../lib/live";
 import { authored, fold } from "../lib/turns";
 import { useSession, makeChatClient } from "../store";
 import type { Conversation, LogEvent, Turn } from "../types";
 import { Avatar } from "./Avatar";
 import { BlockView, type Games } from "./Blocks";
+import { ChangesPanel } from "./Changes";
 import { Composer, type ComposerHandle } from "./Composer";
 import { GameCard } from "./Game";
 import { MenuBack, MenuHeading, MenuItem, Popover } from "./Menu";
@@ -29,7 +31,8 @@ const VISIBLE = new Set(["acp"]);
 const RUNNING_POLL_MS = 15_000;
 const IDLE_POLL_MS = 60_000;
 
-export function Thread({ chat, sends, onSent }: { chat: ChatDto; sends: SendDto[]; onSent: () => void }) {
+export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges }: { chat: ChatDto; sends: SendDto[]; onSent: () => void; live: ChatLive; changesOpen: boolean; onCloseChanges: () => void }) {
+  const { games, takeGame, changes } = live;
   const { me, toast } = useSession();
   const fountain = useMemo(() => makeChatClient(chat.id), [chat.id]);
   const convId = chat.conversationId;
@@ -139,55 +142,6 @@ export function Thread({ chat, sends, onSent }: { chat: ChatDto; sends: SendDto[
       .catch(() => undefined);
   }, [record?.status, record?.turn_count, record?.sandbox?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Games: the chat's own records, read once and then kept live on the chat's game stream.
-  // A record only ever moves forward, so an older one arriving late is ignored.
-  const [games, setGames] = useState<Map<string, GameDto>>(() => new Map());
-  const takeGame = useCallback((g: GameDto) => {
-    setGames((prev) => {
-      const have = prev.get(g.id);
-      if (have && have.seq >= g.seq) return prev;
-      const next = new Map(prev);
-      next.set(g.id, g);
-      return next;
-    });
-  }, []);
-  useEffect(() => {
-    let stopped = false;
-    let source: EventSource | null = null;
-    let retry: number | null = null;
-    const load = () =>
-      api
-        .games(chat.id)
-        .then((list) => {
-          if (!stopped) for (const g of list) takeGame(g);
-        })
-        .catch(() => undefined);
-    const open = () => {
-      if (stopped) return;
-      source = new EventSource(gamesStreamUrl(chat.id));
-      source.addEventListener("game", (ev) => {
-        try {
-          takeGame(JSON.parse((ev as MessageEvent).data) as GameDto);
-        } catch {
-          // not ours
-        }
-      });
-      source.onopen = () => void load(); // what changed while the stream was down
-      source.onerror = () => {
-        source?.close();
-        source = null;
-        if (!stopped) retry = window.setTimeout(open, 3000);
-      };
-    };
-    void load();
-    open();
-    return () => {
-      stopped = true;
-      source?.close();
-      if (retry !== null) window.clearTimeout(retry);
-    };
-  }, [chat.id, takeGame]);
-
   const onMove = useCallback(
     async (gameId: string, cell: number) => {
       try {
@@ -251,7 +205,8 @@ export function Thread({ chat, sends, onSent }: { chat: ChatDto; sends: SendDto[
   const setupFailed = folded.setup.some((e) => e.kind === "stage" && e.state === "failed") && folded.turns.length === 0;
 
   return (
-    <>
+    <div className={`thread-body${changesOpen ? " with-changes" : ""}`}>
+      <div className="thread-main">
       <div className="transcript" ref={scroller} onScroll={onScroll}>
         {loading && <div className="muted small center">Loading…</div>}
         {!loading && folded.turns.length === 0 && record?.first_prompt && (
@@ -361,7 +316,9 @@ export function Thread({ chat, sends, onSent }: { chat: ChatDto; sends: SendDto[
           }
         />
       </div>
-    </>
+      </div>
+      {changesOpen && <ChangesPanel changes={changes} onClose={onCloseChanges} />}
+    </div>
   );
 }
 
