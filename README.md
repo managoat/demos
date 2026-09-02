@@ -51,6 +51,18 @@ nothing about agents, environments or runtimes anywhere.
   stream, never a turn. The `+` at the foot of a chat starts one without
   the model too. Anthropic models only for now: the claude runtime is the
   one that carries an MCP server with headers into the computer.
+- **Projects: a repository the chat works in.** *Projects ›* in the `+`
+  menu: paste a repository address, a branch, a token for a private one,
+  and the chat's computer starts with a checkout of it, on a branch of its
+  own. Behind it is an environment on your Fountain (`server/projects.ts`);
+  the token is a write-only secret there and Salon never keeps it.
+  Everyone in a project is in every chat started in it, and every such
+  chat runs on the project owner's account, whoever starts it.
+- **Changes, beside the transcript.** What the computer did to the
+  repository — the branch, the files, every hunk — shows in a panel for
+  everyone in the chat, live: a hook inside the computer posts a snapshot
+  when a session starts, after each edit and when a turn ends
+  (`server/sandbox.ts`, `server/changes.ts`, `src/components/Changes.tsx`).
 - **Blocks, not dialects.** The transcript renders Fountain's server-parsed
   blocks (`?blocks=true`): text as markdown (an allow-list renderer to React
   nodes, never innerHTML), tool calls as collapsible rows, permission

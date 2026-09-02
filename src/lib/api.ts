@@ -6,6 +6,7 @@ import type { ChangesDto } from "../../shared/changes";
 import type { ChatSettings } from "../../shared/settings";
 import type { GameDto, GameKind } from "../../shared/games";
 import type { ImageInput } from "../../shared/images";
+import type { ProjectDto } from "../../shared/projects";
 
 export interface Me {
   email: string;
@@ -36,6 +37,7 @@ export interface ChatDto {
   conversationId: string;
   agentId: string;
   settings: { model: string; skills: string[]; connectors: { id: string; label: string }[] };
+  project: { id: string; name: string; repoUrl: string; base: string } | null;
   createdAt: string;
   inviteToken?: string | null;
   status: string | null;
@@ -104,6 +106,12 @@ export const api = {
   startGame: (chatId: string, kind: GameKind, players: [string, string]) => data(call<{ data: GameDto }>("POST", `/api/chats/${chatId}/games`, { kind, players })),
   move: (chatId: string, gameId: string, cell: number) => data(call<{ data: GameDto }>("POST", `/api/chats/${chatId}/games/${gameId}/moves`, { cell })),
 
+  projects: () => data(call<{ data: ProjectDto[] }>("GET", "/api/projects")),
+  createProject: (input: { repoUrl: string; base?: string; name?: string; token?: string; setup?: string }) => data(call<{ data: ProjectDto }>("POST", "/api/projects", input)),
+  deleteProject: (id: string) => call<{ ok: true }>("DELETE", `/api/projects/${id}`),
+  addProjectMember: (id: string, email: string) => data(call<{ data: ProjectDto }>("POST", `/api/projects/${id}/members`, { email })),
+  removeProjectMember: (id: string, email: string) => call<{ ok?: true; left?: boolean; data?: ProjectDto }>("DELETE", `/api/projects/${id}/members/${encodeURIComponent(email)}`),
+
   changes: (chatId: string) => data(call<{ data: ChangesDto | null }>("GET", `/api/chats/${chatId}/changes`)),
   changesHistory: (chatId: string) => data(call<{ data: ChangesDto[] }>("GET", `/api/chats/${chatId}/changes/history`)),
 };
@@ -129,7 +137,7 @@ export function joinUrl(token: string): string {
 }
 
 /** "Opus 5 · Gmail, PDFs" — what a chat was started with, for its header and the list. */
-export function settingsLine(settings: ChatDto["settings"], modelLabel: (m: string) => string, skillNames: (ids: readonly string[]) => string[]): string {
-  const extras = [...settings.connectors.map((c) => c.label), ...skillNames(settings.skills)];
+export function settingsLine(settings: ChatDto["settings"], modelLabel: (m: string) => string, skillNames: (ids: readonly string[]) => string[], project: ChatDto["project"] = null): string {
+  const extras = [...(project ? [project.name] : []), ...settings.connectors.map((c) => c.label), ...skillNames(settings.skills)];
   return `${modelLabel(settings.model)}${extras.length ? ` · ${extras.join(", ")}` : ""}`;
 }

@@ -309,3 +309,9 @@ pre.err { color: var(--bad); }
 .diff tr.add td { background: color-mix(in srgb, var(--ok) 14%, transparent); }
 .diff tr.del td { background: color-mix(in srgb, var(--bad) 12%, transparent); }
 .diff tr.hunk td { background: var(--panel); color: var(--muted); padding-top: 4px; padding-bottom: 4px; }
+
+/* projects: the add-a-repository form in the "+" menu */
+.project-form { flex-direction: column; align-items: stretch; gap: 8px; }
+.project-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.project-form input { font-size: 13px; padding: 6px 8px; }
+.project-form button { align-self: flex-start; }

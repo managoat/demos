@@ -13,16 +13,18 @@
  *   POST   /api/chats/:id/invite          host: mint (or re-mint) the join link's token
  *   POST   /api/join/:token               become a member of the chat the link names
  */
+import { withAuthor } from "../shared/author";
 import { imagesProblem } from "../shared/images";
 import { runtimeFor } from "../shared/models";
 import { parseSettings } from "../shared/settings";
-import { agentFor } from "./agents";
+import { agentFor, type ProjectContext } from "./agents";
 import type { ChosenConnector } from "./connectors";
 import { authenticate, chatAccess, ownerClient, requireOwner, userClient, type AppContext } from "./context";
 import { randomToken } from "./crypto";
 import { now, type ChatRow, type Role, type UserRow } from "./db";
 import { FountainHttpError, type ConversationSummary } from "./fountain";
 import { HttpError, isEmail, json, normalizeEmail, readJson, str } from "./http";
+import { projectOwnerClient } from "./projects";
 
 export interface ChatDto {
   id: string;
@@ -34,6 +36,8 @@ export interface ChatDto {
   agentId: string;
   /** What the chat was started with, as the header shows it: "Opus 5 · Gmail, PDFs". */
   settings: { model: string; skills: string[]; connectors: ChosenConnector[] };
+  /** The project the chat was started in, when it was. */
+  project: { id: string; name: string; repoUrl: string; base: string } | null;
   createdAt: string;
   /** The host only: the join link's token, when one has been made. */
   inviteToken?: string | null;
@@ -55,6 +59,7 @@ function toDto(ctx: AppContext, chat: ChatRow, role: Role, conv: ConversationSum
     conversationId: chat.conversation_id,
     agentId: chat.agent_id,
     settings: { model: chat.model, skills: parseJson<string[]>(chat.skills, []), connectors: parseJson<ChosenConnector[]>(chat.connectors, []) },
+    project: projectOf(ctx, chat),
     createdAt: chat.created_at,
     status: conv?.status ?? null,
     lastActiveAt: conv?.last_active_at ?? null,
@@ -63,6 +68,11 @@ function toDto(ctx: AppContext, chat: ChatRow, role: Role, conv: ConversationSum
   };
   if (role === "owner") dto.inviteToken = chat.invite_token;
   return dto;
+}
+
+function projectOf(ctx: AppContext, chat: ChatRow): ChatDto["project"] {
+  const p = chat.project_id ? ctx.db.getProject(chat.project_id) : null;
+  return p ? { id: p.id, name: p.name, repoUrl: p.repo_url, base: p.base } : null;
 }
 
 function parseJson<T>(s: string | null | undefined, fallback: T): T {
@@ -129,16 +139,27 @@ export async function create(ctx: AppContext, req: Request): Promise<Response> {
   if (typeof settings === "string") throw new HttpError(422, "bad_settings", settings);
   const title = str(body.title, 120).trim();
 
-  const client = await userClient(ctx, user);
+  // In a project, the chat is the project owner's: their computer setup, their key, their bill — whoever starts it.
+  let host = user;
+  let client = await userClient(ctx, user);
+  let project: ProjectContext | null = null;
+  const projectRow = settings.projectId ? ctx.db.getProject(settings.projectId) : null;
+  if (settings.projectId) {
+    if (!projectRow || !ctx.db.projectRoleIn(projectRow.id, user.email)) throw new HttpError(404, "not_found", "No such project.");
+    ({ owner: host, client } = await projectOwnerClient(ctx, projectRow));
+    settings.environmentId = projectRow.environment_id;
+    project = { name: projectRow.name, repoUrl: projectRow.repo_url, repoPath: projectRow.mount_path, base: projectRow.base };
+  }
   const id = crypto.randomUUID();
   let conversation: ConversationSummary;
   let connectors: ChosenConnector[];
   let agentId: string;
   try {
-    const made = await agentFor(client, settings, ctx.config.publicUrl);
+    const made = await agentFor(client, settings, ctx.config.publicUrl, project);
     agentId = made.agentId;
     connectors = made.connectors;
-    const create: Record<string, unknown> = { agent_id: agentId, prompt, channel_id: `salon:${id}`, fresh: true };
+    const tagged = projectRow && (ctx.db.projectMembers(projectRow.id).length > 0 || user.email !== host.email) ? withAuthor(user.email, prompt) : prompt;
+    const create: Record<string, unknown> = { agent_id: agentId, prompt: tagged, channel_id: `salon:${id}`, fresh: true };
     if (images) create.images = images;
     if (settings.environmentId) create.environment_id = settings.environmentId;
     if (settings.vaultId) create.vault_id = settings.vaultId;
@@ -151,7 +172,7 @@ export async function create(ctx: AppContext, req: Request): Promise<Response> {
 
   const chat: ChatRow = {
     id,
-    owner_email: user.email,
+    owner_email: host.email,
     conversation_id: conversation.id,
     title,
     runtime: runtimeFor(settings.model),
@@ -164,11 +185,17 @@ export async function create(ctx: AppContext, req: Request): Promise<Response> {
     vault_id: settings.vaultId,
     agent_id: agentId,
     invite_token: null,
+    project_id: projectRow?.id ?? null,
     created_at: now(),
   };
   ctx.db.insertChat(chat);
+  if (projectRow) {
+    // The project's people are the chat's people, the one who started it included.
+    for (const m of ctx.db.projectMembers(projectRow.id)) ctx.db.addMember(id, m.email, `project:${projectRow.id}`);
+    if (user.email !== host.email) ctx.db.addMember(id, user.email, `project:${projectRow.id}`);
+  }
   ctx.db.addSend(id, user.email);
-  return json({ data: toDto(ctx, chat, "owner", conversation, false) }, 201);
+  return json({ data: toDto(ctx, chat, user.email === host.email ? "owner" : "member", conversation, false) }, 201);
 }
 
 export async function show(ctx: AppContext, req: Request, id: string): Promise<Response> {

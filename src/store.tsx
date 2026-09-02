@@ -6,6 +6,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Fountain } from "@agentshit/fountain-sdk";
+import type { ProjectDto } from "../shared/projects";
 import { api, ApiError, chatFountainBase, type ChatDto, type Me, type MenuDto } from "./lib/api";
 import { describeError } from "./lib/errors";
 
@@ -20,6 +21,8 @@ export interface Session {
   menu: MenuDto | null;
   menuError: string | null;
   loadMenu: () => Promise<MenuDto | null>;
+  projects: ProjectDto[];
+  refreshProjects: () => Promise<ProjectDto[] | null>;
   toast: (text: string, kind?: "info" | "error") => void;
   signOut: () => void;
 }
@@ -43,6 +46,7 @@ export function SessionProvider({ me, onSignOut, children }: { me: Me; onSignOut
   const [chatsLoaded, setChatsLoaded] = useState(false);
   const [menu, setMenu] = useState<MenuDto | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
+  const [projects, setProjects] = useState<ProjectDto[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const toast = useCallback((text: string, kind: Toast["kind"] = "info") => {
@@ -77,10 +81,22 @@ export function SessionProvider({ me, onSignOut, children }: { me: Me; onSignOut
     }
   }, [onSignOut]);
 
+  const refreshProjects = useCallback(async () => {
+    try {
+      const list = await api.projects();
+      setProjects(list);
+      return list;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) onSignOut();
+      return null;
+    }
+  }, [onSignOut]);
+
   useEffect(() => {
     void refreshChats();
     void loadMenu();
-  }, [refreshChats, loadMenu]);
+    void refreshProjects();
+  }, [refreshChats, loadMenu, refreshProjects]);
 
   useEffect(() => {
     const tick = () => {
@@ -100,8 +116,8 @@ export function SessionProvider({ me, onSignOut, children }: { me: Me; onSignOut
   }, [onSignOut]);
 
   const value = useMemo<Session>(
-    () => ({ me, chats, chatsLoaded, refreshChats, menu, menuError, loadMenu, toast, signOut }),
-    [me, chats, chatsLoaded, refreshChats, menu, menuError, loadMenu, toast, signOut],
+    () => ({ me, chats, chatsLoaded, refreshChats, menu, menuError, loadMenu, projects, refreshProjects, toast, signOut }),
+    [me, chats, chatsLoaded, refreshChats, menu, menuError, loadMenu, projects, refreshProjects, toast, signOut],
   );
 
   return (

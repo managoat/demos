@@ -98,7 +98,7 @@ export function Chat({ id }: { id: string }) {
             </h2>
           )}
           <div className="muted small">
-            {settingsLine(chat.settings, modelLabel, skillNames)}
+            {settingsLine(chat.settings, modelLabel, skillNames, chat.project)}
             {owner ? " · You host this chat: you pay for it, and the people you invite chat for free" : ` · Hosted by ${shortName(chat.ownerEmail)}: they pay, you chat for free`}
             {chat.unavailable ? " · the host's key is not answering" : ""}
           </div>
