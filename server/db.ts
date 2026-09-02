@@ -82,6 +82,31 @@ export const NO_PROPOSAL: Pick<ItemRow, "proposed_status" | "proposed_agent_id" 
   proposed_at: "",
 };
 
+/**
+ * The git state of one checkout on one of a work item's computers, as the
+ * hook inside the sandbox last posted it (server/snapshots.ts): branch, head,
+ * ahead/behind and porcelain status — the diff itself is read through Fountain.
+ * Latest only:
+ * the disk has one state, and the row is keyed the way the disk is —
+ * by the computer (shared/computers.ts) and the checkout's path on it.
+ */
+export interface SnapshotRow {
+  item_id: string;
+  computer: string;
+  repo: string;
+  conversation_id: string;
+  agent_id: string | null;
+  source: string;
+  branch: string;
+  head: string;
+  upstream: string;
+  ahead: number;
+  behind: number;
+  status: string;
+  meta: string;
+  taken_at: string;
+}
+
 export type Role = "owner" | "member";
 
 /** What an update to a work item may set. Its id, project and creation stand. */
@@ -145,6 +170,23 @@ CREATE TABLE IF NOT EXISTS removed_computers (
   removed_by TEXT NOT NULL,
   removed_at TEXT NOT NULL,
   PRIMARY KEY (item_id, key)
+);
+CREATE TABLE IF NOT EXISTS snapshots (
+  item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  computer TEXT NOT NULL,
+  repo TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
+  agent_id TEXT,
+  source TEXT NOT NULL,
+  branch TEXT NOT NULL DEFAULT '',
+  head TEXT NOT NULL DEFAULT '',
+  upstream TEXT NOT NULL DEFAULT '',
+  ahead INTEGER NOT NULL DEFAULT 0,
+  behind INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT '',
+  meta TEXT NOT NULL DEFAULT '',
+  taken_at TEXT NOT NULL,
+  PRIMARY KEY (item_id, computer, repo)
 );
 `;
 
@@ -391,6 +433,27 @@ export class Db {
   restoreComputer(itemId: string, key: string): boolean {
     const r = this.sql.query("DELETE FROM removed_computers WHERE item_id = $i AND key = $k").run({ i: itemId, k: key });
     return r.changes > 0;
+  }
+
+  // ── snapshots ────────────────────────────────────────────────────────
+
+  /** The latest state of one checkout on one computer replaces the one before it. */
+  upsertSnapshot(r: SnapshotRow): void {
+    this.sql
+      .query(
+        `INSERT INTO snapshots (item_id, computer, repo, conversation_id, agent_id, source, branch, head, upstream, ahead, behind, status, meta, taken_at)
+         VALUES ($item_id, $computer, $repo, $conversation_id, $agent_id, $source, $branch, $head, $upstream, $ahead, $behind, $status, $meta, $taken_at)
+         ON CONFLICT(item_id, computer, repo) DO UPDATE SET
+           conversation_id = excluded.conversation_id, agent_id = excluded.agent_id, source = excluded.source,
+           branch = excluded.branch, head = excluded.head, upstream = excluded.upstream, ahead = excluded.ahead, behind = excluded.behind,
+           status = excluded.status, meta = excluded.meta, taken_at = excluded.taken_at`,
+      )
+      .run({ ...r });
+  }
+
+  /** Every checkout on every computer of the item, newest first. */
+  snapshots(itemId: string): SnapshotRow[] {
+    return this.sql.query("SELECT * FROM snapshots WHERE item_id = $i ORDER BY taken_at DESC, computer, repo").all({ i: itemId }) as SnapshotRow[];
   }
 
   /** Item counts per project for a user's list, in one query. */

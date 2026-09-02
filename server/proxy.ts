@@ -17,6 +17,7 @@
  *                                           record of what its sandbox reached) — after checking :id
  *                                           is in the project
  *   GET  /api/sandboxes/:id                 one computer, if a conversation of the project is on it
+ *   GET  /api/sandboxes/:id/{files,file,diff}  its disk, read by Fountain (ADR 0039), if it is that computer
  *   GET  /api/search                        full text, cut down to hits in this project's conversations,
  *                                           and — unless one conversation is named — less the removed ones
  *   GET  /api/agents, /api/agents/:id/avatar  the owner's agents (the team), with the values of
@@ -64,6 +65,7 @@ function remember(c: ConversationSummary): void {
 /** For tests: forget every cached conversation. */
 export function resetProxyCache(): void {
   convProject.clear();
+  sandboxProject.clear();
 }
 
 /** Whether we still trust what we know about this conversation. */
@@ -122,6 +124,17 @@ export async function handleProxy(ctx: AppContext, req: Request, projectId: stri
 
   const sandbox = /^\/api\/sandboxes\/([^/]+)$/.exec(path);
   if (sandbox && method === "GET") return showSandbox(scope, decodeURIComponent(sandbox[1]!));
+
+  // The disk of one of the project's computers, read by Fountain: a directory,
+  // a file, or `git diff` (ADR 0039). Full-scope only upstream, which the
+  // owner's key is; the sandbox's own key could not make this call, so the
+  // proxy is the one door. Fountain redacts the sandbox's secrets on the way
+  // out and refuses to wake a parked machine; both pass through as they are.
+  const disk = /^\/api\/sandboxes\/([^/]+)\/(files|file|diff)$/.exec(path);
+  if (disk && method === "GET") {
+    if (!(await sandboxBelongs(scope, decodeURIComponent(disk[1]!)))) throw new HttpError(404, "not_found", "No such computer in this project.");
+    return forward(client, req, path, url.search);
+  }
 
   if (method === "GET" && path === "/api/search") return search(ctx, scope, url);
 
@@ -421,7 +434,27 @@ async function showSandbox({ project, client }: Scope, id: string): Promise<Resp
   const mine: { id: string }[] = [];
   for (const c of convs) if (await belongs(client, project.id, c.id)) mine.push(c);
   if (mine.length === 0) throw new HttpError(404, "not_found", "No such computer in this project.");
+  sandboxProject.set(id, { projectId: project.id, at: Date.now() });
   return json({ ...body, data: { ...body.data, conversations: mine } });
+}
+
+/** sandbox id → the project it was last found to belong to. A disk read should not cost a second upstream call every time. */
+const sandboxProject = new Map<string, { projectId: string; at: number }>();
+
+/** Whether a conversation of this project is on the computer — read off its record, cached briefly. */
+async function sandboxBelongs({ project, client }: Scope, id: string): Promise<boolean> {
+  const hit = sandboxProject.get(id);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.projectId === project.id;
+  const res = await client.fetch(`/api/sandboxes/${encodeURIComponent(id)}`);
+  if (!res.ok) return false;
+  const body = (await res.json()) as { data?: { conversations?: { id: string }[] } };
+  for (const c of body.data?.conversations ?? []) {
+    if (await belongs(client, project.id, c.id)) {
+      sandboxProject.set(id, { projectId: project.id, at: Date.now() });
+      return true;
+    }
+  }
+  return false;
 }
 
 // ── search ───────────────────────────────────────────────────────────────

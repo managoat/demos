@@ -1,0 +1,77 @@
+# The smoke test for the snapshot hook (server/hook.ts, server/snapshots.ts)
+# against a dev server. With WORKBENCH_URL substituted for the tunnel the dev
+# server is behind:
+#
+#   WORKBENCH_TOKEN=ftn_… fountain apply -f <this file, with ${WORKBENCH_URL} filled in>
+#
+# Then a project on this environment, a work item, one conversation with the
+# `workbench-snapshot-smoke` agent, and a prompt that writes a file and
+# commits. Three snapshots should land under the item — `post-tool` after the
+# Write, `post-commit` after the commit, `stop` at the end of the turn — and
+# the Changes view on the item should read the diff through the proxy.
+#
+# Run 2026-09-02 against the hosted Fountain, before the installer route
+# existed (the hook was inlined here): all three arrived with HTTP 201,
+# `FOUNTAIN_TOKEN` and `FOUNTAIN_CONVERSATION_ID` were in the hook's env, and
+# `hooks_in_user_settings: false` beside a present settings.local.json showed
+# Fountain's settings.json write had happened and the hook had survived it.
+# The reasoning behind the paths is at the top of server/hook.ts.
+#
+# The checkout is mounted under /home/sprite/work: Fountain's disk reads are
+# confined to /home/sprite and the runtime's cwd, so a repository at
+# /workspace/… is one the workbench can be told about but cannot show.
+apiVersion: fountain.dev/v1
+kind: Environment
+metadata:
+  name: workbench-snapshot-smoke
+spec:
+  networking_type: unrestricted
+  packages:
+    apt:
+      - jq
+  env_vars:
+    LANG: C.UTF-8
+    # A dev server behind a tunnel: the hook posts here instead of the origin
+    # the installer was fetched from (they are the same, but explicit is clearer).
+    WORKBENCH_URL: ${WORKBENCH_URL}
+  secrets:
+    WORKBENCH_TOKEN: ${WORKBENCH_TOKEN}
+  repositories:
+    # Public, so the clone needs no vault.
+    - url: https://github.com/managoat/fountain-workbench
+      mount_path: /home/sprite/work/fountain-workbench
+  setup_script: |
+    set -euxo pipefail
+    # An identity, so a commit works with no vault on the project.
+    git config --global user.email smoke@workbench.invalid
+    git config --global user.name "workbench snapshot smoke"
+    curl -fsSL "${WORKBENCH_URL}/hook/install.sh" | bash
+---
+apiVersion: fountain.dev/v1
+kind: Agent
+metadata:
+  name: workbench-snapshot-smoke
+spec:
+  runtime: claude
+  model: anthropic/claude-sonnet-5
+  environment: workbench-snapshot-smoke
+  description: >
+    Smoke test for the workbench's snapshot hook. Does exactly what the
+    prompt says in /home/sprite/work/fountain-workbench and never pushes.
+  system: |
+    You are a smoke test. The checkout is at /home/sprite/work/fountain-workbench.
+    Do exactly what the prompt asks, using your Write tool for files and
+    your Bash tool for git, then say what you did in one line. Never push
+    and never open a pull request. The one file outside the checkout you may
+    read, when asked, is /home/sprite/.workbench/log: it is the hook's own
+    log and holds names, never values.
+  # An MCP server, so Fountain writes ~/.claude/settings.json after setup
+  # and the smoke exercises the clobber server/hook.ts describes.
+  mcp_servers:
+    workbench:
+      type: http
+      url: ${WORKBENCH_URL}/mcp
+      headers:
+        Authorization: "Bearer ${WORKBENCH_TOKEN}"
+  permission_policy:
+    default: auto_allow

@@ -67,6 +67,31 @@ export interface RemovedComputer {
  */
 export type ItemPatch = Partial<Pick<ItemDto, "title" | "notes" | "status" | "agentIds">> & { proposal?: null };
 
+/**
+ * The git state of one checkout on one of a work item's computers, as the hook
+ * in the sandbox last posted it (server/snapshots.ts). The diff itself is not
+ * here: it is read live through the proxy from Fountain (`fountain.sandboxDiff`).
+ */
+export interface SnapshotDto {
+  itemId: string;
+  /** The computer's key: its sandbox id, or `conv:<id>`. */
+  computer: string;
+  /** The checkout's absolute path in the sandbox. */
+  repo: string;
+  conversationId: string;
+  agentId: string | null;
+  source: "stop" | "post-tool" | "post-commit" | "manual";
+  branch: string;
+  head: string;
+  upstream: string;
+  ahead: number;
+  behind: number;
+  /** `git status --porcelain=v2 --branch --untracked-files=all` (lib/diff.ts parses it). */
+  status: string;
+  meta: unknown;
+  takenAt: string;
+}
+
 /** What closing a work item did to its computers (server/projects.ts). */
 export interface RetiredDto {
   conversations: number;
@@ -325,6 +350,9 @@ export const api = {
     call<{ data: ItemDto; retired: RetiredDto; removed: number }>("POST", `/api/projects/${projectId}/items/${itemId}/computers`, { keys }),
   restoreComputer: (projectId: string, itemId: string, key: string) =>
     data(call<{ data: ItemDto }>("DELETE", `/api/projects/${projectId}/items/${itemId}/computers/${encodeURIComponent(key)}`)),
+
+  // The latest state of each checkout on each of the item's computers, as the hook posted it.
+  snapshots: (projectId: string, itemId: string) => data(call<{ data: SnapshotDto[] }>("GET", `/api/projects/${projectId}/items/${itemId}/snapshots`)),
 
   recover: () => data(call<{ data: { projects: number; items: number } }>("POST", "/api/projects/recover")),
   importState: (state: unknown) => data(call<{ data: { projects: number; items: number } }>("POST", "/api/import", state)),

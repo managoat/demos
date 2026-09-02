@@ -76,6 +76,8 @@ const posted: { key: string; body: Record<string, unknown> }[] = [];
 const prompted: { prompt?: string; images?: unknown[] }[] = [];
 /** Conversations this fake was asked to terminate; one whose id starts with `stuck` refuses. */
 const terminated: string[] = [];
+/** Every disk read (files, file, diff) this fake was asked for, and with what query. */
+const diskAsked: { id: string; what: string; query: string }[] = [];
 /** Permission answers this fake accepted. A second one for the same request is too late. */
 const answers: { conversation: string; request: string; option_id: unknown }[] = [];
 let streamEvents: { conversation_id: string; id: number }[] = [];
@@ -209,10 +211,19 @@ const fountain = Bun.serve({
       }
       return Response.json({ error: "not_found" }, { status: 404 });
     }
-    const sb = /^\/api\/sandboxes\/([^/]+)$/.exec(path);
+    const sb = /^\/api\/sandboxes\/([^/]+)(\/(files|file|diff))?$/.exec(path);
     if (sb) {
       const on = convs[key]!.filter((c) => c.sandbox_id === sb[1]);
       if (on.length === 0) return Response.json({ error: "not_found" }, { status: 404 });
+      if (sb[3]) {
+        // The disk reads of ADR 0039, full scope only: what was asked is recorded, the answer is canned.
+        diskAsked.push({ id: sb[1]!, what: sb[3], query: url.search });
+        const p = url.searchParams.get("path") ?? "/home/sprite";
+        if (!p.startsWith("/home/sprite")) return Response.json({ error: "path_outside_sandbox" }, { status: 422 });
+        if (sb[3] === "diff") return Response.json({ data: { diff: "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n", path: p, ref: url.searchParams.get("ref"), repo_root: p, staged: url.searchParams.get("staged") === "true", truncated: false } });
+        if (sb[3] === "files") return Response.json({ data: { path: p, entries: [{ name: "thing", type: "directory", size: 0 }], truncated: false } });
+        return Response.json({ data: { path: p, content: "hello\n", encoding: "utf-8", size: 6, truncated: false } });
+      }
       return Response.json({ data: { id: sb[1], sprite_name: `sprite-${sb[1]}`, status: "ready", conversations: on.map((c) => ({ id: c.id, status: c.status, mid_turn: false })) } });
     }
     if (path === "/api/search") {
@@ -2372,5 +2383,156 @@ describe("what a project cost this billing period, measured in turn hours", () =
     expect(p.fanout.candidates).toBe(7);
     expect(p.projects.map((x) => x.id)).toContain(cp);
     billingEnabled = true;
+  });
+});
+
+// ── snapshots, posted from inside the sandbox ────────────────────────────
+
+describe("snapshots from inside the sandbox, and the disk reads beside them", () => {
+  let projectId = "";
+  let itemId = "";
+  const seen: unknown[] = [];
+
+  beforeAll(async () => {
+    await signIn("alice");
+    await signIn("bob");
+    await signIn("carol");
+    const p = (await (await call("alice", "POST", "/api/projects", { name: "Snapshots" })).json()) as { data: { id: string } };
+    projectId = p.data.id;
+    await call("alice", "POST", `/api/projects/${projectId}/members`, { email: "bob@example.com" });
+    const w = (await (await call("alice", "POST", `/api/projects/${projectId}/items`, { title: "fix foo" })).json()) as { data: { id: string } };
+    itemId = w.data.id;
+    // The conversation the hook runs inside: alice's, on this item, on a computer.
+    convs["key-alice"]!.push({
+      id: "snap-c1",
+      channel_id: `workbench:${projectId}/${itemId}/t1`,
+      title: "Coder: fix foo",
+      agent_id: "a1",
+      environment_id: null,
+      vault_id: null,
+      sandbox_id: "sb-snap",
+      status: "running",
+      inserted_at: "2026-09-01T00:00:00Z",
+    });
+    events.subscribe(projectId, (data) => seen.push(data));
+  });
+
+  /** What the hook sends: the sandbox's key and its conversation, no cookie. */
+  function post(headers: Record<string, string>, body: unknown): Promise<Response> {
+    return app(new Request("http://wb.test/api/snapshots", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) }));
+  }
+  const asSandbox = { authorization: "Bearer key-alice", "x-fountain-conversation-id": "snap-c1" };
+  const git = {
+    repo: "/home/sprite/work/thing",
+    source: "stop",
+    branch: "wb/fix-foo",
+    head: "abc123",
+    upstream: "origin/main",
+    ahead: 2,
+    behind: 1,
+    status: "# branch.head wb/fix-foo\n1 .M N... 100644 100644 100644 x y README.md\n? SMOKE.md",
+  };
+
+  test("needs the conversation header: without it there is no item to record against", async () => {
+    const res = await post({ authorization: "Bearer key-alice" }, git);
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: string }).error).toBe("conversation_required");
+  });
+
+  test("a key that never signed in here is refused, as at the MCP endpoint", async () => {
+    expect((await post({ authorization: "Bearer key-dave", "x-fountain-conversation-id": "snap-c1" }, git)).status).toBe(401);
+    expect((await post({ "x-fountain-conversation-id": "snap-c1" }, git)).status).toBe(401);
+  });
+
+  test("records the checkout's state against the item and the computer, tells the project, and members read it", async () => {
+    const res = await post(asSandbox, { ...git, meta: { event: "Stop", tool: "" } });
+    expect(res.status).toBe(201);
+    const receipt = ((await res.json()) as { data: Record<string, unknown> }).data;
+    expect(receipt.itemId).toBe(itemId);
+    expect(receipt.computer).toBe("sb-snap");
+    expect(seen).toContainEqual({ kind: "snapshot", itemId, computer: "sb-snap", repo: "/home/sprite/work/thing", source: "stop" });
+
+    const listed = (await (await call("bob", "GET", `/api/projects/${projectId}/items/${itemId}/snapshots`)).json()) as { data: Record<string, unknown>[] };
+    expect(listed.data).toHaveLength(1);
+    const s = listed.data[0]!;
+    expect(s).toMatchObject({ computer: "sb-snap", repo: "/home/sprite/work/thing", conversationId: "snap-c1", agentId: "a1", branch: "wb/fix-foo", head: "abc123", ahead: 2, behind: 1, source: "stop" });
+    expect(s.status).toBe(git.status);
+    expect(s.meta).toEqual({ event: "Stop", tool: "" });
+    // No diff rides this way: bytes come from Fountain's read, redacted.
+    expect("diff" in s).toBe(false);
+    // Not in the project: the item does not exist for her.
+    expect((await call("carol", "GET", `/api/projects/${projectId}/items/${itemId}/snapshots`)).status).toBe(404);
+    expect((await call(null, "GET", `/api/projects/${projectId}/items/${itemId}/snapshots`)).status).toBe(401);
+  });
+
+  test("the latest state of a checkout replaces the one before it; a second checkout is a second row", async () => {
+    expect((await post(asSandbox, { ...git, source: "post-commit", head: "def456" })).status).toBe(201);
+    expect((await post(asSandbox, { ...git, repo: "/home/sprite/work/other", source: "post-tool" })).status).toBe(201);
+    const listed = (await (await call("alice", "GET", `/api/projects/${projectId}/items/${itemId}/snapshots`)).json()) as { data: { repo: string; head: string; source: string }[] };
+    expect(listed.data.map((s) => [s.repo, s.head, s.source]).sort()).toEqual([
+      ["/home/sprite/work/other", "abc123", "post-tool"],
+      ["/home/sprite/work/thing", "def456", "post-commit"],
+    ]);
+  });
+
+  test("an unknown source reads as manual; a repo must be an absolute path", async () => {
+    const res = await post(asSandbox, { ...git, repo: "/home/sprite/work/big", source: "whatever" });
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { data: { source: string } }).data.source).toBe("manual");
+    expect((await post(asSandbox, { ...git, repo: "relative/path" })).status).toBe(422);
+  });
+
+  test("a conversation on another project's item, or none of ours, records nothing here", async () => {
+    convs["key-alice"]!.push({ id: "snap-plain", channel_id: null, title: null, agent_id: null, environment_id: null, vault_id: null, sandbox_id: null, status: "idle", inserted_at: "2026-09-01T00:00:00Z" });
+    expect((await post({ authorization: "Bearer key-alice", "x-fountain-conversation-id": "snap-plain" }, git)).status).toBe(404);
+    expect((await post({ authorization: "Bearer key-alice", "x-fountain-conversation-id": "snap-nope" }, git)).status).toBe(404);
+    // bob's key cannot see alice's conversation, so bob's sandbox cannot post as it.
+    expect((await post({ authorization: "Bearer key-bob", "x-fountain-conversation-id": "snap-c1" }, git)).status).toBe(404);
+  });
+
+  test("the disk of the project's computer is read through the proxy, query and all; another computer is not there", async () => {
+    diskAsked.length = 0;
+    const diff = await call("bob", "GET", `/f/${projectId}/api/sandboxes/sb-snap/diff?path=%2Fhome%2Fsprite%2Fwork%2Fthing&staged=true`);
+    expect(diff.status).toBe(200);
+    const body = ((await diff.json()) as { data: { diff: string; staged: boolean; repo_root: string } }).data;
+    expect(body.diff).toContain("+b");
+    expect(body.staged).toBe(true);
+    expect(body.repo_root).toBe("/home/sprite/work/thing");
+    expect((await call("bob", "GET", `/f/${projectId}/api/sandboxes/sb-snap/files?path=%2Fhome%2Fsprite%2Fwork`)).status).toBe(200);
+    const file = (await (await call("alice", "GET", `/f/${projectId}/api/sandboxes/sb-snap/file?path=%2Fhome%2Fsprite%2Fwork%2Fthing%2FREADME.md`)).json()) as { data: { content: string } };
+    expect(file.data.content).toBe("hello\n");
+    expect(diskAsked.map((d) => [d.id, d.what])).toEqual([
+      ["sb-snap", "diff"],
+      ["sb-snap", "files"],
+      ["sb-snap", "file"],
+    ]);
+    expect(diskAsked[0]!.query).toContain("staged=true");
+    // Fountain's own refusals pass through as they are.
+    const outside = await call("bob", "GET", `/f/${projectId}/api/sandboxes/sb-snap/diff?path=%2Fworkspace%2Fthing`);
+    expect(outside.status).toBe(422);
+    expect(((await outside.json()) as { error: string }).error).toBe("path_outside_sandbox");
+    // sb2 hosts alice's private conversation, sb3 another project's: neither is this project's computer.
+    expect((await call("bob", "GET", `/f/${projectId}/api/sandboxes/sb2/diff`)).status).toBe(404);
+    expect((await call("bob", "GET", `/f/${projectId}/api/sandboxes/sb3/files`)).status).toBe(404);
+    expect((await call("carol", "GET", `/f/${projectId}/api/sandboxes/sb-snap/diff`)).status).toBe(404);
+    // Read-only upstream, read-only here.
+    expect((await call("alice", "POST", `/f/${projectId}/api/sandboxes/sb-snap/diff`)).status).toBe(404);
+  });
+});
+
+describe("the hook's installer", () => {
+  test("is public, and posts back to the origin it was fetched from", async () => {
+    const res = await app(new Request("http://wb.test/hook/install.sh", { headers: { "x-forwarded-proto": "https", "x-forwarded-host": "workbench.example" } }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/x-shellscript");
+    const body = await res.text();
+    expect(body).toContain('URL="${WORKBENCH_URL:-https://workbench.example}"');
+    expect(body).toContain("/home/sprite/.claude/settings.local.json");
+    expect(body).toContain("core.hooksPath");
+    expect(body).not.toContain("__WORKBENCH_URL__");
+    // No diff leaves the sandbox this way.
+    expect(body).not.toContain("git diff");
+    const plain = await app(new Request("http://wb.test/hook/install.sh"));
+    expect(await plain.text()).toContain('URL="${WORKBENCH_URL:-http://wb.test}"');
   });
 });

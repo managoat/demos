@@ -12,6 +12,13 @@
 # the `jhgaylor` vault (GitHub token + git identity), and pull the
 # `fountain-workbench` agent onto its work items. No vault is defined here:
 # the project supplies one, and the repo is public, so the clone needs none.
+#
+# Checkouts are mounted under /home/sprite/work, not /workspace: Fountain's
+# disk reads (`GET /api/sandboxes/:id/{files,file,diff}`, ADR 0039) are
+# confined to /home/sprite and the runtime's cwd, and the workbench's Changes
+# view is built on them. A repository anywhere else is one the view cannot
+# show. The setup script's last step installs the snapshot hook that tells the
+# workbench *when* to look (server/hook.ts).
 apiVersion: fountain.dev/v1
 kind: Environment
 metadata:
@@ -34,11 +41,11 @@ spec:
     WORKBENCH_TOKEN: ${WORKBENCH_TOKEN}
   repositories:
     - url: https://github.com/managoat/fountain-workbench
-      mount_path: /workspace/fountain-workbench
+      mount_path: /home/sprite/work/fountain-workbench
       secret_key: GITHUB_TOKEN
     # The API the workbench is built on: OpenAPI, ADRs, the SDK source.
     - url: https://github.com/BinaryBourbon/fountain
-      mount_path: /workspace/fountain
+      mount_path: /home/sprite/work/fountain
       secret_key: GITHUB_TOKEN
   setup_script: |
     set -euxo pipefail
@@ -55,10 +62,14 @@ spec:
       | sudo tee /etc/apt/sources.list.d/github-cli.list
     sudo apt-get update -qq && sudo apt-get install -y -qq gh
 
-    cd /workspace/fountain-workbench
+    cd /home/sprite/work/fountain-workbench
     bun install --frozen-lockfile
     bun run typecheck
     echo 'fountain-workbench ready: bun test / bun run typecheck / bun run build / bun run server'
+
+    # The workbench's snapshot hook: posts branch, head and status on every
+    # edit, commit and turn end, so the Changes view knows when to read the diff.
+    curl -fsSL https://fountain-workbench.demo.managoat.com/hook/install.sh | bash
 ---
 apiVersion: fountain.dev/v1
 kind: Agent
@@ -74,12 +85,12 @@ spec:
     gate, opens one pull request.
   system: |
     You work on Fountain Workbench: a Bun server (server/) and a React SPA
-    (src/) on the Fountain API. The checkout is at /workspace/fountain-workbench;
+    (src/) on the Fountain API. The checkout is at /home/sprite/work/fountain-workbench;
     Fountain itself (the API this is built on: apps/fountain, docs/, decisions/,
-    sdk/typescript) is at /workspace/fountain for reference.
+    sdk/typescript) is at /home/sprite/work/fountain for reference.
 
     Before you touch anything, in this order:
-      1. cd /workspace/fountain-workbench && git fetch origin && git checkout -B <branch> origin/main
+      1. cd /home/sprite/work/fountain-workbench && git fetch origin && git checkout -B <branch> origin/main
          The sandbox may have warm-started from a checkpoint, so the checkout
          on disk can be days old. Fetch before you read it.
       2. Read README.md — how sign-in, sharing, and the project-scoped proxy
@@ -88,7 +99,7 @@ spec:
          boundary a member must not cross. Keep it that way.
       3. For anything touching the Fountain API, read the OpenAPI document in
          the SDK (node_modules/@agentshit/fountain-sdk/dist/generated/openapi.d.ts)
-         or /workspace/fountain/docs before guessing a shape.
+         or /home/sprite/work/fountain/docs before guessing a shape.
 
     The gate, in the foreground, before you push:
       bun run typecheck && bun test && bun run build

@@ -5,7 +5,7 @@
     "": {
       "name": "fountain-workbench",
       "dependencies": {
-        "@agentshit/fountain-sdk": "0.1.7",
+        "@agentshit/fountain-sdk": "1.15.0",
         "react": "^19.1.0",
         "react-dom": "^19.1.0",
       },
@@ -21,7 +21,7 @@
     },
   },
   "packages": {
-    "@agentshit/fountain-sdk": ["@agentshit/fountain-sdk@0.1.7", "", {}, "sha512-LofXimTYKGPMboFS+KO89RDEQqJG1EhpnBAMrewpptd7MtYAHvURoDI1xTk6NQ4MIPQC/aZ46HDonDZcYW6AjA=="],
+    "@agentshit/fountain-sdk": ["@agentshit/fountain-sdk@1.15.0", "", {}, "sha512-OV0ZlaobChTJesF1BBNWs9/vK6+lmouDiUYj69BBfzuUiwpZum2kyuB2vP5FABqWuE0p9d7w1KvSerYGqokHyQ=="],
 
     "@babel/code-frame": ["@babel/code-frame@7.29.7", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.29.7", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw=="],
 

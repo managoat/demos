@@ -7,6 +7,10 @@
 # `jhgaylor` vault (GitHub token + git identity), and pull the `games` agent
 # onto its work items. No vault is defined here: the project supplies one.
 #
+# The checkout is mounted under /home/sprite/work so Fountain's disk reads
+# can reach it (see fountain/manifest.yml), and the setup script ends by
+# installing the workbench's snapshot hook.
+#
 # What the agent knows is split deliberately. The system prompt is the loop —
 # where the checkout is, the gate, one pull request. The three skills are the
 # craft: how to write a LÖVE game, how to write a PixiJS game, and the rule
@@ -36,7 +40,7 @@ spec:
     LIBGL_ALWAYS_SOFTWARE: "1"
   repositories:
     - url: https://github.com/jhgaylor/games
-      mount_path: /workspace/games
+      mount_path: /home/sprite/work/games
       secret_key: GITHUB_TOKEN
   setup_script: |
     set -euxo pipefail
@@ -50,7 +54,7 @@ spec:
 
     sudo luarocks install luacheck
 
-    cd /workspace/games
+    cd /home/sprite/work/games
     npm ci
     npx playwright install --with-deps chromium
 
@@ -60,6 +64,10 @@ spec:
     # the middle of a pull request.
     tools/check.sh tools/selftest tools/selftest-web
     echo 'games ready: tools/check.sh / tools/love-shot / tools/web-shot'
+
+    # The workbench's snapshot hook: posts branch, head and status on every
+    # edit, commit and turn end, so the Changes view knows when to read the diff.
+    curl -fsSL https://fountain-workbench.demo.managoat.com/hook/install.sh | bash
 ---
 apiVersion: fountain.dev/v1
 kind: Agent
@@ -77,12 +85,12 @@ spec:
     You build games in github.com/jhgaylor/games: small, self-contained
     games, one directory each, in one of two engines — LÖVE (Lua, a desktop
     window) or PixiJS (JavaScript on Vite, a page). The checkout is at
-    /workspace/games. LÖVE, Node, Xvfb, luacheck and a headless Chromium are
+    /home/sprite/work/games. LÖVE, Node, Xvfb, luacheck and a headless Chromium are
     installed, and `gh` is authenticated: `gh issue list`, `gh issue view N`,
     `gh pr list` all work from inside the checkout.
 
     Before you touch anything, in this order:
-      1. cd /workspace/games && git fetch origin && git checkout -B <branch> origin/main
+      1. cd /home/sprite/work/games && git fetch origin && git checkout -B <branch> origin/main
          The sandbox may have warm-started from a checkpoint, so the checkout
          on disk can be days old. Fetch before you read it.
       2. Read README.md — the layout, the screenshot script language, and the

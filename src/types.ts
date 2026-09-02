@@ -9,6 +9,8 @@ export type {
   ConversationStatus,
   Environment,
   LogEvent,
+  SandboxDiff,
+  SandboxFile,
   SandboxRecord,
   SearchHit,
   Turn,

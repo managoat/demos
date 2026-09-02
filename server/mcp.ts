@@ -6,7 +6,8 @@
  * A teammate in a sandbox already holds a Fountain key (`$FOUNTAIN_TOKEN`,
  * minted per conversation, `sprite` scope) and the id of the conversation
  * it is running (`$FOUNTAIN_CONVERSATION_ID`). That is everything this
- * endpoint needs, so nothing new is issued and nothing new is stored:
+ * endpoint needs, so nothing new is issued and nothing new is stored. The
+ * rule is `server/callers.ts`, shared with the snapshot route; in short:
  *
  *   - **The bearer token says who is asking.** The workbench asks Fountain
  *     `GET /api/auth/me` and takes the email, which is exactly what
@@ -32,29 +33,17 @@
  * workbench tree of the person it belongs to — no more than handing the
  * same key to the sign-in form would, which is the deal already.
  */
-import { parseChannel } from "../shared/channel";
 import { emptyCounts, isClosed, isItemStatus, isProposedStatus, ITEM_STATUSES, PROPOSABLE_STATUSES, statusLabel } from "../shared/status";
-import { projectAccess, type AppContext } from "./context";
-import { sha256 } from "./crypto";
-import { NO_PROPOSAL, type ItemPatch, type ItemRow, type ProjectRow, type Role, type UserRow } from "./db";
-import { FountainClient, FountainHttpError } from "./fountain";
+import { authenticate, type Caller } from "./callers";
+import type { AppContext } from "./context";
+import { NO_PROPOSAL, type ItemPatch, type ItemRow, type ProjectRow } from "./db";
 import { HttpError, json, readJson, str } from "./http";
 import { itemDto, newItemRow, proposalFields, type ItemDto } from "./projects";
 
 const PROTOCOL_VERSION = "2025-06-18";
 const SERVER_INFO = { name: "fountain-workbench", version: "1" };
-const CONVERSATION_HEADER = "x-fountain-conversation-id";
-
-/** How long a key's verdict from Fountain is reused. Short: a revoked key must stop working. */
-const KEY_CACHE_TTL_MS = 60 * 1000;
-
-/** sha256(key) → the email Fountain said it belongs to, and when it said so. */
-const verified = new Map<string, { email: string; at: number }>();
-
-/** For tests: forget every verified key. */
-export function resetMcpCache(): void {
-  verified.clear();
-}
+/** For tests: forget every verified key. The cache is `server/callers.ts`'s; the name stays for the tests that call it. */
+export { resetKeyCache as resetMcpCache } from "./callers";
 
 // ── the tools ────────────────────────────────────────────────────────────
 
@@ -193,63 +182,6 @@ function callTool(ctx: AppContext, caller: Caller, params: Record<string, unknow
     if (err instanceof ToolError) return toolError(err.message);
     throw err;
   }
-}
-
-// ── who is asking ────────────────────────────────────────────────────────
-
-interface Caller {
-  user: UserRow;
-  /** The project, item and agent of the conversation the caller named, when it named one. */
-  pinned: { project: ProjectRow; role: Role; itemId: string; agentId: string | null } | null;
-}
-
-async function authenticate(ctx: AppContext, req: Request): Promise<Caller> {
-  const header = req.headers.get("authorization") ?? "";
-  const key = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
-  if (!key) {
-    throw new HttpError(401, "unauthenticated", "Send a Fountain API key as `Authorization: Bearer …`; inside a sandbox that is $FOUNTAIN_TOKEN.");
-  }
-  const email = await whose(ctx, key);
-  const user = ctx.db.getUser(email);
-  if (!user) throw new HttpError(401, "unknown_user", `${email} has never signed in to the workbench, so there is nothing here to reach. Sign in once first.`);
-  return { user, pinned: await pin(ctx, user, key, req) };
-}
-
-/** The email Fountain says a key belongs to. */
-async function whose(ctx: AppContext, key: string): Promise<string> {
-  const hash = await sha256(key);
-  const hit = verified.get(hash);
-  if (hit && Date.now() - hit.at < KEY_CACHE_TTL_MS) return hit.email;
-
-  let who: { email: string };
-  try {
-    who = await new FountainClient(ctx.config.fountainUrl, key).me();
-  } catch (err) {
-    if (err instanceof FountainHttpError && (err.status === 401 || err.status === 403)) throw new HttpError(401, "bad_key", "Fountain rejected that key.");
-    throw new HttpError(502, "fountain_unreachable", `Could not reach ${ctx.config.fountainUrl} to verify the key.`);
-  }
-  const email = who.email.trim().toLowerCase();
-  if (!email) throw new HttpError(502, "no_email", "Fountain did not say who the key belongs to.");
-  verified.set(hash, { email, at: Date.now() });
-  return email;
-}
-
-/**
- * The project a caller is confined to, from the conversation it named. Read
- * on the caller's own key — a conversation Fountain will not show that key
- * is not one this caller is in.
- */
-async function pin(ctx: AppContext, user: UserRow, key: string, req: Request): Promise<Caller["pinned"]> {
-  const id = req.headers.get(CONVERSATION_HEADER)?.trim();
-  if (!id) return null;
-  const conv = await new FountainClient(ctx.config.fountainUrl, key).conversation(id);
-  if (!conv) throw new HttpError(404, "no_conversation", `Fountain has no conversation ${id} for this key.`);
-  const ref = parseChannel(conv.channel_id);
-  if (!ref) {
-    throw new HttpError(404, "not_a_workbench_conversation", "That conversation is not on a workbench work item, so there is no project to be in. Drop the header to reach your projects by name.");
-  }
-  const { project, role } = projectAccess(ctx, user, ref.projectId);
-  return { project, role, itemId: ref.itemId, agentId: conv.agent_id ?? null };
 }
 
 // ── what the tools do ────────────────────────────────────────────────────

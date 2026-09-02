@@ -217,6 +217,12 @@ export interface ProjectStore {
   reload: () => Promise<void>;
   /** Events for one conversation, live. Returns the unsubscribe. */
   subscribe: (conversationId: string, handler: EventHandler) => () => void;
+  /**
+   * The last `snapshot` notice off the stream: a hook in a sandbox posted the
+   * git state of a checkout (server/snapshots.ts). The Changes view on that
+   * item re-reads the state and pulls the diff for that computer.
+   */
+  lastSnapshot: SnapshotNotice | null;
   toast: Workbench["toast"];
   // Mutations go to the server; the stream (or the returned record) brings the change back.
   updateProject: (patch: Partial<Pick<ProjectDto, "name" | "notes" | "environmentId" | "vaultId" | "defaultAgentId">>) => Promise<void>;
@@ -243,6 +249,15 @@ export interface ProjectStore {
    * can say so where it asked.
    */
   startConversation: (input: StartInput) => Promise<Conversation>;
+}
+
+export interface SnapshotNotice {
+  itemId: string;
+  computer: string;
+  repo: string;
+  source: string;
+  /** When this browser heard it, so two notices for one computer are two ticks. */
+  at: number;
 }
 
 const ProjectCtx = createContext<ProjectStore | null>(null);
@@ -272,6 +287,7 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
   const [missing, setMissing] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [sandboxes, setSandboxes] = useState<Map<string, SandboxRecord>>(new Map());
+  const [lastSnapshot, setLastSnapshot] = useState<SnapshotNotice | null>(null);
   const [agents, setAgents] = useState<Map<string, Agent>>(new Map());
   const [environments, setEnvironments] = useState<Map<string, Environment>>(new Map());
   const [vaults, setVaults] = useState<Map<string, Vault>>(new Map());
@@ -407,6 +423,19 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
             return;
           }
           if (msg.event === "workbench") {
+            // A snapshot changes no record of the project's own — the item,
+            // its members, its settings stand — so it is not a reload; it is
+            // a cue to whoever is showing that computer's changes.
+            let note: Record<string, unknown> = {};
+            try {
+              note = JSON.parse(msg.data) as Record<string, unknown>;
+            } catch {
+              // an older server's notice carried no body
+            }
+            if (note.kind === "snapshot") {
+              setLastSnapshot({ itemId: String(note.itemId ?? ""), computer: String(note.computer ?? ""), repo: String(note.repo ?? ""), source: String(note.source ?? ""), at: Date.now() });
+              return;
+            }
             scheduleReload();
             return;
           }
@@ -582,6 +611,7 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
             refreshResources,
             reload,
             subscribe,
+            lastSnapshot,
             toast,
             updateProject,
             addMember,
@@ -612,6 +642,7 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
       refreshResources,
       reload,
       subscribe,
+      lastSnapshot,
       toast,
       updateProject,
       addMember,

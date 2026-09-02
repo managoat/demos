@@ -3,7 +3,9 @@
  * status, the teammates on it and the rest of the team a click away, and the
  * conversations it has — each on its computer — linking into the thread.
  * Prompting an agent from here is what puts them on the item; "+" on one only
- * earmarks them.
+ * earmarks them. Between the digest and the teammates sit the **Changes**: per
+ * computer, the branch and files the hook in the sandbox reported and the diff
+ * Fountain reads off the disk (components/Changes.tsx).
  *
  * The notes are the briefing whoever picks the item up reads — a teammate
  * over MCP (`list_work_items`) as much as a person here — so they are
@@ -39,6 +41,7 @@ import { StartDialog } from "../components/StartDialog";
 import { StatusPill } from "../components/StatusPill";
 import { AgentAvatar } from "../components/AgentAvatar";
 import { ItemDigest } from "../components/ItemDigest";
+import { Changes } from "../components/Changes";
 import { shortId } from "../lib/format";
 
 export function WorkItem({ itemId }: { itemId: string }) {
@@ -140,6 +143,9 @@ export function WorkItem({ itemId }: { itemId: string }) {
 
       {/* Keyed on the item: the mark it reads is captured once, per item. */}
       <ItemDigest key={item.id} itemId={item.id} conversations={convs} />
+
+      {/* What the work has come to, per computer: the hook's state and Fountain's diff. */}
+      <Changes item={item} computers={computers} />
 
       <section className="card stack tight">
         <h2 className="h2">Teammates</h2>

@@ -1304,3 +1304,22 @@ body.resizing-col { cursor: col-resize; user-select: none; }
   .page-header .row { flex-wrap: wrap; }
   .page-header h1 { overflow-wrap: anywhere; }
 }
+
+/* ── changes: the hook's state and Fountain's diff, per checkout (components/Changes.tsx) ── */
+.pad { padding: 10px 12px; }
+.repo-changes { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-1); padding: 8px 10px; }
+.repo-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.file-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
+.file-kind { display: inline-block; min-width: 68px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); }
+.file-kind.untracked, .file-kind.added { color: var(--ok); }
+.file-kind.deleted { color: var(--bad); }
+.file-kind.modified, .file-kind.renamed, .file-kind.unmerged { color: var(--warn); }
+.diff-file { border: 1px solid var(--border); border-radius: 8px; margin-top: 8px; overflow: hidden; background: var(--bg-0); }
+.diff-file > summary { padding: 6px 10px; background: var(--bg-2); cursor: pointer; font-size: 12.5px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.diff-wrap { overflow-x: auto; }
+.diff { width: 100%; border-collapse: collapse; font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.45; }
+.diff td { padding: 0 8px; white-space: pre-wrap; word-break: break-all; vertical-align: top; }
+.diff td.no { width: 1%; text-align: right; color: var(--muted); user-select: none; white-space: nowrap; }
+.diff tr.add td { background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.diff tr.del td { background: color-mix(in srgb, var(--bad) 14%, transparent); }
+.diff tr.meta td { color: var(--muted); background: var(--bg-2); }

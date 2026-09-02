@@ -28,7 +28,11 @@
  *   DELETE /api/projects/:id/items/:item
  *   POST   /api/projects/:id/items/:item/computers        { key } or { keys }: retire those computers and take them out of the item
  *   DELETE /api/projects/:id/items/:item/computers/:key   put it back
+ *   GET    /api/projects/:id/items/:item/snapshots        the git state of the item's checkouts, per computer (snapshots.ts)
+ *   POST   /api/snapshots                   from inside a sandbox, on its Fountain key and conversation header:
+ *                                           the git state of a checkout, as the hook there read it (snapshots.ts)
  *   *      /f/:id/api/...                   Fountain, scoped to the project (proxy.ts)
+ *   GET    /hook/install.sh                 the snapshot hook's installer, for an environment's setup script (hook.ts)
  *   POST   /mcp                             the work items as MCP tools, on a Fountain key (mcp.ts)
  *   GET    /healthz
  */
@@ -38,10 +42,12 @@ import * as auth from "./auth";
 import * as brokering from "./brokering";
 import type { AppContext } from "./context";
 import * as cost from "./cost";
+import { installer } from "./hook";
 import { errorResponse, HttpError, json } from "./http";
 import { handleMcp } from "./mcp";
 import * as projects from "./projects";
 import { handleProxy } from "./proxy";
+import * as snapshots from "./snapshots";
 
 type Handler = (req: Request, params: Record<string, string>) => Promise<Response> | Response;
 
@@ -106,10 +112,16 @@ export function buildApp(ctx: AppContext): (req: Request) => Promise<Response> {
   // collection under an item is the removals, and this is a POST to it.
   on("POST", "/api/projects/:id/items/:item/computers", (req, p) => projects.removeComputer(ctx, req, p.id!, p.item!));
   on("DELETE", "/api/projects/:id/items/:item/computers/:key", (req, p) => projects.restoreComputer(ctx, req, p.id!, p.item!, p.key!));
+  on("GET", "/api/projects/:id/items/:item/snapshots", (req, p) => snapshots.list(ctx, req, p.id!, p.item!));
+  // Not under a project: the caller is a sandbox, and which project it is in
+  // is what its conversation header answers (callers.ts), not the URL.
+  on("POST", "/api/snapshots", (req) => snapshots.record(ctx, req));
 
   on("*", "/f/:id/*", (req, p) => handleProxy(ctx, req, p.id!, "/" + (p.rest ?? "")));
   // Not under /api: an agent's client is told one URL, and this is it.
   on("*", "/mcp", (req) => handleMcp(ctx, req));
+  // Public: a script anyone could write, holding no secret but this server's own URL.
+  on("GET", "/hook/install.sh", (req) => installer(req));
 
   const staticDir = ctx.config.staticDir;
 

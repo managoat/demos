@@ -207,6 +207,51 @@ which is the argument for naming the roleless set (`agentForEveryone` in
 `server/proxy.ts`) and having both routes start from it. A rule spread across
 two call sites is a rule one of them can be missing.
 
+**And what is on its disk.** The Details panel says what a computer runs
+with; nothing said what the work on it had come to — which files an agent had
+touched, whether it had committed, how far ahead of `origin/main` it was.
+**Changes**, on the work item, is that: per computer, per checkout, the branch
+and how far ahead, the files that moved, and the diff, following the agent's
+edits as they happen. It is two sources joined, because neither alone is
+enough.
+
+The *bytes* come from Fountain. `GET /api/sandboxes/:id/{files,file,diff}`
+(ADR 0039) reads a sandbox's disk over the API — a directory, a file, `git
+diff` — and the project proxy forwards the three on the owner's key, for the
+project's computers only, exactly as it does the sandbox record. Fountain
+redacts the sandbox's environment and vault values on the way out, pages by
+`max_bytes`, and hands over the whole file beside a hunk when a review wants
+it. Two limits are Fountain's and the view says so rather than showing a
+blank: it reads a `ready` computer only and does not wake a parked one, so an
+asleep machine shows the last state reported and says it is asleep; and it
+reads under `/home/sprite` only, so **environments mount their repositories
+under `/home/sprite/work`** (the manifests in `fountain/` do), and a checkout
+anywhere else is named as the reason there is no diff.
+
+The *state* comes from a hook inside the sandbox, because three things the
+reads cannot tell are the ones a review starts from: which branch, how far
+ahead of upstream, which files are untracked (`git diff` never shows one), and
+*when* anything changed — nothing on Fountain announces a write. The
+environment's setup script installs it in one line, `curl …/hook/install.sh |
+bash`, served by this server so there is one copy (`server/hook.ts`,
+`server/hook.sh`). It wires a script to Claude Code's `Stop` and `PostToolUse`
+hooks and to git's `post-commit`; each posts branch, head, upstream,
+ahead/behind and porcelain status to `POST /api/snapshots`, and never a diff
+— a hook posting raw bytes would carry a secret an agent pasted into a file,
+and Fountain's read would not. The hook is a child of the agent's process, so
+it inherits the per-conversation identity Fountain gives that process,
+`$FOUNTAIN_TOKEN` and `$FOUNTAIN_CONVERSATION_ID`, and authenticates exactly
+as `POST /mcp` does (`server/callers.ts`); nothing new is issued. The server
+keeps the latest per work item, computer and checkout (`server/snapshots.ts`),
+members read it under the item, and a `snapshot` record on the project stream
+is the browser's cue to pull the diff again. Two facts about Fountain fix the
+hook's paths and are written up at the top of `server/hook.ts`: Fountain
+overwrites `~/.claude/settings.json` *after* the setup script whenever the
+agent has an MCP server, and claude's cwd is its HOME, so the hook lives in
+`settings.local.json`; and the identity is spawn env, not disk, so a daemon
+started by the setup script would have neither variable. All of it was proved
+live on 2026-09-02 (`fountain/snapshot-smoke.yml`).
+
 **What happened while you were away.** A work item opens on a digest of
 itself: turns finished, turns that failed, computers that went away, and —
 loudest — how many agents are blocked on a permission request, each one a
@@ -535,7 +580,8 @@ browser ──(session cookie)──▶ workbench server ──(owner's Fountain
   with `workbench:<project>/`: it filters the list, checks every
   per-conversation call (a conversation's egress log — what its sandbox
   reached through the credential broker, and which secret went with each
-  request, by name — included), forces the project's environment and vault
+  request, by name — included), lets the project's computers' disks be read
+  (`/api/sandboxes/:id/{files,file,diff}`) and no others', forces the project's environment and vault
   on a new conversation, cuts full-text search down to hits in the project's
   conversations, lets a member see only the project's environment and
   vault (the owner sees all), and shapes every agent on the way out: the values
@@ -657,9 +703,15 @@ server/
   cost.ts            your bill, the projects you own that it paid for, and their turn hours inside its period
   proxy.ts           Fountain as seen from inside one project, on the owner's key
   watch.ts           one stage stream per owner, folded into who is blocked on a permission request
+  callers.ts         who is calling from inside a sandbox: the sprite key and the conversation header, shared by /mcp and /api/snapshots
+  snapshots.ts       the git state of a work item's checkouts, posted by the hook in the sandbox; latest per computer and repo
+  hook.ts, hook.sh   the hook's installer, served at /hook/install.sh with this server's URL written in
   mcp.ts             the work items as MCP tools, for an agent holding a Fountain key
   db.ts              SQLite: users, sessions, projects, members, items
   crypto.ts          keys at rest, session token hashing
+fountain/
+  manifest.yml       the environment and agent for working on the workbench itself, on Fountain
+  snapshot-smoke.yml the smoke for the snapshot hook: an environment that installs it, an agent that edits and commits
 shared/
   channel.ts         workbench:<project>/<item> — read and written by both sides
   images.ts          an image on a prompt: the four media types, the 10 MB ceiling, the size worth re-encoding at
@@ -679,12 +731,13 @@ src/
   lib/notify.ts      that feed on the desktop: what is new since the last survey, and the permission behind it
   lib/details.ts     what a conversation runs with: its computer, its skills and MCP servers, the policy in force
   lib/board.ts       the items as columns, and which drags between them are real writes
+  lib/diff.ts        a unified diff and a porcelain status, parsed for the Changes view
   lib/blocks.ts      arrange server-parsed blocks (from fountain-conversations)
   lib/markdown.tsx   allow-list markdown → React nodes, no innerHTML
   lib/draft.ts       a field's draft and the debounced save behind it
   lib/theme.ts       the palette list; the blocks themselves are in styles.css
   pages/             Projects, Project (items as a list or a board, people), WorkItem, Team, Cost
-  components/        Thread, ThreadFind (⌘F), DetailsPanel, Board, ItemDigest, Feed (🔔), Palette (⌘K), StartDialog, Attachments, EnvVaultFields, DefaultTeammateField, Blocks, ItemStatus, SignIn, Layout
+  components/        Thread, ThreadFind (⌘F), DetailsPanel, Changes, Board, ItemDigest, Feed (🔔), Palette (⌘K), StartDialog, Attachments, EnvVaultFields, DefaultTeammateField, Blocks, ItemStatus, SignIn, Layout
 test/
   preload.ts         a document for the test run (happy-dom), loaded by bunfig.toml
   render.tsx         mount a component or a hook and drive it, inside React's act
