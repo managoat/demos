@@ -44,6 +44,6 @@ export async function completeGitHubConnectIfCallback(): Promise<string | null> 
 
 function clearParams(): void {
   const url = new URL(window.location.href);
-  ["code", "state", "error", "error_description", "installation_id", "setup_action"].forEach((key) => url.searchParams.delete(key));
+  ["code", "state", "error", "error_description", "iss", "installation_id", "setup_action"].forEach((key) => url.searchParams.delete(key));
   window.history.replaceState({}, "", url.pathname + url.search + url.hash);
 }

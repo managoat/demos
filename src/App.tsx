@@ -15,7 +15,7 @@ import { Join } from "./pages/Join";
 import { useRoute } from "./router";
 import { SessionProvider } from "./store";
 
-type Phase = { kind: "booting" } | { kind: "signin"; fountainUrl: string; error: string | null } | { kind: "in"; me: Me };
+type Phase = { kind: "booting" } | { kind: "signin"; fountainUrl: string; error: string | null } | { kind: "in"; me: Me; error?: string | null };
 
 export function App() {
   const [phase, setPhase] = useState<Phase>({ kind: "booting" });
@@ -51,7 +51,7 @@ export function App() {
       }
       try {
         const me = await api.me();
-        if (!cancelled) setPhase({ kind: "in", me });
+        if (!cancelled) setPhase({ kind: "in", me, error });
       } catch (err) {
         if (!(err instanceof ApiError && err.status === 401)) error = error ?? describeError(err);
         if (!cancelled) setPhase({ kind: "signin", fountainUrl, error });
@@ -69,7 +69,7 @@ export function App() {
   if (phase.kind === "booting") return <div className="boot">Signing in…</div>;
   if (phase.kind === "signin") return <SignIn fountainUrl={phase.fountainUrl} error={phase.error} onSignedIn={(me) => setPhase({ kind: "in", me })} />;
   return (
-    <SessionProvider me={phase.me} onSignOut={signedOut}>
+    <SessionProvider me={phase.me} onSignOut={signedOut} initialError={phase.error}>
       <Shell />
     </SessionProvider>
   );

@@ -1004,8 +1004,11 @@ describe("the GitHub App", () => {
     const host = await signIn("ftn_host");
     const before = await call("GET", "/api/github", { cookie: host });
     expect((await before.json()) as Record<string, unknown>).toMatchObject({ data: { configured: true, connected: false, clientId: "Iv1.salon" } });
+    expect((await call("POST", "/api/github/callback", { cookie: host, body: { code: "good-code", redirectUri: "https://elsewhere.example/" } })).status).toBe(400);
 
-    const linked = await call("POST", "/api/github/callback", { cookie: host, body: { code: "good-code", redirectUri: "http://salon.test/" } });
+    // The public redirect is HTTPS while this in-process request is HTTP —
+    // exactly what Bun sees behind the production reverse proxy.
+    const linked = await call("POST", "/api/github/callback", { cookie: host, body: { code: "good-code", redirectUri: "https://salon.test/" } });
     expect(linked.status).toBe(200);
     expect(((await linked.json()) as { data: { login: string } }).data.login).toBe("octohost");
     const account = ctx.db.githubAccount("host@example.com")!;

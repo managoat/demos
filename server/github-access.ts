@@ -41,7 +41,11 @@ export async function callback(ctx: AppContext, req: Request): Promise<Response>
     throw new HttpError(400, "github_redirect_bad", "The GitHub redirect address is invalid.");
   }
   const here = new URL(req.url);
-  if (redirect.origin !== here.origin || redirect.pathname !== "/") throw new HttpError(400, "github_redirect_bad", "The GitHub redirect address does not belong to this Salon.");
+  // Behind Traefik Bun sees an http request even though the browser and
+  // GitHub used PUBLIC_URL's https origin. Accept the configured public
+  // origin as authoritative; keep the direct request origin for local dev.
+  const allowedOrigins = new Set([here.origin, ctx.config.publicUrl].filter((origin): origin is string => !!origin));
+  if (!allowedOrigins.has(redirect.origin) || redirect.pathname !== "/") throw new HttpError(400, "github_redirect_bad", "The GitHub redirect address does not belong to this Salon.");
   try {
     const token = await exchangeCode(app, code, redirectUri);
     const who = await viewer(app, token.token);
