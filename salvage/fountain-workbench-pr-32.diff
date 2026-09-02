@@ -1,0 +1,1248 @@
+diff --git a/README.md b/README.md
+index 139abd5..e3c718e 100644
+--- a/README.md
++++ b/README.md
+@@ -224,6 +224,20 @@ off a summary row, in a project you are not even in, is a worse decision than
+ answering it under the transcript that explains it, and a countdown makes that
+ pressure worse rather than better.
+ 
++**And in between the two, the verdicts.** A teammate's proposal is the third
++thing waiting on you, and the panel's order is how long each will wait: a
++blocked agent is on five minutes, a verdict waits forever but is a question
++somebody asked you, a finished conversation is news and news keeps. Its rows
++go to the **work item**, not to a thread — the same argument as the blocked
++half, and it lands harder here, because Confirm is what retires the item's
++computers and the notes saying *why* won't do are on the item. So the bell
++takes you to where the reasons and the buttons both are. It also has a mark
++unlike either of the others: read state cannot clear it and neither can this
++browser looking at it, since the proposal is a column on the item. Only
++Confirm or Dismiss takes it away — which is precisely why it needed a wire of
++its own. The top bar is outside every project, so it holds no team and says
++"A teammate says: won't do"; the item page, which has the team, names them.
++
+ That half cannot be surveyed, and it is the one place the server keeps a
+ connection open. A held request is on no conversation record — Fountain writes
+ it to the *turn* and announces it on the `stage` stream — and the conversation
+@@ -299,6 +313,29 @@ letting an item close while its computers stay up — is exactly what "Done
+ means done" is there to prevent, so it is not a shortcut, it is a different
+ promise.
+ 
++**A question is only asked if somebody can hear it.** A proposal is the one
++state in the app that does nothing at all until a person answers it, and it
++used to be visible only on the two screens that already showed the item — you
++found out by going and looking, which is the complaint the 🔔 exists to
++answer. So it is now on the three screens that say *where to look*. The
++explorer marks an open item with a verdict standing on it: a small **needs
++you**, the words the board's own column uses, with "Coder says: won't do" in
++the tooltip. The short form deliberately does not say the verdict — a pill
++reading "won't do" on an item that is still open is the exact confusion `wont`
++was separated from `done` to avoid — and it fits because the tree already
++carries a pill that size in that slot, the one a *closed* item gets, which is
++the one case this one is absent. The projects list carries the number as a
++pill beside "N working", and the bell carries the rows.
++
++It is not a fourth number beside "12 open · 3 done · 1 won't do". Those three
++partition the items and a proposal does not: an item waiting on you is still
++counted in `open`, which is the whole point of the field. A fourth number in
++that line would read as a fourth state. It rides the survey instead, next to
++the other things that are *happening* rather than filed — and because a
++proposal is a column on the work item rather than anything of Fountain's, that
++half of the survey is a database read and still answers when a key is refused
++or Fountain is down.
++
+ **The board answers where the work stands.** The list says what is there;
+ **Board**, the other half of the toggle on a project, says where each item has
+ got to — one column per state, cards you can drag between them. The columns
+@@ -554,7 +591,7 @@ src/
+   lib/search.ts      what ⌘K and ⌘F search: names locally, messages through the proxy
+   lib/turns.ts       fold a log feed into turns for the chat view
+   lib/digest.ts      a work item's stage stream → what happened since you last looked
+-  lib/feed.ts        the same question across every project: what stopped unread and who is blocked, and where
++  lib/feed.ts        the same question across every project: what stopped unread, who is blocked, what verdict is unanswered, and where
+   lib/details.ts     what a conversation runs with: its computer, its skills and MCP servers, the policy in force
+   lib/board.ts       the items as columns, and which drags between them are real writes
+   lib/blocks.ts      arrange server-parsed blocks (from fountain-conversations)
+diff --git a/server/app.test.ts b/server/app.test.ts
+index 8fb7818..eedd679 100644
+--- a/server/app.test.ts
++++ b/server/app.test.ts
+@@ -1121,7 +1121,7 @@ describe("the survey: what is live per project, and what stopped unread across a
+     // `s-running` and `s-pending`; and the latest is theirs (12:31), not the
+     // 13:00 of the team conversation and the one in a project she is not in —
+     // neither of those is this project's to report, in either figure.
+-    expect(s.projects[projectId]).toEqual({ live: 2, latest: "2026-08-24T12:31:00Z" });
++    expect(s.projects[projectId]).toEqual({ live: 2, latest: "2026-08-24T12:31:00Z", proposals: 0 });
+     expect(s.projects.otherproj).toBeUndefined();
+   });
+ 
+@@ -1282,11 +1282,133 @@ describe("the survey: what is live per project, and what stopped unread across a
+       // there. His own project is simply quiet — one dead key is a hole in
+       // the sweep, not a screen that fails to load.
+       expect(s.feed.map((e) => e.conversationId)).toEqual(["s-failed", "s-idle", "s-orphan"]);
+-      expect(s.projects.bobproj).toEqual({ live: 0, latest: null });
++      expect(s.projects.bobproj).toEqual({ live: 0, latest: null, proposals: 0 });
+     } finally {
+       KEYS["key-bob"] = kept;
+     }
+   });
++
++  test("a verdict waiting on a person answers without Fountain at all — it is a column, not a conversation", async () => {
++    // The half of the survey that is the workbench's own. A dead key is a hole
++    // in the sweep, and a question standing on a work item is not something the
++    // browser should stop being told about because a conversation list timed
++    // out. Bob's key is refused and his project still reports the verdict on it.
++    const item = (await (await call("bob", "POST", "/api/projects/bobproj/items", { title: "rip out the cache" })).json()).data.id as string;
++    db.updateItem(item, proposalFields("wont", "a1", "bob@example.com"));
++    const kept = KEYS["key-bob"]!;
++    delete KEYS["key-bob"];
++    try {
++      const s = await surveyOf("bob");
++      expect(s.projects.bobproj).toEqual({ live: 0, latest: null, proposals: 1 });
++      expect(s.proposals.map((p) => p.itemId)).toEqual([item]);
++    } finally {
++      KEYS["key-bob"] = kept;
++      await call("bob", "DELETE", `/api/projects/bobproj/items/${item}`);
++    }
++  });
++
++  test("a verdict says what it is, who by, and where — and points at the item, not a conversation", async () => {
++    const item = (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title: "rip out the cache" })).json()).data.id as string;
++    db.updateItem(item, proposalFields("wont", "a1", "alice@example.com"));
++    try {
++      const s = await surveyOf("alice");
++      const p = s.proposals.find((x) => x.itemId === item)!;
++      expect(p.status).toBe("wont");
++      expect(p.agentId).toBe("a1");
++      expect(p.email).toBe("alice@example.com");
++      expect(p.at).not.toBe("");
++      // Where it is, for the same reason a feed entry carries it: whoever
++      // reads this is in another project and has no store for this one.
++      expect(p.projectId).toBe(projectId);
++      expect(p.projectName).toBe(db.getProject(projectId)!.name);
++      expect(p.itemTitle).toBe("rip out the cache");
++      // A member of the project is told too: the proposal is on the item, so
++      // it waits on whoever gets there, not on the account that recorded it.
++      expect((await surveyOf("bob")).proposals.map((x) => x.itemId)).toContain(item);
++      // And somebody in neither project is told about neither.
++      expect((await surveyOf("carol")).proposals.map((x) => x.itemId)).not.toContain(item);
++    } finally {
++      await call("bob", "DELETE", `/api/projects/${projectId}/items/${item}`);
++    }
++  });
++
++  test("a proposal does not move open, done or won't do: the item is still open work", async () => {
++    // The whole point of the field being separate from the status. A proposal
++    // retires nothing and takes no computer down, so the list must keep
++    // counting the item as open until a person agrees.
++    const item = (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title: "still open" })).json()).data.id as string;
++    const countsNow = async () => (await (await call("bob", "GET", `/api/projects/${projectId}`)).json()).data.project.counts;
++    const before = await countsNow();
++    try {
++      db.updateItem(item, proposalFields("wont", "a1", "alice@example.com"));
++      expect(await countsNow()).toEqual(before);
++      expect((await surveyOf("alice")).projects[projectId]!.proposals).toBe(1);
++      // Confirming it is what moves the count — and settles the question.
++      await call("bob", "PATCH", `/api/projects/${projectId}/items/${item}`, { status: "wont" });
++      expect(await countsNow()).toEqual({ ...before, open: before.open - 1, wont: before.wont + 1 });
++      const after = await surveyOf("alice");
++      expect(after.projects[projectId]!.proposals).toBe(0);
++      expect(after.proposals).toEqual([]);
++    } finally {
++      await call("bob", "DELETE", `/api/projects/${projectId}/items/${item}`);
++    }
++  });
++
++  test("dismissing it clears the row and leaves the item open — the other way a verdict is answered", async () => {
++    const item = (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title: "dismiss me" })).json()).data.id as string;
++    db.updateItem(item, proposalFields("done", null, "alice@example.com"));
++    try {
++      expect((await surveyOf("alice")).proposals.map((p) => p.itemId)).toContain(item);
++      await call("bob", "PATCH", `/api/projects/${projectId}/items/${item}`, { proposal: null });
++      const s = await surveyOf("alice");
++      expect(s.proposals.map((p) => p.itemId)).not.toContain(item);
++      // Nothing was closed: dismissing is not a decision about the work.
++      expect(db.getItem(item)!.status).toBe("open");
++    } finally {
++      await call("bob", "DELETE", `/api/projects/${projectId}/items/${item}`);
++    }
++  });
++
++  test("verdicts come oldest first, and the list caps while the per-project number stays exact", async () => {
++    // Nothing expires a proposal, so nothing else ranks them: the one standing
++    // longest is the one most overdue an answer, and it is the one the cap keeps.
++    const made: string[] = [];
++    try {
++      for (let i = 0; i < 55; i++) {
++        const id = (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title: `item ${i}` })).json()).data.id as string;
++        made.push(id);
++        db.updateItem(id, { ...proposalFields("wont", "a1", "alice@example.com"), proposed_at: `2026-08-${String(1 + i).padStart(2, "0")}T00:00:00Z` });
++      }
++      const s = await surveyOf("alice");
++      expect(s.proposals).toHaveLength(50);
++      expect(s.proposalsDropped).toBe(5);
++      const times = s.proposals.map((p) => p.at);
++      expect([...times].sort()).toEqual(times);
++      // Kept the oldest five-and-forty, dropped the newest five.
++      expect(s.proposals[0]!.itemId).toBe(made[0]!);
++      expect(s.proposals.map((p) => p.itemId)).not.toContain(made[54]);
++      // The number on the projects row is not capped: it is counted before the
++      // list is trimmed, so it cannot say 50 when 55 are waiting.
++      expect(s.projects[projectId]!.proposals).toBe(55);
++    } finally {
++      for (const id of made) await call("bob", "DELETE", `/api/projects/${projectId}/items/${id}`);
++    }
++  });
++
++  test("a proposal left on a closed item is waiting on nobody", async () => {
++    // Deciding a status settles the proposal everywhere one can be written, so
++    // this is a row an older build or a hand-edit could leave behind. The item
++    // is shut; there is no question left standing on it.
++    const item = (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title: "already shut" })).json()).data.id as string;
++    db.updateItem(item, { status: "done", ...proposalFields("wont", "a1", "alice@example.com") });
++    try {
++      const s = await surveyOf("alice");
++      expect(s.proposals.map((p) => p.itemId)).not.toContain(item);
++      expect(s.projects[projectId]!.proposals).toBe(0);
++    } finally {
++      await call("bob", "DELETE", `/api/projects/${projectId}/items/${item}`);
++    }
++  });
+ });
+ 
+ describe("a database written before proposals existed", () => {
+diff --git a/server/app.ts b/server/app.ts
+index e10a201..08ceff7 100644
+--- a/server/app.ts
++++ b/server/app.ts
+@@ -11,9 +11,10 @@
+  *   GET    /api/me/cost/period              the same projects in turn hours over the bill's own window (cost.ts)
+  *   GET    /api/projects                    mine: owned and shared with me
+  *   POST   /api/projects
+- *   GET    /api/projects/activity           per project: live counts and last activity; and across
+- *                                           all of them, the conversations that stopped unread and
+- *                                           the agents blocked on a permission request (watch.ts)
++ *   GET    /api/projects/activity           per project: live counts, last activity and standing
++ *                                           proposals; and across all of them, the conversations that
++ *                                           stopped unread, the agents blocked on a permission
++ *                                           request (watch.ts), and the verdicts waiting on a person
+  *   POST   /api/projects/recover            rebuild my projects from my Fountain conversations
+  *   POST   /api/import                      the tree an old browser kept in localStorage
+  *   GET    /api/projects/:id                project + items
+diff --git a/server/db.ts b/server/db.ts
+index ec9ad8c..89979d2 100644
+--- a/server/db.ts
++++ b/server/db.ts
+@@ -328,6 +328,34 @@ export class Db {
+     this.sql.query("DELETE FROM items WHERE id = $id").run({ id });
+   }
+ 
++  /**
++   * Every standing proposal across these projects: a verdict a teammate has
++   * recorded that nobody has answered yet.
++   *
++   * Open items only. Deciding a status settles the proposal on it everywhere
++   * one can be written (server/projects.ts, server/mcp.ts), so a closed row
++   * should not be carrying one — and a row that somehow is, from an older
++   * build or a hand-edited database, is waiting on nobody: the item is shut.
++   * The test is `NOT IN ('done','wont')` rather than `= 'open'` because that
++   * is what `isClosed` does with a status nothing recognises (shared/status.ts)
++   * — an item nobody can account for is still work.
++   *
++   * The rows come back whole and are counted in one pass by the caller, so
++   * the per-project number and the list it is capped out of cannot disagree.
++   */
++  standingProposals(projectIds: string[]): ItemRow[] {
++    if (projectIds.length === 0) return [];
++    return this.sql
++      .query(
++        `SELECT * FROM items
++          WHERE project_id IN (${projectIds.map(() => "?").join(",")})
++            AND status NOT IN ('done', 'wont')
++            AND proposed_status <> ''
++          ORDER BY proposed_at ASC, id ASC`,
++      )
++      .all(...projectIds) as ItemRow[];
++  }
++
+   /** Item counts per project for a user's list, in one query. */
+   itemCounts(projectIds: string[]): Map<string, ItemCounts> {
+     const out = new Map<string, ItemCounts>();
+diff --git a/server/projects.ts b/server/projects.ts
+index 7070f7f..0061302 100644
+--- a/server/projects.ts
++++ b/server/projects.ts
+@@ -117,10 +117,22 @@ export async function list(ctx: AppContext, req: Request): Promise<Response> {
+   return json({ data: rows.map((p) => projectDto(ctx, p, p.owner_email === user.email ? "owner" : "member", counts.get(p.id))) });
+ }
+ 
+-/** What is happening in one project: how many conversations are working, and when anything last happened. */
++/** What is happening in one project: how many conversations are working, when anything last happened, and what is waiting on a person. */
+ export interface Activity {
+   live: number;
+   latest: string | null;
++  /**
++   * Standing proposals on this project's open items.
++   *
++   * Deliberately here and not in `ItemCounts`: those three numbers partition
++   * the items, and a proposal is not a fourth state an item can be in — it is
++   * a question standing on an item that is still open work, and still counted
++   * as open. A fourth number beside the other three would read as a fourth
++   * state, which is the exact misreading `wont` was split from `done` to
++   * avoid. This is a count of what is waiting on you, which is what the
++   * survey is for.
++   */
++  proposals: number;
+ }
+ 
+ /**
+@@ -175,6 +187,31 @@ export interface WaitingEntry {
+   expiresAt: string;
+ }
+ 
++/**
++ * One verdict a teammate has proposed that nobody has answered.
++ *
++ * The third thing waiting on a person, and the only one that is the
++ * workbench's own: a proposal is a column on the item, so this half of the
++ * survey is a database read and answers even when Fountain does not.
++ *
++ * It names its project and item for the same reason the other two do — a
++ * browser reading it is somewhere else — and it points at the *item* rather
++ * than a conversation, because the item is where Confirm and Dismiss are.
++ */
++export interface ProposalEntry {
++  projectId: string;
++  projectName: string;
++  itemId: string;
++  itemTitle: string;
++  /** What the teammate says should happen to it: `done` or `wont`. */
++  status: ProposedStatus;
++  /** The agent that said it, when it came from inside a conversation; null when a bare key proposed it. */
++  agentId: string | null;
++  /** The account whose Fountain key it was — what a reader falls back to when nothing can name the agent. */
++  email: string;
++  at: string;
++}
++
+ export interface ActivityDto {
+   projects: Record<string, Activity>;
+   /** Newest first, capped. */
+@@ -183,6 +220,10 @@ export interface ActivityDto {
+   dropped: number;
+   /** Held permission requests, oldest first — the ones closest to running out. */
+   waiting: WaitingEntry[];
++  /** Standing proposals, oldest first — the one that has been asked longest is the one most overdue an answer. */
++  proposals: ProposalEntry[];
++  /** Proposals past the cap. The per-project numbers above stay exact; only this list is trimmed. */
++  proposalsDropped: number;
+ }
+ 
+ /**
+@@ -200,6 +241,9 @@ const FEED_STATUSES = new Set(["idle", "failed"]);
+  */
+ const FEED_MAX = 50;
+ 
++/** The same rule for proposals: a list, not an archive. The per-project counts are not capped. */
++const PROPOSALS_MAX = 50;
++
+ /**
+  * What is happening across every project the caller is in, in the two shapes
+  * the app reads it in: per project, how much is working and when anything last
+@@ -221,6 +265,13 @@ const FEED_MAX = 50;
+  * news. That is folded off the owner's stage stream instead (server/watch.ts,
+  * which is also where the choice between asking Fountain and streaming is
+  * argued) and joined on here, in the same pass, out of the same listing.
++ *
++ * The third thing waiting on a person needs no listing at all. A proposal is a
++ * column on the work item, so it is read straight out of the database before
++ * any of the above — which means it is the one part of the survey that still
++ * answers when a key is refused or Fountain is down. A question standing on an
++ * item is not something the browser should stop being told about because the
++ * conversation list timed out.
+  */
+ export async function activity(ctx: AppContext, req: Request): Promise<Response> {
+   const user = await authenticate(ctx, req);
+@@ -229,9 +280,31 @@ export async function activity(ctx: AppContext, req: Request): Promise<Response>
+   const byOwner = new Map<string, ProjectRow>();
+   for (const p of rows) if (!byOwner.has(p.owner_email)) byOwner.set(p.owner_email, p);
+   const out: Record<string, Activity> = {};
+-  for (const p of rows) out[p.id] = { live: 0, latest: null };
++  for (const p of rows) out[p.id] = { live: 0, latest: null, proposals: 0 };
+   const feed: FeedEntry[] = [];
+   const waiting: WaitingEntry[] = [];
++  // A shared project shares this the way it shares everything else: the
++  // proposal is on the item, so it waits on whoever gets there, not on the
++  // account whose key recorded it.
++  const proposals: ProposalEntry[] = [];
++  for (const w of ctx.db.standingProposals(rows.map((p) => p.id))) {
++    const project = mine.get(w.project_id);
++    const proposal = proposalOf(w);
++    // `proposalOf` is the same reader the item rows use, so a `proposed_status`
++    // neither side recognises is nobody proposing anything, in both places.
++    if (!project || !proposal) continue;
++    out[project.id]!.proposals += 1;
++    proposals.push({
++      projectId: project.id,
++      projectName: project.name,
++      itemId: w.id,
++      itemTitle: w.title,
++      status: proposal.status,
++      agentId: proposal.agentId,
++      email: proposal.email,
++      at: proposal.at,
++    });
++  }
+   await Promise.allSettled(
+     [...byOwner.values()].map(async (p) => {
+       const client = await ownerClient(ctx, p);
+@@ -287,7 +360,17 @@ export async function activity(ctx: AppContext, req: Request): Promise<Response>
+   // Waiting sorts the other way up: oldest first is closest to being denied,
+   // and the one about to run out is the one to answer.
+   waiting.sort((a, b) => a.askedAt.localeCompare(b.askedAt) || a.conversationId.localeCompare(b.conversationId));
+-  const dto: ActivityDto = { projects: out, feed: feed.slice(0, FEED_MAX), dropped: Math.max(0, feed.length - FEED_MAX), waiting };
++  // Proposals are already oldest first out of the query. Nothing expires one,
++  // so nothing else ranks them: the one that has been standing longest is the
++  // one most overdue an answer, and it is the one the cap keeps.
++  const dto: ActivityDto = {
++    projects: out,
++    feed: feed.slice(0, FEED_MAX),
++    dropped: Math.max(0, feed.length - FEED_MAX),
++    waiting,
++    proposals: proposals.slice(0, PROPOSALS_MAX),
++    proposalsDropped: Math.max(0, proposals.length - PROPOSALS_MAX),
++  };
+   return json({ data: dto });
+ }
+ 
+diff --git a/src/components/Feed.test.tsx b/src/components/Feed.test.tsx
+index e5b073e..0be715f 100644
+--- a/src/components/Feed.test.tsx
++++ b/src/components/Feed.test.tsx
+@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test";
+ import { renderToStaticMarkup } from "react-dom/server";
+ import { FeedList } from "./Feed";
+ import { NO_ACTIVITY } from "../lib/feed";
+-import type { ActivityDto, FeedEntry, WaitingEntry } from "../lib/api";
++import type { ActivityDto, FeedEntry, ProposalEntry, WaitingEntry } from "../lib/api";
+ 
+ const T0 = Date.parse("2026-08-24T10:00:00Z");
+ const at = (mins: number) => new Date(T0 + mins * 60_000).toISOString();
+@@ -37,18 +37,31 @@ const entry = (over: Partial<FeedEntry> & Pick<FeedEntry, "conversationId" | "pr
+   ...over,
+ });
+ 
++/** A verdict standing on an item `mins` after T0, waiting on whoever gets there. */
++const proposed = (mins: number, over: Partial<ProposalEntry> & Pick<ProposalEntry, "itemId" | "projectId">): ProposalEntry => ({
++  projectName: "Fountain",
++  itemTitle: "fix foo",
++  status: "wont",
++  agentId: "a1",
++  email: "alice@example.com",
++  at: at(mins),
++  ...over,
++});
++
++const survey = (over: Partial<ActivityDto> = {}): ActivityDto => ({ ...NO_ACTIVITY, ...over });
++
+ const render = (a: ActivityDto, here: string | null = null) => renderToStaticMarkup(<FeedList activity={a} here={here} now={T0 + 30 * 60_000} />);
+ 
+ describe("FeedList", () => {
+   test("nothing waiting: it says so, and says what would land here", () => {
+     const html = render(NO_ACTIVITY);
+     expect(html).toContain("Nothing waiting");
+-    expect(html).toContain("Opening the thread is what clears it");
++    expect(html).toContain("Opening the thread is what clears the first two");
+     expect(html).not.toContain("feed-row ");
+   });
+ 
+   test("a row names the conversation, the item and the project, and links to the thread", () => {
+-    const html = render({ projects: {}, dropped: 0, waiting: [], feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0) })] });
++    const html = render(survey({ feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0) })] }));
+     expect(html).toContain("Coder: fix foo");
+     expect(html).toContain("fix foo");
+     // The project is the fact the reader is missing: they are in another one.
+@@ -58,21 +71,18 @@ describe("FeedList", () => {
+   });
+ 
+   test("a failed conversation says so where the row is read, not only in its colour", () => {
+-    const html = render({ projects: {}, dropped: 0, waiting: [], feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0), status: "failed" })] });
++    const html = render(survey({ feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0), status: "failed" })] }));
+     expect(html).toContain("feed-row failed");
+     expect(html).toContain("failed ·");
+   });
+ 
+   test("the project you are looking at is labelled, so a row you can already see is not mistaken for news", () => {
+-    const a: ActivityDto = {
+-      projects: {},
+-      dropped: 0,
+-      waiting: [],
++    const a = survey({
+       feed: [
+         entry({ conversationId: "c1", projectId: "here", projectName: "Here", at: at(0) }),
+         entry({ conversationId: "c2", projectId: "p2", projectName: "Elsewhere", at: at(-10) }),
+       ],
+-    };
++    });
+     const html = render(a, "here");
+     expect(html).toContain("· here");
+     // And it is last, under the project that is actually news.
+@@ -80,19 +90,19 @@ describe("FeedList", () => {
+   });
+ 
+   test("what the server capped off is stated, not swallowed", () => {
+-    const html = render({ projects: {}, dropped: 7, waiting: [], feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0) })] });
++    const html = render(survey({ dropped: 7, feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0) })] }));
+     expect(html).toContain("7 more not shown");
+     // The count in the head is everything waiting, including those seven.
+     expect(html).toContain("8 conversations finished and unread");
+   });
+ 
+   test("a blocked agent is first, says what it wants to run, and counts down", () => {
+-    const html = render({
+-      projects: {},
+-      dropped: 0,
+-      waiting: [asking(27, { conversationId: "c9", projectId: "p9", projectName: "Ravioli" })],
+-      feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0) })],
+-    });
++    const html = render(
++      survey({
++        waiting: [asking(27, { conversationId: "c9", projectId: "p9", projectName: "Ravioli" })],
++        feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0) })],
++      }),
++    );
+     expect(html).toContain("Waiting on you");
+     expect(html).toContain("wants to run Bash");
+     // Two minutes to answer before Fountain answers for you, with a refusal.
+@@ -108,13 +118,67 @@ describe("FeedList", () => {
+   test("a request that has already run out is not offered — Fountain has answered it", () => {
+     // Asked at 20, denied at 25, and it is 30: a row here would be a link to
+     // a question nobody can answer any more.
+-    const html = render({ projects: {}, dropped: 0, waiting: [asking(20, { conversationId: "c9", projectId: "p9" })], feed: [] });
++    const html = render(survey({ waiting: [asking(20, { conversationId: "c9", projectId: "p9" })] }));
+     expect(html).not.toContain("feed-group waiting");
+     expect(html).toContain("Nothing waiting");
+   });
+ 
++  // ── a verdict waiting on a person ──────────────────────────────────────
++
++  test("a proposed verdict is a row, and it goes to the item rather than a thread", () => {
++    const html = render(survey({ proposals: [proposed(0, { itemId: "w7", projectId: "p1", itemTitle: "rip out the cache" })] }));
++    expect(html).toContain("Needs you");
++    expect(html).toContain("says: won&#x27;t do");
++    expect(html).toContain("rip out the cache");
++    // The item, not the conversation: Confirm retires the item's computers and
++    // is decided off the notes that say why, both of which are on the item.
++    expect(html).toContain('href="#/p/p1/w/w7"');
++    expect(html).toContain("1 verdict waiting on you");
++  });
++
++  test("the top bar cannot name the agent, so it says the true thing it knows", () => {
++    // Inside a conversation, a teammate proposed it — the bell holds no team
++    // for a project it is not in, and the item page says the name.
++    expect(render(survey({ proposals: [proposed(0, { itemId: "w7", projectId: "p1" })] }))).toContain("A teammate");
++    // On a bare key, no agent proposed it at all and the account is all there is.
++    const bare = render(survey({ proposals: [proposed(0, { itemId: "w7", projectId: "p1", agentId: null })] }));
++    expect(bare).toContain("alice@example.com");
++    expect(bare).not.toContain("A teammate");
++  });
++
++  test("a verdict sits under what is on a clock and above what merely finished", () => {
++    const html = render(
++      survey({
++        waiting: [asking(27, { conversationId: "c9", projectId: "p9" })],
++        proposals: [proposed(0, { itemId: "w7", projectId: "p1", itemTitle: "rip out the cache" })],
++        feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0), title: "Coder: finished something" })],
++      }),
++    );
++    expect(html.indexOf("Waiting on you")).toBeLessThan(html.indexOf("Needs you"));
++    expect(html.indexOf("Needs you")).toBeLessThan(html.indexOf("Coder: finished something"));
++    // All three in the sentence, in the same order.
++    expect(html).toContain("1 agent is blocked waiting on you · 1 verdict waiting on you · 1 conversation finished and unread");
++  });
++
++  test("a verdict alone is not an empty panel", () => {
++    const html = render(survey({ proposals: [proposed(0, { itemId: "w7", projectId: "p1" })] }));
++    expect(html).not.toContain("Nothing waiting");
++    expect(html).not.toContain("would land here");
++  });
++
++  test("the project you are standing in is labelled on a verdict too", () => {
++    const html = render(survey({ proposals: [proposed(0, { itemId: "w7", projectId: "here", projectName: "Here" })] }), "here");
++    expect(html).toContain("· here");
++  });
++
++  test("verdicts past the cap are stated in the panel and counted on the bell", () => {
++    const html = render(survey({ proposals: [proposed(0, { itemId: "w7", projectId: "p1" })], proposalsDropped: 4 }));
++    expect(html).toContain("4 more waiting on you, not shown");
++    expect(html).toContain("5 verdicts waiting on you");
++  });
++
+   test("a conversation Fountain has not titled yet still renders as a row", () => {
+-    const html = render({ projects: {}, dropped: 0, waiting: [], feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0), title: null, itemTitle: null })] });
++    const html = render(survey({ feed: [entry({ conversationId: "c1", projectId: "p1", at: at(0), title: null, itemTitle: null })] }));
+     expect(html).toContain("Untitled conversation");
+     expect(html).toContain("no longer here");
+   });
+diff --git a/src/components/Feed.tsx b/src/components/Feed.tsx
+index 13c8814..774fe23 100644
+--- a/src/components/Feed.tsx
++++ b/src/components/Feed.tsx
+@@ -1,19 +1,25 @@
+ /**
+- * The feed in the top bar: who is blocked waiting on you, and what finished in
+- * your projects that nobody has read — grouped by project, newest first.
++ * The feed in the top bar: who is waiting on you, and what finished in your
++ * projects that nobody has read — grouped by project, newest first.
+  *
+- * The blocked half is first and stays first. A finished conversation waits
+- * indefinitely; a held permission request is denied by Fountain five minutes
+- * after it was raised, so the row carries a countdown and sorts oldest first —
+- * the one about to run out is the one to answer.
++ * Three things wait on you, and they are in the order of how long they will
++ * wait. A held permission request is denied by Fountain five minutes after it
++ * was raised, so it leads, with a countdown, oldest first. A proposed verdict
++ * waits forever but is a question a teammate asked you — it is the one state
++ * in the app that does nothing at all until somebody answers, and before this
++ * it was visible only if you were already looking at the item. A finished
++ * conversation is news, and news keeps.
+  *
+- * It is a link, not a pair of buttons, and that is deliberate: the same
+- * argument the item digest already had and lost. Answering "Bash — rm -rf
+- * build/" from a summary row, in a project you are not even in, off a title
+- * and a tool name, is a worse decision than answering it in the thread with
+- * the transcript above it — and a countdown makes that pressure worse, not
+- * better. This says who is waiting and takes you there; the card in the thread
+- * (`PermissionCard` in Blocks.tsx) is where you say yes.
++ * Every one of them is a link, not a pair of buttons, and that is deliberate:
++ * the same argument the item digest already had and lost. Answering "Bash —
++ * rm -rf build/" from a summary row, in a project you are not even in, off a
++ * title and a tool name, is a worse decision than answering it in the thread
++ * with the transcript above it — and a countdown makes that pressure worse,
++ * not better. A verdict is the same shape: "won't do" is confirmed off the
++ * notes that say why, which are on the item, and Confirm there retires the
++ * item's computers. So a proposal row goes to the item and the buttons stay
++ * where the reasons are (`CloseControls` in ItemStatus.tsx); a blocked row
++ * goes to the thread, where `PermissionCard` in Blocks.tsx is.
+  *
+  * It is in the top bar rather than on a page because the whole complaint it
+  * answers is that you were *somewhere else*: a screen you have to navigate to
+@@ -21,13 +27,15 @@
+  * The bell is on every page, in and out of a project, and carries the count
+  * whether or not it is open.
+  *
+- * A row is an ordinary link to the conversation, and opening the thread is
+- * what clears the row: it marks the conversation read on Fountain (`markRead`
+- * in Thread.tsx), which is the same fact the server surveys. Nothing here
+- * dismisses without reading — a "clear all" would let the one screen that
+- * says an agent finished be silenced without anyone going and looking, which
+- * is how you end up back where this started. See src/lib/feed.ts for why read
+- * state and not a per-browser mark.
++ * A feed row is an ordinary link to the conversation, and opening the thread
++ * is what clears the row: it marks the conversation read on Fountain
++ * (`markRead` in Thread.tsx), which is the same fact the server surveys.
++ * Nothing here dismisses without reading — a "clear all" would let the one
++ * screen that says an agent finished be silenced without anyone going and
++ * looking, which is how you end up back where this started. See
++ * src/lib/feed.ts for why read state and not a per-browser mark. A proposal
++ * row is stricter still: reading it does nothing, and only Confirm or Dismiss
++ * on the item takes it away.
+  *
+  * `FeedList` is the render and takes everything it shows, so it can be tested
+  * without a DOM; `Feed` is the button, the store and the open/closed state.
+@@ -35,7 +43,7 @@
+ import { useEffect, useRef, useState } from "react";
+ import { useWorkbench } from "../store";
+ import { href, useRoute } from "../router";
+-import { feedCount, feedGroups, feedSummary, feedTitle, feedWaiting, feedWhere, waitingWhat, waitingWho } from "../lib/feed";
++import { feedCount, feedGroups, feedSummary, feedTitle, feedWaiting, feedWhere, proposalSays, proposalWho, waitingWhat, waitingWho } from "../lib/feed";
+ import { timeLeft } from "../lib/digest";
+ import { relativeTime } from "../lib/sidebar";
+ import type { ActivityDto } from "../lib/api";
+@@ -79,10 +87,37 @@ export function FeedList({
+           ))}
+         </div>
+       )}
+-      {groups.length === 0 && waiting.length === 0 ? (
++      {activity.proposals.length > 0 && (
++        <div className="feed-group proposed">
++          <div className="feed-group-label">Needs you</div>
++          {activity.proposals.map((p) => (
++            <a
++              key={p.itemId}
++              className="feed-row proposal"
++              href={href.item(p.projectId, p.itemId)}
++              onClick={onPick}
++              title="Nothing has been retired — the item is still open work. Confirm it or dismiss it on the item, where the notes say why."
++            >
++              <span className="feed-dot" aria-hidden="true" />
++              <span className="feed-row-main">
++                <span className="feed-row-title">
++                  {proposalWho(p)} <span className="muted">{proposalSays(p)}</span>
++                </span>
++                <span className="feed-row-sub muted">
++                  {p.projectName}
++                  {p.projectId === here ? " · here" : ""} · {p.itemTitle}
++                </span>
++              </span>
++              <span className="feed-row-time muted">{relativeTime(p.at, now)}</span>
++            </a>
++          ))}
++          {activity.proposalsDropped > 0 && <p className="feed-foot muted small">{activity.proposalsDropped} more waiting on you, not shown.</p>}
++        </div>
++      )}
++      {groups.length === 0 && waiting.length === 0 && activity.proposals.length === 0 ? (
+         <p className="feed-empty muted">
+-          When a teammate finishes in any of your projects, or gets blocked waiting on you in one, it lands here — so you find out without going and looking. Opening
+-          the thread is what clears it; a blocked one goes when you answer it.
++          When a teammate finishes in any of your projects, gets blocked waiting on you in one, or proposes a verdict on a work item, it lands here — so you find out
++          without going and looking. Opening the thread is what clears the first two; a verdict goes when you confirm or dismiss it.
+         </p>
+       ) : (
+         groups.map((g) => (
+diff --git a/src/components/ItemStatus.test.tsx b/src/components/ItemStatus.test.tsx
+index f8cd7f4..bd5868b 100644
+--- a/src/components/ItemStatus.test.tsx
++++ b/src/components/ItemStatus.test.tsx
+@@ -6,7 +6,7 @@
+  */
+ import { describe, expect, test } from "bun:test";
+ import { renderToStaticMarkup } from "react-dom/server";
+-import { CloseControls } from "./ItemStatus";
++import { CloseControls, ItemStatusPill, ProposalPill } from "./ItemStatus";
+ import { proposerName } from "../lib/workbench";
+ import type { Proposal } from "../lib/workbench";
+ 
+@@ -37,6 +37,40 @@ describe("an open item with a proposal on it", () => {
+   });
+ });
+ 
++describe("the same proposal in a tree row, where there is no space for a sentence", () => {
++  test("the small form says the state, not the verdict — a verdict there reads as a closed item", () => {
++    const html = markup(<ProposalPill proposal={wont} by="Coder" tiny />);
++    // "won't do" on an item that is still open is the exact confusion `wont`
++    // was separated from `done` to avoid, and a tree row is all pill and no
++    // sentence. "needs you" is what the board's own column calls these items.
++    expect(html).toContain("needs you");
++    expect(html).not.toContain("won&#x27;t do</span>");
++    // The sentence is one hover away, and says the item is still open.
++    expect(html).toContain("Coder says: won&#x27;t do");
++    expect(html).toContain("still open");
++    expect(html).toContain("pill proposed tiny");
++  });
++
++  test("it fits where it goes, because a pill of that size is already on that row", () => {
++    // The evidence for the small form is that the tree already carries one in
++    // the same slot: a closed item's status pill. "needs you" is the length of
++    // "won't do", in the same class at the same size — so this is not a new
++    // demand on the row's width.
++    const closed = markup(<ItemStatusPill status="wont" tiny />);
++    expect(closed).toContain("pill wont tiny");
++    expect("needs you".length).toBeLessThanOrEqual("won't do".length + 1);
++    // And the two never appear together: the tiny proposal pill is only for an
++    // item that is still open, which is the one case the status pill is absent.
++  });
++
++  test("with room, it is the full sentence — the same pill the item's own controls carry", () => {
++    const html = markup(<ProposalPill proposal={wont} by="Coder" />);
++    expect(html).toContain("Coder says: won&#x27;t do");
++    expect(html).not.toContain("needs you");
++    expect(html).not.toContain("tiny");
++  });
++});
++
+ describe("an item nobody has proposed anything on", () => {
+   test("has the two ways of closing it and nothing else", () => {
+     const html = markup(<CloseControls status="open" live={0} onSet={() => {}} />);
+diff --git a/src/components/ItemStatus.tsx b/src/components/ItemStatus.tsx
+index e06a49c..70f39cc 100644
+--- a/src/components/ItemStatus.tsx
++++ b/src/components/ItemStatus.tsx
+@@ -26,6 +26,32 @@ export function ItemStatusPill({ status, tiny = false }: { status: ItemStatus; t
+   return <span className={`pill ${tone}${tiny ? " tiny" : ""}`}>{statusLabel(status)}</span>;
+ }
+ 
++/**
++ * A proposal standing on an open item, as a mark rather than a control.
++ *
++ * The full form — "Coder says: won't do" — is what a row with room says, and
++ * it is the one below, inside `CloseControls`. `tiny` is for a tree row, which
++ * has no room for a sentence and would be actively misread by the short one:
++ * a pill saying "won't do" on an item that is still open reads as an item that
++ * is closed, which is the exact confusion `wont` was separated from `done` to
++ * avoid. So the small form says what the *state* is instead of what was
++ * proposed — "needs you", the same words the board's column uses for the same
++ * items (lib/board.ts) — and the sentence moves into the tooltip, where it is
++ * one hover away and cannot be mistaken for a status.
++ */
++export function ProposalPill({ proposal, by, tiny = false, className = "" }: { proposal: Proposal; by: string; tiny?: boolean; className?: string }) {
++  const said = statusLabel(proposal.status);
++  const when = proposal.at ? ` on ${new Date(proposal.at).toLocaleString()}` : "";
++  return (
++    <span
++      className={["pill proposed", tiny ? "tiny" : "", className].filter(Boolean).join(" ")}
++      title={`${by} says: ${said}${when}. Nothing has been retired — the item is still open. Confirm it or dismiss it.`}
++    >
++      {tiny ? "needs you" : `${by} says: ${said}`}
++    </span>
++  );
++}
++
+ export function CloseControls({
+   status,
+   live,
+@@ -76,9 +102,7 @@ export function CloseControls({
+     const said = statusLabel(proposal.status);
+     return (
+       <>
+-        <span className="pill proposed self-center" title={`${proposedBy} proposed this${proposal.at ? ` on ${new Date(proposal.at).toLocaleString()}` : ""}. Nothing has been retired — the item is still open.`}>
+-          {proposedBy} says: {said}
+-        </span>
++        <ProposalPill proposal={proposal} by={proposedBy} className="self-center" />
+         {close(proposal.status, compact ? "Confirm" : `Confirm ${said}`, "")}
+         {onDismiss && (
+           <button className={`secondary ${cls}`} title="Clear the proposal and leave the item open" onClick={onDismiss}>
+diff --git a/src/components/Sidebar.tsx b/src/components/Sidebar.tsx
+index c99a282..bc69de1 100644
+--- a/src/components/Sidebar.tsx
++++ b/src/components/Sidebar.tsx
+@@ -9,7 +9,9 @@
+  *
+  * Nothing here reorders itself while you read it: the order comes from
+  * lib/sidebar, which ranks on start times, not on activity. Work in flight
+- * shows as a dot on the row it belongs to.
++ * shows as a dot on the row it belongs to, and an open item a teammate has
++ * proposed a verdict on says "needs you" — the one thing on this tree that is
++ * waiting on the reader rather than reporting to them.
+  *
+  * The row at the top of the tree adds a work item where you read them: type
+  * what needs doing, Enter, and it is there. With a default teammate set on
+@@ -21,10 +23,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties,
+ import { useProject } from "../store";
+ import { href, navigate, useRoute } from "../router";
+ import { attachable, clampWidth, coarseTime, computerLabel, groupByItem, hueOf, loadSidebarWidth, saveSidebarWidth, type Computer, type ItemGroup } from "../lib/sidebar";
+-import { defaultTeammate, isClosed, type WorkItem } from "../lib/workbench";
++import { defaultTeammate, isClosed, proposerName, type WorkItem } from "../lib/workbench";
+ import { itemAsPrompt, splitAsk, type JoinTarget } from "../lib/start";
+ import { describeError } from "../lib/errors";
+-import { ItemStatusPill } from "./ItemStatus";
++import { ItemStatusPill, ProposalPill } from "./ItemStatus";
+ import { StartDialog } from "./StartDialog";
+ import type { Conversation } from "../types";
+ 
+@@ -200,7 +202,16 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
+           <a href={href.item(project.id, g.item.id)} className="sidebar-item-title ellipsis" onClick={onNavigate} title={g.item.title}>
+             {g.item.title}
+           </a>
+-          {isClosed(g.item.status) && <ItemStatusPill status={g.item.status} tiny />}
++          {/* A closed item says which way it was closed; an open one is the
++              default and not worth the pixels. An open item with a verdict
++              standing on it is not the default — it is the one state that does
++              nothing until somebody answers it, and this is the screen that is
++              always on. */}
++          {isClosed(g.item.status) ? (
++            <ItemStatusPill status={g.item.status} tiny />
++          ) : g.item.proposal ? (
++            <ProposalPill proposal={g.item.proposal} by={proposerName(g.item.proposal, agents)} tiny />
++          ) : null}
+           {g.unread && <span className="unread-dot" />}
+           {g.busy && <span className="live-dot" title="a turn is running" />}
+           {!isOpen && convs > 0 && (
+diff --git a/src/lib/api.ts b/src/lib/api.ts
+index d37abbb..3e0ac36 100644
+--- a/src/lib/api.ts
++++ b/src/lib/api.ts
+@@ -51,6 +51,13 @@ export interface RetiredDto {
+ export interface Activity {
+   live: number;
+   latest: string | null;
++  /**
++   * Standing proposals on this project's open items — waiting on a person.
++   * Not part of `ItemCounts`, and deliberately: those three partition the
++   * items, and an item with a proposal on it is still counted as open work
++   * (server/projects.ts).
++   */
++  proposals: number;
+ }
+ 
+ /**
+@@ -87,6 +94,22 @@ export interface WaitingEntry {
+   expiresAt: string;
+ }
+ 
++/**
++ * One verdict a teammate has proposed and nobody has answered, in whichever
++ * project it is in. It points at the work item rather than a conversation:
++ * the item is where Confirm and Dismiss are (server/projects.ts).
++ */
++export interface ProposalEntry {
++  projectId: string;
++  projectName: string;
++  itemId: string;
++  itemTitle: string;
++  status: "done" | "wont";
++  agentId: string | null;
++  email: string;
++  at: string;
++}
++
+ /** What one survey of every project you are in came back with. */
+ export interface ActivityDto {
+   projects: Record<string, Activity>;
+@@ -95,6 +118,10 @@ export interface ActivityDto {
+   dropped: number;
+   /** Oldest first: the one closest to running out is the one to answer. */
+   waiting: WaitingEntry[];
++  /** Oldest first: nothing expires a proposal, so the longest-standing one is the most overdue. */
++  proposals: ProposalEntry[];
++  /** Proposals past the server's cap. The per-project numbers stay exact. */
++  proposalsDropped: number;
+ }
+ 
+ export interface Me {
+diff --git a/src/lib/feed.test.ts b/src/lib/feed.test.ts
+index 3a26395..f8d0b20 100644
+--- a/src/lib/feed.test.ts
++++ b/src/lib/feed.test.ts
+@@ -1,6 +1,20 @@
+ import { describe, expect, test } from "bun:test";
+-import { feedCount, feedGroups, feedRead, feedSummary, feedTitle, feedWaiting, feedWhere, NO_ACTIVITY, waitingWhat, waitingWho } from "./feed";
+-import type { ActivityDto, FeedEntry, WaitingEntry } from "./api";
++import {
++  feedCount,
++  feedGroups,
++  feedRead,
++  feedSummary,
++  feedTitle,
++  feedWaiting,
++  feedWhere,
++  NO_ACTIVITY,
++  proposalAnswered,
++  proposalSays,
++  proposalWho,
++  waitingWhat,
++  waitingWho,
++} from "./feed";
++import type { Activity, ActivityDto, FeedEntry, ProposalEntry, WaitingEntry } from "./api";
+ 
+ function entry(over: Partial<FeedEntry> & Pick<FeedEntry, "conversationId" | "projectId" | "at">): FeedEntry {
+   return {
+@@ -15,7 +29,29 @@ function entry(over: Partial<FeedEntry> & Pick<FeedEntry, "conversationId" | "pr
+ }
+ 
+ function survey(feed: FeedEntry[], dropped = 0, waiting: WaitingEntry[] = []): ActivityDto {
+-  return { projects: {}, feed, dropped, waiting };
++  return { ...NO_ACTIVITY, feed, dropped, waiting };
++}
++
++function proposal(over: Partial<ProposalEntry> & Pick<ProposalEntry, "itemId" | "projectId">): ProposalEntry {
++  return {
++    projectName: "Project",
++    itemTitle: "fix foo",
++    status: "wont",
++    agentId: "a1",
++    email: "alice@example.com",
++    at: "2026-08-24T09:00:00Z",
++    ...over,
++  };
++}
++
++/** A survey carrying standing proposals, and the per-project number that goes with them. */
++function asked(proposals: ProposalEntry[], proposalsDropped = 0): ActivityDto {
++  const projects: Record<string, Activity> = {};
++  for (const p of proposals) {
++    projects[p.projectId] ??= { live: 0, latest: null, proposals: 0 };
++    projects[p.projectId]!.proposals += 1;
++  }
++  return { ...NO_ACTIVITY, projects, proposals, proposalsDropped };
+ }
+ 
+ const NOW = Date.parse("2026-08-24T12:00:00Z");
+@@ -130,4 +166,60 @@ describe("the feed", () => {
+     expect(feedTitle(e)).toBe("Untitled conversation");
+     expect(feedWhere(e)).toContain("no longer here");
+   });
++
++  // ── a verdict nobody has answered ──────────────────────────────────────
++  //
++  // The third thing that waits on a person, and the reason it is here at all:
++  // it used to be visible only if you were already looking at the item, which
++  // is the complaint the bell exists to answer.
++
++  test("a standing verdict counts on the bell, and sits between the clock and the news", () => {
++    const a: ActivityDto = { ...asked([proposal({ itemId: "w1", projectId: "p1" })]), feed: [entry({ conversationId: "c1", projectId: "p1", at: "x" })], waiting: [held(1)] };
++    expect(feedCount(a, NOW)).toBe(3);
++    // Blocked leads because it expires; a verdict is a question somebody asked
++    // you; a finished conversation is news, and news keeps.
++    expect(feedSummary(a, NOW)).toBe("1 agent is blocked waiting on you · 1 verdict waiting on you · 1 conversation finished and unread");
++    expect(feedSummary(asked([proposal({ itemId: "w1", projectId: "p1" }), proposal({ itemId: "w2", projectId: "p2" })]), NOW)).toBe("2 verdicts waiting on you");
++  });
++
++  test("verdicts the server capped off still count, exactly as the feed's do", () => {
++    const a = asked([proposal({ itemId: "w1", projectId: "p1" })], 9);
++    expect(feedCount(a, NOW)).toBe(10);
++    expect(feedSummary(a, NOW)).toBe("10 verdicts waiting on you");
++  });
++
++  test("nothing is waiting only when all three are empty", () => {
++    expect(feedSummary(asked([]), NOW)).toContain("Nothing waiting");
++    expect(feedSummary(asked([proposal({ itemId: "w1", projectId: "p1" })]), NOW)).not.toContain("Nothing waiting");
++  });
++
++  test("answering one takes it off the bell and off the project's number now, not at the next survey", () => {
++    const a = asked([proposal({ itemId: "w1", projectId: "p1" }), proposal({ itemId: "w2", projectId: "p1" }), proposal({ itemId: "w3", projectId: "p2" })]);
++    expect(a.projects.p1!.proposals).toBe(2);
++    const after = proposalAnswered(a, "w1");
++    expect(after.proposals.map((p) => p.itemId)).toEqual(["w2", "w3"]);
++    // The projects list reads the same fact off the same survey, so it has to
++    // move with it — otherwise the row keeps saying "2 needs you" for a minute.
++    expect(after.projects.p1!.proposals).toBe(1);
++    expect(after.projects.p2!.proposals).toBe(1);
++    // Confirm and Dismiss both land here; either settles the question.
++    expect(proposalAnswered(after, "w2").projects.p1!.proposals).toBe(0);
++    // An item this survey never carried changes nothing, and changes nothing
++    // by identity — every close in the app calls this.
++    expect(proposalAnswered(a, "nope")).toBe(a);
++    // What the server capped off is untouched: answering one row tells us
++    // nothing about what was behind it.
++    expect(proposalAnswered(asked([proposal({ itemId: "w1", projectId: "p1" })], 5), "w1").proposalsDropped).toBe(5);
++  });
++
++  test("what a verdict row says when the top bar cannot name who proposed it", () => {
++    // The bell is outside every project by design, so it holds no team and
++    // cannot turn an agent id into a name — the item page does that.
++    expect(proposalWho(proposal({ itemId: "w1", projectId: "p1" }))).toBe("A teammate");
++    // No agent id: a bare key proposed it, and the account is all there is to name.
++    expect(proposalWho(proposal({ itemId: "w1", projectId: "p1", agentId: null }))).toBe("alice@example.com");
++    // `wont` is the wire value and "won't do" is the only form a person sees.
++    expect(proposalSays(proposal({ itemId: "w1", projectId: "p1" }))).toBe("says: won't do");
++    expect(proposalSays(proposal({ itemId: "w1", projectId: "p1", status: "done" }))).toBe("says: done");
++  });
+ });
+diff --git a/src/lib/feed.ts b/src/lib/feed.ts
+index ff93952..901abbb 100644
+--- a/src/lib/feed.ts
++++ b/src/lib/feed.ts
+@@ -37,12 +37,32 @@
+  * why it is shown above the rest and counted separately — "3 finished" can
+  * wait until tomorrow and "an agent is blocked, 2m left" cannot.
+  *
++ * And the fourth, which is the reason this file grew again:
++ *
++ *   proposals  a verdict a teammate has recorded on an open item — "won't do,
++ *              because…" — that nobody has confirmed or dismissed
++ *
++ * A proposal is the one state in the app that does nothing at all until a
++ * person answers it, and it used to be visible only on the two screens that
++ * already showed the item: you found out by going and looking, which is the
++ * complaint the bell exists to answer. So it belongs here, with the same
++ * argument the blocked half made and won.
++ *
++ * It sits between the other two, and the ordering is the point of all three:
++ * a blocked agent is on a five-minute clock, a proposal waits indefinitely but
++ * is a *question* somebody asked you, and a finished conversation is news. Its
++ * mark is neither a browser's nor Fountain's — the proposal is a column on the
++ * work item, so it goes away when it is answered and by no other means. There
++ * is nothing to read here that would clear it, which is exactly why it needed
++ * a wire of its own.
++ *
+  * Everything here is pure; the panel is components/Feed.tsx.
+  */
+-import type { ActivityDto, FeedEntry, WaitingEntry } from "./api";
++import { statusLabel } from "./workbench";
++import type { ActivityDto, FeedEntry, ProposalEntry, WaitingEntry } from "./api";
+ 
+ /** Nothing surveyed yet. */
+-export const NO_ACTIVITY: ActivityDto = { projects: {}, feed: [], dropped: 0, waiting: [] };
++export const NO_ACTIVITY: ActivityDto = { projects: {}, feed: [], dropped: 0, waiting: [], proposals: [], proposalsDropped: 0 };
+ 
+ /**
+  * Requests still worth answering. The server drops them on the same deadline,
+@@ -61,7 +81,7 @@ export function feedWaiting(a: ActivityDto, now: number = Date.now()): WaitingEn
+  * quiet while there was more, which is the failure this whole thing is for.
+  */
+ export function feedCount(a: ActivityDto, now: number = Date.now()): number {
+-  return feedWaiting(a, now).length + a.feed.length + a.dropped;
++  return feedWaiting(a, now).length + a.proposals.length + a.proposalsDropped + a.feed.length + a.dropped;
+ }
+ 
+ /** What to call a conversation that has not been given a title yet. */
+@@ -113,10 +133,14 @@ export function feedGroups(entries: readonly FeedEntry[], hereProjectId?: string
+  */
+ export function feedSummary(a: ActivityDto, now: number = Date.now()): string {
+   const blocked = feedWaiting(a, now).length;
++  const asked = a.proposals.length + a.proposalsDropped;
+   const rest = a.feed.length + a.dropped;
+-  if (blocked === 0 && rest === 0) return "Nothing waiting: every conversation in your projects has been read.";
++  if (blocked === 0 && asked === 0 && rest === 0) return "Nothing waiting: every conversation in your projects has been read.";
+   const parts: string[] = [];
+   if (blocked) parts.push(`${blocked} agent${blocked === 1 ? " is" : "s are"} blocked waiting on you`);
++  // A verdict, not "an item": the item is not waiting on you, the question
++  // standing on it is. It stays open work either way.
++  if (asked) parts.push(`${asked} verdict${asked === 1 ? "" : "s"} waiting on you`);
+   if (rest) {
+     const failed = a.feed.filter((e) => e.status === "failed").length;
+     parts.push(`${rest} conversation${rest === 1 ? "" : "s"} finished and unread${failed ? ` — ${failed} failed` : ""}`);
+@@ -138,6 +162,53 @@ export function waitingWhat(w: WaitingEntry): string {
+   return `wants to run ${w.tool ?? "a tool"}`;
+ }
+ 
++/**
++ * Who proposed it, as far as the top bar can honestly say.
++ *
++ * The row on the item reads "Coder says: won't do", because the page it is on
++ * holds that project's team and can turn an agent id into a name
++ * (`proposerName` in lib/workbench.ts). The bell is outside every project by
++ * design — it is on the projects list and the sign-in-adjacent pages too — so
++ * it holds no team for a project it is not in, and naming the agent would cost
++ * an agent list per owner per survey to say something the item says for free
++ * one click later.
++ *
++ * So it says the true thing it knows: with an agent id, a teammate proposed
++ * it; without one, a bare key did, and the account is all there is to name.
++ * The same trade `waitingWho` makes, for the same reason.
++ */
++export function proposalWho(p: ProposalEntry): string {
++  return p.agentId ? "A teammate" : p.email;
++}
++
++/** "says: won't do" — the verdict, in the only form a person sees it in. */
++export function proposalSays(p: ProposalEntry): string {
++  return `says: ${statusLabel(p.status)}`;
++}
++
++/**
++ * Drop a proposal from a survey, for when this browser has just answered it.
++ *
++ * The same early application of a fact as `feedRead`, and needed for a sharper
++ * reason: confirming or dismissing is the act the row exists to prompt, and
++ * watching the bell go on saying "1 verdict waiting on you" for the rest of
++ * the minute after you answered it reads as the click not having worked.
++ *
++ * Confirm and Dismiss both land here — either settles the question, which is
++ * what the row is counting. The per-project number goes with it, since that is
++ * the same fact on the projects list.
++ */
++export function proposalAnswered(a: ActivityDto, itemId: string): ActivityDto {
++  const proposals = a.proposals.filter((p) => p.itemId !== itemId);
++  if (proposals.length === a.proposals.length) return a;
++  const projects = { ...a.projects };
++  for (const gone of a.proposals.filter((p) => p.itemId === itemId)) {
++    const at = projects[gone.projectId];
++    if (at) projects[gone.projectId] = { ...at, proposals: Math.max(0, at.proposals - 1) };
++  }
++  return { ...a, proposals, projects };
++}
++
+ /**
+  * Drop one conversation from a survey, for when this browser has just read it.
+  *
+diff --git a/src/pages/Projects.tsx b/src/pages/Projects.tsx
+index 0f18024..8bb6117 100644
+--- a/src/pages/Projects.tsx
++++ b/src/pages/Projects.tsx
+@@ -80,6 +80,17 @@ export function Projects() {
+             <div className="conv-title">
+               <span className="strong">{p.name}</span>
+               {(a?.live ?? 0) > 0 && <span className="pill running">{a!.live} working</span>}
++              {/* A verdict a teammate proposed and nobody has answered. It is
++                  a pill and not a fourth number in the line below, because the
++                  three down there partition the items and this does not: an
++                  item waiting on you is still counted in `open`. It comes off
++                  the survey rather than `counts` for the same reason "working"
++                  does — it is a thing happening, not a thing filed. */}
++              {(a?.proposals ?? 0) > 0 && (
++                <span className="pill proposed" title={`${a!.proposals} work item${a!.proposals === 1 ? "" : "s"} here ${a!.proposals === 1 ? "has" : "have"} a verdict a teammate proposed, waiting for you to confirm or dismiss it. Still open work either way.`}>
++                  {a!.proposals} need{a!.proposals === 1 ? "s" : ""} you
++                </span>
++              )}
+               {p.members.length > 0 && p.role === "owner" && <span className="pill">shared with {p.members.length}</span>}
+             </div>
+             <div className="conv-sub muted">
+diff --git a/src/store.tsx b/src/store.tsx
+index c976aff..58ade20 100644
+--- a/src/store.tsx
++++ b/src/store.tsx
+@@ -21,7 +21,7 @@ import { api, ApiError, projectFountainBase, type ActivityDto, type ItemDto, typ
+ import { startBody, type StartInput } from "./lib/start";
+ import { readSse } from "./lib/sse";
+ import { describeError } from "./lib/errors";
+-import { feedRead, NO_ACTIVITY } from "./lib/feed";
++import { feedRead, NO_ACTIVITY, proposalAnswered } from "./lib/feed";
+ import { retiredMessage } from "./lib/workbench";
+ 
+ export type EventHandler = (ev: UserEvent) => void;
+@@ -73,6 +73,8 @@ export interface Workbench {
+   refreshActivity: () => Promise<void>;
+   /** This browser has just read a conversation, so take it out of the feed now rather than at the next survey. */
+   markRead: (conversationId: string) => void;
++  /** A proposal on this item has just been confirmed or dismissed; the same fact, applied early. */
++  markAnswered: (itemId: string) => void;
+   toast: (text: string, kind?: "info" | "error") => void;
+   signOut: () => void;
+ }
+@@ -130,6 +132,10 @@ export function WorkbenchProvider({ me, onSignOut, children }: { me: Me; onSignO
+     setActivity((a) => feedRead(a, conversationId));
+   }, []);
+ 
++  const markAnswered = useCallback((itemId: string) => {
++    setActivity((a) => proposalAnswered(a, itemId));
++  }, []);
++
+   useEffect(() => {
+     void refreshProjects();
+     void refreshActivity();
+@@ -157,8 +163,8 @@ export function WorkbenchProvider({ me, onSignOut, children }: { me: Me; onSignO
+   }, [onSignOut]);
+ 
+   const value = useMemo<Workbench>(
+-    () => ({ me, projects, projectsLoaded, activity, refreshProjects, refreshActivity, markRead, toast, signOut }),
+-    [me, projects, projectsLoaded, activity, refreshProjects, refreshActivity, markRead, toast, signOut],
++    () => ({ me, projects, projectsLoaded, activity, refreshProjects, refreshActivity, markRead, markAnswered, toast, signOut }),
++    [me, projects, projectsLoaded, activity, refreshProjects, refreshActivity, markRead, markAnswered, toast, signOut],
+   );
+ 
+   return (
+@@ -236,7 +242,7 @@ export function makeProjectClient(projectId: string): Fountain {
+ }
+ 
+ export function ProjectProvider({ projectId, children, fallback }: { projectId: string; children: ReactNode; fallback: (state: "loading" | "missing") => ReactNode }) {
+-  const { toast, refreshProjects, signOut } = useWorkbench();
++  const { toast, refreshProjects, signOut, markAnswered } = useWorkbench();
+   const fountain = useMemo(() => makeProjectClient(projectId), [projectId]);
+   const [project, setProject] = useState<ProjectDto | null>(null);
+   const [items, setItems] = useState<ItemDto[]>([]);
+@@ -461,6 +467,10 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId:
+       // Deciding the status settles any proposal standing on the item, here as
+       // on the server — the question has been answered, so it stops being asked.
+       setItems((ws) => ws.map((w) => (w.id === id ? { ...w, ...patch, ...(patch.status === undefined ? {} : { proposal: null }) } : w)));
++      // Confirm and Dismiss are both answers, and the bell counts the question
++      // rather than the item: take it off the survey now instead of leaving it
++      // to say "1 verdict waiting on you" for the rest of the minute.
++      if (patch.status !== undefined || patch.proposal === null) markAnswered(id);
+       // Closing an item — done or won't do — retires its computers (server/projects.ts):
+       // say what went, and show the conversations as retired without waiting for Fountain's notice.
+       await run(async () => {
+@@ -472,7 +482,7 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId:
+       });
+       void refreshProjects();
+     },
+-    [projectId, run, refresh, refreshProjects, toast],
++    [projectId, run, refresh, refreshProjects, toast, markAnswered],
+   );
+   const removeItem = useCallback<ProjectStore["removeItem"]>(
+     async (id) => {
+diff --git a/src/styles.css b/src/styles.css
+index a5c863e..dd689ae 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -936,6 +936,10 @@ body.resizing-col { cursor: col-resize; user-select: none; }
+    one way the rest of the panel does not — colour it and put it first. */
+ .feed-group.waiting { background: color-mix(in srgb, var(--warn) 8%, transparent); }
+ .feed-row.asking .feed-dot { background: var(--warn); }
++/* A proposed verdict waits on a person too, but nothing runs out: the same
++   warn hue as the pill on the item row (`.pill.proposed`), and no countdown. */
++.feed-row.proposal .feed-dot { background: var(--warn); }
++.feed-group.proposed .feed-foot { border-top: 0; background: transparent; padding: 6px; }
+ .feed-bell.blocked { color: var(--warn); }
+ .feed-badge.blocked { background: var(--warn); }
+ .feed-foot { margin: 0; padding: 8px 10px; border-top: 1px solid var(--border); background: var(--bg-1); }

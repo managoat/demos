@@ -37,16 +37,23 @@ concurrency:
   group: build-main
   cancel-in-progress: false
 
+# Least privilege by default; the two jobs that need more say so themselves
+# (packages: write to push, contents: write to pin). Carried over from
+# managoat/mend#1 and managoat/rounds#1, which proposed this against the
+# per-app workflows this one replaced.
+permissions:
+  contents: read
+
 jobs:
   pick:
     runs-on: ubuntu-latest
     outputs:
       apps: ${{ steps.pick.outputs.apps }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - id: pick
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -72,23 +79,23 @@ jobs:
       matrix:
         app: ${{ fromJSON(needs.pick.outputs.apps) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Test and build
         run: |
           bun install --frozen-lockfile
           bun run --cwd packages/fountain-app test
           bun run --cwd "apps/${{ matrix.app }}" test
           bun run --cwd "apps/${{ matrix.app }}" build
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: apps/${{ matrix.app }}
           platforms: linux/amd64,linux/arm64
@@ -107,7 +114,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: main
       - name: Pin the image sha for every app that built
