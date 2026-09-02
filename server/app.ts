@@ -62,6 +62,7 @@ import * as account from "./account";
 import * as changes from "./changes";
 import * as chats from "./chats";
 import * as comments from "./comments";
+import * as control from "./control";
 import type { AppContext } from "./context";
 import * as files from "./files";
 import * as games from "./games";
@@ -71,6 +72,7 @@ import * as hub from "./hub";
 import { handleMcp } from "./mcp";
 import * as menu from "./menu";
 import * as projects from "./projects";
+import * as plans from "./plans";
 import { handleProxy } from "./proxy";
 
 type Handler = (req: Request, params: Record<string, string>) => Promise<Response> | Response;
@@ -144,6 +146,30 @@ export function buildApp(ctx: AppContext): (req: Request) => Promise<Response> {
   on("POST", "/hooks/github-token", (req) => github.sandboxToken(ctx, req));
 
   on("GET", "/api/chats/:id/stream", (req, p) => hub.stream(ctx, req, p.id!));
+  on("GET", "/api/chats/:id/collaboration", (req, p) => control.state(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/presence", (req, p) => control.heartbeat(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/presence/leave", (req, p) => control.leave(ctx, req, p.id!));
+  on("GET", "/api/chats/:id/notes", (req, p) => control.listNotes(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/notes", (req, p) => control.createNote(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/notes/send", (req, p) => control.sendNotes(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/notes/:note/queue", (req, p) => control.queueNote(ctx, req, p.id!, p.note!));
+  on("POST", "/api/chats/:id/notes/:note/resolve", (req, p) => control.resolveNote(ctx, req, p.id!, p.note!));
+  on("DELETE", "/api/chats/:id/notes/:note", (req, p) => control.deleteNote(ctx, req, p.id!, p.note!));
+  on("GET", "/api/chats/:id/control-actions", (req, p) => control.listControlEvents(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/interrupt", (req, p) => control.interrupt(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/permission-requests/:request/answer", (req, p) => control.answerPermission(ctx, req, p.id!, p.request!));
+
+  on("GET", "/api/chats/:id/plan", (req, p) => plans.show(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/plan/adopt", (req, p) => plans.adopt(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/plan/operations", (req, p) => plans.mutate(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/plan/decisions", (req, p) => plans.decide(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/plan/proposals/:proposal", (req, p) => plans.decideProposal(ctx, req, p.id!, p.proposal!));
+  on("POST", "/api/chats/:id/plan/draft", (req, p) => plans.draft(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/plan/feedback/send", (req, p) => plans.sendFeedback(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/plan/run", (req, p) => plans.run(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/plan/executions/:execution/finish", (req, p) => plans.finish(ctx, req, p.id!, p.execution!));
+  on("GET", "/api/chats/:id/plan/executions/:execution/evidence", (req, p) => plans.evidence(ctx, req, p.id!, p.execution!));
+  on("GET", "/api/chats/:id/plan/export", (req, p) => plans.exportPortable(ctx, req, p.id!));
   on("GET", "/api/chats/:id/games", (req, p) => games.list(ctx, req, p.id!));
   on("POST", "/api/chats/:id/games", (req, p) => games.create(ctx, req, p.id!));
   on("GET", "/api/chats/:id/games/:game", (req, p) => games.show(ctx, req, p.id!, p.game!));

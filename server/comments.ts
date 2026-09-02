@@ -23,6 +23,8 @@ import { now, type CommentRow } from "./db";
 import { FountainHttpError } from "./fountain";
 import { hub } from "./hub";
 import { HttpError, json, readJson } from "./http";
+import { withPromptLock } from "./prompt-lock";
+import { markQueuedNotesSent, preparePromptWithQueuedNotes } from "./control";
 
 export function toDto(r: CommentRow): CommentDto {
   return {
@@ -40,6 +42,9 @@ export function toDto(r: CommentRow): CommentDto {
     resolvedBy: r.resolved_by,
     sentAt: r.sent_at,
     sentBy: r.sent_by,
+    anchorKind: r.anchor_kind,
+    planNodeId: r.plan_node_id,
+    planField: r.plan_field,
   };
 }
 
@@ -54,16 +59,22 @@ export async function create(ctx: AppContext, req: Request, chatId: string): Pro
   const { chat } = chatAccess(ctx, user, chatId);
   const parsed = parseComment(await readJson(req));
   if (typeof parsed === "string") throw new HttpError(422, "bad_comment", parsed);
+  const anchorKind = parsed.anchorKind ?? "diff_line";
   const latest = ctx.db.latestChanges(chat.id);
-  if (!latest) throw new HttpError(409, "no_changes", "There are no changes to comment on yet.");
+  if (anchorKind === "diff_line" && !latest) throw new HttpError(409, "no_changes", "There are no changes to comment on yet.");
+  if (anchorKind !== "diff_line") {
+    const nodeId = parsed.planNodeId ?? "";
+    const node = ctx.db.sql.query("SELECT id FROM plan_nodes WHERE id = $id AND plan_id IN (SELECT id FROM plans WHERE chat_id = $chat)").get({ id: nodeId, chat: chat.id });
+    if (!node) throw new HttpError(404, "plan_node_not_found", "No such plan node in this chat.");
+  }
   const row: CommentRow = {
     id: crypto.randomUUID(),
     chat_id: chat.id,
-    changes_seq: latest.seq,
+    changes_seq: latest?.seq ?? 0,
     path: parsed.path,
     side: parsed.side,
     line: parsed.line,
-    quote: lineText(latest.diff, parsed.path, parsed.side, parsed.line),
+    quote: latest && anchorKind === "diff_line" ? lineText(latest.diff, parsed.path, parsed.side, parsed.line) : "",
     body: parsed.body,
     author: user.email,
     created_at: now(),
@@ -71,6 +82,9 @@ export async function create(ctx: AppContext, req: Request, chatId: string): Pro
     resolved_by: null,
     sent_at: null,
     sent_by: null,
+    anchor_kind: anchorKind,
+    plan_node_id: parsed.planNodeId ?? null,
+    plan_field: parsed.planField ?? null,
   };
   ctx.db.insertComment(row);
   const dto = toDto(row);
@@ -110,26 +124,30 @@ export async function remove(ctx: AppContext, req: Request, chatId: string, comm
 export async function send(ctx: AppContext, req: Request, chatId: string): Promise<Response> {
   const user = await authenticate(ctx, req);
   const { chat } = chatAccess(ctx, user, chatId);
-  const open = pending(ctx.db.comments(chat.id).map(toDto));
-  if (open.length === 0) throw new HttpError(422, "nothing_to_send", "There are no open comments to send.");
-  const latest = ctx.db.latestChanges(chat.id);
-  const prompt = reviewPrompt(open, latest ? changesDto(latest, false) : null);
-  const tagged = ctx.db.participants(chat).length > 1 ? withAuthor(user.email, prompt) : prompt;
-  const client = await ownerClient(ctx, chat);
-  const res = await client.fetch(`/api/conversations/${encodeURIComponent(chat.conversation_id)}/prompts`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ prompt: tagged }),
+  return withPromptLock(chat.id, async () => {
+    const executing = ctx.db.sql.query("SELECT 1 FROM plan_executions WHERE plan_id IN (SELECT id FROM plans WHERE chat_id = $chat) AND status IN ('queued', 'running') LIMIT 1").get({ chat: chat.id });
+    if (executing) throw new HttpError(409, "plan_execution_busy", "Wait for the approved plan node to be finalized before sending review comments.");
+    const open = pending(ctx.db.comments(chat.id).filter((comment) => comment.anchor_kind === "diff_line").map(toDto));
+    if (open.length === 0) throw new HttpError(422, "nothing_to_send", "There are no open comments to send.");
+    const latest = ctx.db.latestChanges(chat.id);
+    const review = reviewPrompt(open, latest ? changesDto(latest, false) : null);
+    const queued = preparePromptWithQueuedNotes(ctx, chat.id, review);
+    const prompt = queued.prompt;
+    const tagged = ctx.db.participants(chat).length > 1 ? withAuthor(user.email, prompt) : prompt;
+    const client = await ownerClient(ctx, chat);
+    const res = await client.fetch(`/api/conversations/${encodeURIComponent(chat.conversation_id)}/prompts`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: tagged }),
+    });
+    if (!res.ok) throw new FountainHttpError(res.status, await res.text()).toHttp("Fountain would not take the comments.");
+    const seq = ctx.db.addSend(chat.id, user.email);
+    markQueuedNotesSent(ctx, chat.id, queued.noteIds, user.email);
+    hub.publish(chat.id, "turn", { id: `pending:${seq}`, author: user.email, status: "pending" });
+    const t = now();
+    const sent: CommentDto[] = [];
+    for (const c of open) {
+      const updated = ctx.db.updateComment(c.id, { sent_at: t, sent_by: user.email })!;
+      const dto = toDto(updated); sent.push(dto); hub.publish(chat.id, "comment", dto);
+    }
+    return json({ data: { sent: sent.length, prompt, comments: sent } }, 202);
   });
-  if (!res.ok) throw new FountainHttpError(res.status, await res.text()).toHttp("Fountain would not take the comments.");
-  ctx.db.addSend(chat.id, user.email);
-  const t = now();
-  const sent: CommentDto[] = [];
-  for (const c of open) {
-    const updated = ctx.db.updateComment(c.id, { sent_at: t, sent_by: user.email })!;
-    const dto = toDto(updated);
-    sent.push(dto);
-    hub.publish(chat.id, "comment", dto);
-  }
-  return json({ data: { sent: sent.length, prompt, comments: sent } }, 202);
 }

@@ -41,23 +41,27 @@ server/   Bun. app.ts is the route table; index.ts boots it.
           changes.ts   the repository's changes: the hook's POST, the latest record, `record` (the one way in)
           files.ts     the repository read through Fountain's read-only sandbox routes: refresh (a snapshot into `record`), a directory, a file
           comments.ts  review comments on a line of the changes; `send` turns the open ones into one prompt
+          control.ts   room notes, presence leases, audited interrupts and permission answers
+          plans.ts     durable revisioned DAG plans, approvals, proposals, sequential execution and evidence
           hub.ts       GET /api/chats/:id/stream: what Salon itself records, live (game, changes events)
           sandbox.ts   who a computer is (bearer = $FOUNTAIN_TOKEN + conversation id), and the hook setup script
           mcp.ts       POST /mcp: Salon as an MCP server for the chat's computer (start_game, game_state)
-          db.ts        SQLite: users, sessions, chats, chat_members, sends, games, changes, comments, projects, project_members
+          db.ts        SQLite, including plans/nodes/edges/events/approvals/proposals/executions, notes and control actions
 shared/   what both sides agree on: author.ts, models.ts, settings.ts, skills.ts, images.ts, games.ts (the rules),
           changes.ts (the snapshot shape, and the diff/status parsers both sides use),
           files.ts (a directory listing and a file as the panel browses them; paths stay inside the repository),
           comments.ts (a comment's shape, and the prompt the open ones become),
+          plans.ts (plan schema, operations, DAG/conflicts, prompts, exports and conformance),
+          control.ts (notes, presence and control-policy contracts),
           projects.ts (what a repository address is, where it is checked out)
 src/      Vite + React. store.tsx (session), router.ts (hash routes), lib/live.ts (the chat's own stream),
           components/Thread.tsx (transcript + composer), SettingsMenu.tsx (pill + `+`),
           Game.tsx (the board), Blocks.tsx (a start_game tool block renders as the board),
-          Changes.tsx (the repository panel beside the thread, with the room's comments on its lines, Refresh, and Files)
+          Changes.tsx (the repository evidence panel), Plan.tsx (outline, graph, review, approvals and conformance)
 k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) applies it
 ```
 
-## Nine boundaries, easy to get wrong
+## Twelve boundaries, easy to get wrong
 
 1. **The proxy is the member boundary.** A guest's browser builds
    `new Fountain({ baseUrl: "<origin>/f/<chat>", apiKey: "session" })`; the
@@ -253,6 +257,30 @@ k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) ap
    terminated the conversation; restore opened a new one whose hook
    posted under the new id, and the model said the unpushed branch was
    not on origin, which is what the archive warning is for.
+
+10. **The plan is Salon's authority, not a repository file.** `plans`, nodes,
+    edges, immutable events and exact-revision approvals live in SQLite.
+    Mutations are operations with `expectedRevision`: stale independent fields
+    commute, overlapping fields conflict, and every candidate DAG is validated
+    before commit. Markdown/JSON are portable exports only. Model redrafts are
+    durable proposed operations until a person applies them.
+
+11. **One approved node is one root turn.** `server/plans.ts#run` requires the
+    host's approval of the current revision, records the execution and send
+    sequence before submission, and chooses only a dependency-ready node. Its
+    prompt contains the authoritative plan/revision and requires a practical
+    commit boundary. Completion retains a diff from the recorded starting HEAD,
+    conservatively marks the turn binding inferred, fills every criterion with
+    pass/fail/unknown and flags scope, sensitive-file, unknown/failure and plan
+    drift exceptions. Execution-bound changes snapshots are never pruned.
+
+12. **Room chatter and control stay Salon-owned.** Notes and plan comments are
+    never turns until explicitly sent; a prompt attempted while busy is saved
+    for the next turn. Presence/typing/viewing are expiring in-process leases on
+    the Salon SSE stream. Direct Fountain interrupt/request mutations are not in
+    the proxy allow-list: `server/control.ts` derives the turn author, applies
+    the isolated host-or-author policy and records the actor/outcome, preserving
+    Fountain's first-answer-wins result and naming the known winner.
 
 ## Run, test, ship
 

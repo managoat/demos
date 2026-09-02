@@ -22,6 +22,7 @@ export function Chat({ id }: { id: string }) {
   const [editing, setEditing] = useState<string | null>(null);
   const live = useChatLive(id);
   const [changesOpen, setChangesOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -37,6 +38,11 @@ export function Chat({ id }: { id: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // The plan is the default companion surface for project chats.
+  useEffect(() => {
+    setPlanOpen(!!state?.chat.project);
+  }, [id, state?.chat.project?.id]);
 
   // Opening a mentioned thread from either the notification or the shared
   // list clears its badge.
@@ -132,8 +138,14 @@ export function Chat({ id }: { id: string }) {
           </div>
         </div>
         <div className="chat-tools">
+          {(chat.project || live.plan) && (
+            <button type="button" className={`changes-btn${planOpen ? " on" : ""}`} onClick={() => { setPlanOpen((open) => !open); setChangesOpen(false); }} aria-pressed={planOpen}>
+              <span>Plan</span>
+              {live.plan && <span className="muted">r{live.plan.document.plan.revision}</span>}
+            </button>
+          )}
           {(live.changes || chat.project) && (
-            <button type="button" className={`changes-btn${changesOpen ? " on" : ""}`} onClick={() => setChangesOpen((o) => !o)} aria-pressed={changesOpen} title={live.changes ? `${live.changes.branch || live.changes.head.slice(0, 7)} against ${live.changes.base}` : `${chat.project?.name}: nothing reported yet`}>
+            <button type="button" className={`changes-btn${changesOpen ? " on" : ""}`} onClick={() => { setChangesOpen((o) => !o); setPlanOpen(false); }} aria-pressed={changesOpen} title={live.changes ? `${live.changes.branch || live.changes.head.slice(0, 7)} against ${live.changes.base}` : `${chat.project?.name}: nothing reported yet`}>
               <span>Changes</span>
               {live.changes && <span className="muted">{changesLine(live.changes.files)}</span>}
             </button>
@@ -180,7 +192,7 @@ export function Chat({ id }: { id: string }) {
           )}
         </div>
       </header>
-      <Thread chat={chat} sends={sends} onSent={() => void load()} live={live} changesOpen={changesOpen} onCloseChanges={() => setChangesOpen(false)} />
+      <Thread chat={chat} sends={sends} onSent={() => void load()} live={live} changesOpen={changesOpen} onCloseChanges={() => setChangesOpen(false)} onOpenChanges={() => setChangesOpen(true)} planOpen={planOpen} onClosePlan={() => setPlanOpen(false)} />
     </div>
   );
 }

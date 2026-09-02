@@ -40,6 +40,18 @@ interface Computer {
   project: ProjectRow;
 }
 
+/** Read the node-specific patch since a recorded execution boundary. */
+export async function diffFromHead(ctx: AppContext, chat: ChatRow, head: string): Promise<{ diff: string; truncated: boolean }> {
+  if (!head) return { diff: "", truncated: false };
+  const c = await computer(ctx, chat);
+  try {
+    const got = await c.client.sandboxDiff(c.sandboxId, c.project.mount_path, { ref: head, maxBytes: DIFF_MAX_CHARS + 1 });
+    return { diff: got.diff.slice(0, DIFF_MAX_CHARS), truncated: got.truncated === true || got.diff.length > DIFF_MAX_CHARS };
+  } catch (err) {
+    passThrough(err, "Fountain would not read the changes for this plan step.");
+  }
+}
+
 /** The chat's computer, if it has one now: the project behind it, the host's client, the sandbox the conversation runs on. */
 async function computer(ctx: AppContext, chat: ChatRow): Promise<Computer> {
   const project = chat.project_id ? ctx.db.getProject(chat.project_id) : null;
@@ -114,6 +126,12 @@ export async function show(ctx: AppContext, req: Request, chatId: string): Promi
 }
 
 const inFlight = new Map<string, Promise<ChangesDto>>();
+
+/** Capture a fresh authoritative boundary for plan execution. */
+export async function captureExecutionBoundary(ctx: AppContext, chat: ChatRow): Promise<ChangesDto> {
+  const c = await computer(ctx, chat);
+  return record(ctx, chat, await snapshot(ctx, chat, c, "manual"), "fountain");
+}
 
 /**
  * Read the repository now and keep what was read. One read at a time per

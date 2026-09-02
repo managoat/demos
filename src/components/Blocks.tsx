@@ -139,7 +139,7 @@ function PermissionCard({ block, onAnswer }: { block: PermissionBlock; onAnswer?
       await onAnswer(requestId, choice.optionId);
       setSaid(`Answered — ${choice.label}.`);
     } catch (err) {
-      if (errorCode(err) === "permission_request_resolved") setSaid("Already answered — somebody else got there first.");
+      if (errorCode(err) === "permission_request_resolved") setSaid(describeError(err));
       else setProblem(describeError(err));
     } finally {
       setSending(null);

@@ -5,6 +5,7 @@ export class HttpError extends Error {
     readonly status: number,
     readonly code: string,
     message?: string,
+    readonly details?: Record<string, unknown>,
   ) {
     super(message ?? code);
   }
@@ -15,7 +16,7 @@ export function json(body: unknown, status = 200, headers: Record<string, string
 }
 
 export function errorResponse(err: unknown): Response {
-  if (err instanceof HttpError) return json({ error: err.code, message: err.message }, err.status);
+  if (err instanceof HttpError) return json({ error: err.code, message: err.message, ...err.details }, err.status);
   if (err instanceof DOMException && err.name === "AbortError") {
     return json({ error: "client_closed", message: "The request was abandoned." }, 499);
   }

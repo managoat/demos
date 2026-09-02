@@ -1113,7 +1113,7 @@ describe("review comments", () => {
     expect(sent.status).toBe(202);
     const out = ((await sent.json()) as { data: { sent: number; prompt: string } }).data;
     expect(out.sent).toBe(2);
-    expect(seen).toEqual(["comment", "comment"]);
+    expect(seen).toEqual(["turn", "comment", "comment"]);
     const prompt = state.prompts.find((p) => p.id === conv)!.body as { prompt: string };
     expect(prompt.prompt).toBe(`[from guest@example.com] ${out.prompt}`);
     expect(out.prompt).toContain("Review comments on salon/abcd1234 at deadbee");

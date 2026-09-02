@@ -25,6 +25,9 @@ import type { Role } from "./db";
 import type { FountainClient } from "./fountain";
 import { HttpError, json, readJson, str } from "./http";
 import { mentionedWorkspaceMembers } from "./account";
+import { markQueuedNotesSent, preparePromptWithQueuedNotes } from "./control";
+import { withPromptLock } from "./prompt-lock";
+import { hub } from "./hub";
 
 export async function handleProxy(ctx: AppContext, req: Request, chatId: string, path: string): Promise<Response> {
   const user = await authenticate(ctx, req);
@@ -45,20 +48,28 @@ export async function handleProxy(ctx: AppContext, req: Request, chatId: string,
     const body = await readJson(req);
     const problem = imagesProblem(body.images);
     if (problem) throw new HttpError(422, "bad_images", problem);
-    let prompt = str(body.prompt, 100_000);
-    const mentions = mentionedWorkspaceMembers(ctx, user.email, prompt).filter((email) => email !== chat.owner_email && email !== user.email);
-    if (ctx.db.participants(chat).length > 1 || mentions.length > 0) prompt = withAuthor(user.email, prompt);
-    const out: Record<string, unknown> = { prompt };
-    if (Array.isArray(body.images) && body.images.length) out.images = body.images;
-    const res = await forward(client, req, path, url.search, JSON.stringify(out));
-    if (res.ok) {
-      ctx.db.addSend(chat.id, user.email);
-      for (const email of mentions) {
-        ctx.db.addMember(chat.id, email, `mention:${user.email}`);
-        ctx.db.addMentionNotification(email, chat.id, user.email);
+    const rawPrompt = str(body.prompt, 100_000);
+    const mentions = mentionedWorkspaceMembers(ctx, user.email, rawPrompt).filter((email) => email !== chat.owner_email && email !== user.email);
+    return withPromptLock(chat.id, async () => {
+      const executing = ctx.db.sql.query("SELECT 1 FROM plan_executions WHERE plan_id IN (SELECT id FROM plans WHERE chat_id = $chat) AND status IN ('queued', 'running') LIMIT 1").get({ chat: chat.id });
+      if (executing) throw new HttpError(409, "plan_execution_busy", "This message was not sent because an approved plan node is still being finalized. Save it as a next-turn note.");
+      const queued = preparePromptWithQueuedNotes(ctx, chat.id, rawPrompt);
+      let prompt = queued.prompt;
+      if (ctx.db.participants(chat).length > 1 || mentions.length > 0) prompt = withAuthor(user.email, prompt);
+      const out: Record<string, unknown> = { prompt };
+      if (Array.isArray(body.images) && body.images.length) out.images = body.images;
+      const res = await forward(client, req, path, url.search, JSON.stringify(out));
+      if (res.ok) {
+        const seq = ctx.db.addSend(chat.id, user.email);
+        hub.publish(chat.id, "turn", { id: `pending:${seq}`, author: user.email, status: "pending" });
+        markQueuedNotesSent(ctx, chat.id, queued.noteIds, user.email);
+        for (const email of mentions) {
+          ctx.db.addMember(chat.id, email, `mention:${user.email}`);
+          ctx.db.addMentionNotification(email, chat.id, user.email);
+        }
       }
-    }
-    return res;
+      return res;
+    });
   }
 
   return forward(client, req, path, url.search);
@@ -69,7 +80,9 @@ function allowed(method: string, sub: string, role: Role): boolean {
   if (method === "GET") return ["/turns", "/events", "/stream"].includes(sub) || /^\/turns\/[^/]+\/images\/\d+$/.test(sub);
   if (method === "POST") {
     if (sub === "/terminate") return role === "owner";
-    return ["/prompts", "/read", "/interrupt"].includes(sub) || /^\/requests\/[^/]+$/.test(sub);
+    // Interrupts and permission answers are Salon-owned routes: they apply
+    // room authority and persist who acted. Fountain remains first-answer-wins.
+    return ["/prompts", "/read"].includes(sub);
   }
   return false;
 }

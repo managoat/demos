@@ -41,6 +41,15 @@ export interface ConversationSummary {
   [k: string]: unknown;
 }
 
+export interface ConversationTurnSummary {
+  id: string;
+  turn_number?: number;
+  origin?: string;
+  status?: string;
+  prompt?: string;
+  [k: string]: unknown;
+}
+
 export interface EnvironmentSummary {
   id: string;
   name: string;
@@ -240,6 +249,10 @@ export class FountainClient {
       if (err instanceof FountainHttpError && err.status === 404) return null;
       throw err;
     }
+  }
+
+  async conversationTurns(id: string): Promise<ConversationTurnSummary[]> {
+    return (await this.json<{ data: ConversationTurnSummary[] }>(`/api/conversations/${encodeURIComponent(id)}/turns`)).data ?? [];
   }
 
   // ── a sandbox's disk, read-only (Fountain's ADR 0039) ──────────────────

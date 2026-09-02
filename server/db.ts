@@ -163,6 +163,137 @@ export interface CommentRow {
   resolved_by: string | null;
   sent_at: string | null;
   sent_by: string | null;
+  /** The review surface this comment is attached to. Older rows are diff lines. */
+  anchor_kind: "diff_line" | "plan_node" | "plan_field";
+  plan_node_id: string | null;
+  plan_field: string | null;
+}
+
+export interface PlanRow {
+  id: string;
+  chat_id: string;
+  title: string;
+  outcome: string;
+  description: string;
+  revision: number;
+  status: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlanNodeRow {
+  id: string;
+  plan_id: string;
+  outcome: string;
+  description: string;
+  acceptance_criteria: string;
+  scope: string;
+  status: string;
+  position: number;
+  field_revisions: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlanEdgeRow {
+  plan_id: string;
+  from_node_id: string;
+  to_node_id: string;
+  created_at: string;
+}
+
+export interface PlanEventRow {
+  id: string;
+  plan_id: string;
+  actor: string;
+  kind: string;
+  operation: string;
+  before_revision: number;
+  after_revision: number;
+  created_at: string;
+}
+
+export interface PlanApprovalRow {
+  id: string;
+  plan_id: string;
+  revision: number;
+  actor: string;
+  kind: "approve" | "support";
+  valid: 0 | 1;
+  invalidated_at: string | null;
+  invalidated_by_event: string | null;
+  created_at: string;
+}
+
+export interface PlanProposalRow {
+  id: string;
+  plan_id: string;
+  base_revision: number;
+  author: string;
+  operations: string;
+  status: "pending" | "applied" | "dismissed";
+  created_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
+}
+
+export interface PlanExecutionRow {
+  id: string;
+  plan_id: string;
+  node_id: string;
+  plan_revision: number;
+  launched_by: string;
+  conversation_id: string;
+  submission_seq: number;
+  turn_submission_seq: number;
+  fountain_turn_id: string | null;
+  turn_binding: "inferred";
+  status: string;
+  start_branch: string | null;
+  start_head: string | null;
+  start_changes_seq: number | null;
+  end_branch: string | null;
+  end_head: string | null;
+  end_changes_seq: number | null;
+  evidence_diff: string;
+  evidence_truncated: 0 | 1;
+  result_summary: string;
+  error: string | null;
+  exception_state: string;
+  prompt: string;
+  node_snapshot: string;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  model_claims: string;
+}
+
+export interface RoomNoteRow {
+  id: string;
+  chat_id: string;
+  body: string;
+  author: string;
+  queued: 0 | 1;
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  sent_at: string | null;
+  sent_by: string | null;
+}
+
+export interface ControlActionRow {
+  id: string;
+  chat_id: string;
+  actor: string;
+  action: string;
+  conversation_id: string;
+  turn_id: string | null;
+  request_id: string | null;
+  option_id: string | null;
+  outcome: string;
+  winner: string | null;
+  created_at: string;
 }
 
 export type Role = "owner" | "member";
@@ -294,7 +425,10 @@ CREATE TABLE IF NOT EXISTS comments (
   resolved_at TEXT,
   resolved_by TEXT,
   sent_at TEXT,
-  sent_by TEXT
+  sent_by TEXT,
+  anchor_kind TEXT NOT NULL DEFAULT 'diff_line',
+  plan_node_id TEXT,
+  plan_field TEXT
 );
 CREATE INDEX IF NOT EXISTS comments_chat ON comments(chat_id, created_at);
 CREATE TABLE IF NOT EXISTS changes (
@@ -314,6 +448,151 @@ CREATE TABLE IF NOT EXISTS changes (
   at TEXT NOT NULL,
   PRIMARY KEY (chat_id, seq)
 );
+CREATE TABLE IF NOT EXISTS plans (
+  id TEXT PRIMARY KEY,
+  chat_id TEXT NOT NULL UNIQUE REFERENCES chats(id) ON DELETE CASCADE,
+  title TEXT NOT NULL DEFAULT 'Plan',
+  outcome TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  revision INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'draft',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS plan_nodes (
+  id TEXT NOT NULL,
+  plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  outcome TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  acceptance_criteria TEXT NOT NULL DEFAULT '[]',
+  scope TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'pending',
+  position INTEGER NOT NULL,
+  field_revisions TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (plan_id, id)
+);
+CREATE INDEX IF NOT EXISTS plan_nodes_plan ON plan_nodes(plan_id, position, id);
+CREATE TABLE IF NOT EXISTS plan_edges (
+  plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  from_node_id TEXT NOT NULL,
+  to_node_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (plan_id, from_node_id, to_node_id),
+  CHECK (from_node_id <> to_node_id),
+  FOREIGN KEY (plan_id, from_node_id) REFERENCES plan_nodes(plan_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (plan_id, to_node_id) REFERENCES plan_nodes(plan_id, id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS plan_events (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  actor TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  before_revision INTEGER NOT NULL,
+  after_revision INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS plan_events_plan ON plan_events(plan_id, after_revision, created_at);
+CREATE TABLE IF NOT EXISTS plan_approvals (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  revision INTEGER NOT NULL,
+  actor TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  valid INTEGER NOT NULL DEFAULT 1,
+  invalidated_at TEXT,
+  invalidated_by_event TEXT REFERENCES plan_events(id),
+  created_at TEXT NOT NULL,
+  UNIQUE(plan_id, revision, actor, kind)
+);
+CREATE INDEX IF NOT EXISTS plan_approvals_plan ON plan_approvals(plan_id, revision, valid);
+CREATE TABLE IF NOT EXISTS plan_proposals (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  base_revision INTEGER NOT NULL,
+  author TEXT NOT NULL,
+  operations TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  decided_at TEXT,
+  decided_by TEXT
+);
+CREATE INDEX IF NOT EXISTS plan_proposals_plan ON plan_proposals(plan_id, created_at);
+CREATE TABLE IF NOT EXISTS plan_executions (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  -- Deliberately not a node FK: the immutable node_snapshot and execution
+  -- evidence must survive a later plan revision that removes this node id.
+  node_id TEXT NOT NULL,
+  plan_revision INTEGER NOT NULL,
+  launched_by TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
+  submission_seq INTEGER NOT NULL,
+  turn_submission_seq INTEGER NOT NULL,
+  fountain_turn_id TEXT,
+  turn_binding TEXT NOT NULL DEFAULT 'inferred',
+  status TEXT NOT NULL,
+  start_branch TEXT,
+  start_head TEXT,
+  start_changes_seq INTEGER,
+  end_branch TEXT,
+  end_head TEXT,
+  end_changes_seq INTEGER,
+  evidence_diff TEXT NOT NULL DEFAULT '',
+  evidence_truncated INTEGER NOT NULL DEFAULT 0,
+  result_summary TEXT NOT NULL DEFAULT '',
+  error TEXT,
+  exception_state TEXT NOT NULL DEFAULT 'none',
+  prompt TEXT NOT NULL,
+  node_snapshot TEXT NOT NULL DEFAULT '{}',
+  model_claims TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT,
+  UNIQUE(plan_id, submission_seq)
+);
+CREATE INDEX IF NOT EXISTS plan_executions_plan ON plan_executions(plan_id, created_at);
+CREATE TABLE IF NOT EXISTS execution_criteria (
+  id TEXT PRIMARY KEY,
+  execution_id TEXT NOT NULL REFERENCES plan_executions(id) ON DELETE CASCADE,
+  criterion_index INTEGER NOT NULL,
+  criterion TEXT NOT NULL,
+  result TEXT NOT NULL DEFAULT 'unknown',
+  deterministic_evidence TEXT NOT NULL DEFAULT '[]',
+  model_claim TEXT,
+  explanation TEXT NOT NULL DEFAULT '',
+  UNIQUE(execution_id, criterion_index)
+);
+CREATE TABLE IF NOT EXISTS room_notes (
+  id TEXT PRIMARY KEY,
+  chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  author TEXT NOT NULL,
+  queued INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  resolved_at TEXT,
+  resolved_by TEXT,
+  sent_at TEXT,
+  sent_by TEXT
+);
+CREATE INDEX IF NOT EXISTS room_notes_chat ON room_notes(chat_id, created_at);
+CREATE TABLE IF NOT EXISTS control_actions (
+  id TEXT PRIMARY KEY,
+  chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
+  turn_id TEXT,
+  request_id TEXT,
+  option_id TEXT,
+  outcome TEXT NOT NULL,
+  winner TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS control_actions_chat ON control_actions(chat_id, created_at);
 `;
 
 export function now(): string {
@@ -346,6 +625,21 @@ export class Db {
     if (!changes.has("ahead")) this.sql.exec("ALTER TABLE changes ADD COLUMN ahead INTEGER");
     const projects = new Set((this.sql.query("PRAGMA table_info(projects)").all() as { name: string }[]).map((c) => c.name));
     if (!projects.has("github_repo")) this.sql.exec("ALTER TABLE projects ADD COLUMN github_repo TEXT");
+    const comments = new Set((this.sql.query("PRAGMA table_info(comments)").all() as { name: string }[]).map((c) => c.name));
+    if (!comments.has("anchor_kind")) this.sql.exec("ALTER TABLE comments ADD COLUMN anchor_kind TEXT NOT NULL DEFAULT 'diff_line'");
+    if (!comments.has("plan_node_id")) this.sql.exec("ALTER TABLE comments ADD COLUMN plan_node_id TEXT");
+    if (!comments.has("plan_field")) this.sql.exec("ALTER TABLE comments ADD COLUMN plan_field TEXT");
+    const plans = new Set((this.sql.query("PRAGMA table_info(plans)").all() as { name: string }[]).map((c) => c.name));
+    if (!plans.has("outcome")) this.sql.exec("ALTER TABLE plans ADD COLUMN outcome TEXT NOT NULL DEFAULT ''");
+    if (!plans.has("description")) this.sql.exec("ALTER TABLE plans ADD COLUMN description TEXT NOT NULL DEFAULT ''");
+    if (!plans.has("status")) this.sql.exec("ALTER TABLE plans ADD COLUMN status TEXT NOT NULL DEFAULT 'draft'");
+    const executions = new Set((this.sql.query("PRAGMA table_info(plan_executions)").all() as { name: string }[]).map((c) => c.name));
+    if (!executions.has("conversation_id")) this.sql.exec("ALTER TABLE plan_executions ADD COLUMN conversation_id TEXT NOT NULL DEFAULT ''");
+    if (!executions.has("model_claims")) this.sql.exec("ALTER TABLE plan_executions ADD COLUMN model_claims TEXT NOT NULL DEFAULT '[]'");
+    if (!executions.has("completed_at")) this.sql.exec("ALTER TABLE plan_executions ADD COLUMN completed_at TEXT");
+    if (!executions.has("evidence_truncated")) this.sql.exec("ALTER TABLE plan_executions ADD COLUMN evidence_truncated INTEGER NOT NULL DEFAULT 0");
+    if (!executions.has("turn_submission_seq")) this.sql.exec("ALTER TABLE plan_executions ADD COLUMN turn_submission_seq INTEGER NOT NULL DEFAULT 0");
+    if (!executions.has("node_snapshot")) this.sql.exec("ALTER TABLE plan_executions ADD COLUMN node_snapshot TEXT NOT NULL DEFAULT '{}'");
   }
 
   close(): void {
@@ -656,8 +950,8 @@ export class Db {
   insertComment(c: CommentRow): void {
     this.sql
       .query(
-        `INSERT INTO comments (id, chat_id, changes_seq, path, side, line, quote, body, author, created_at, resolved_at, resolved_by, sent_at, sent_by)
-         VALUES ($id, $chat_id, $changes_seq, $path, $side, $line, $quote, $body, $author, $created_at, $resolved_at, $resolved_by, $sent_at, $sent_by)`,
+        `INSERT INTO comments (id, chat_id, changes_seq, path, side, line, quote, body, author, created_at, resolved_at, resolved_by, sent_at, sent_by, anchor_kind, plan_node_id, plan_field)
+         VALUES ($id, $chat_id, $changes_seq, $path, $side, $line, $quote, $body, $author, $created_at, $resolved_at, $resolved_by, $sent_at, $sent_by, $anchor_kind, $plan_node_id, $plan_field)`,
       )
       .run(c as unknown as Record<string, string | number | null>);
   }
@@ -708,6 +1002,21 @@ export class Db {
 
   /** Keep the newest `keep` snapshots of a chat. */
   pruneChanges(chatId: string, keep: number): void {
-    this.sql.query("DELETE FROM changes WHERE chat_id = $c AND seq <= (SELECT COALESCE(MAX(seq), 0) FROM changes WHERE chat_id = $c) - $keep").run({ c: chatId, keep });
+    // Snapshots used as plan-execution boundaries are durable evidence and
+    // survive the rolling room-history policy.
+    this.sql
+      .query(
+        `DELETE FROM changes
+         WHERE chat_id = $c
+           AND seq <= (SELECT COALESCE(MAX(seq), 0) FROM changes WHERE chat_id = $c) - $keep
+           AND seq NOT IN (
+             SELECT start_changes_seq FROM plan_executions e JOIN plans p ON p.id = e.plan_id
+             WHERE p.chat_id = $c AND start_changes_seq IS NOT NULL
+             UNION
+             SELECT end_changes_seq FROM plan_executions e JOIN plans p ON p.id = e.plan_id
+             WHERE p.chat_id = $c AND end_changes_seq IS NOT NULL
+           )`,
+      )
+      .run({ c: chatId, keep });
   }
 }

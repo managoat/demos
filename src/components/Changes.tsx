@@ -37,6 +37,8 @@ export interface Review {
   sendPrompt: ((text: string) => Promise<void>) | null;
   /** Read the repository through Fountain now. Null when the chat has no repository, or no computer any more. */
   refresh: ((reason: "manual") => Promise<unknown>) | null;
+  /** Historical execution evidence is immutable and cannot accept live diff comments/actions. */
+  readOnly?: boolean;
 }
 
 type View = { kind: "diff" } | { kind: "dir"; path: string } | { kind: "file"; path: string };
@@ -48,7 +50,7 @@ export function ChangesPanel({ changes, review, onClose }: { changes: ChangesDto
   const [sending, setSending] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [view, setView] = useState<View>({ kind: "diff" });
-  const all = useMemo(() => [...review.comments.values()], [review.comments]);
+  const all = useMemo(() => [...review.comments.values()].filter((comment) => !comment.anchorKind || comment.anchorKind === "diff_line"), [review.comments]);
   const open = pending(all);
 
   const refresh = async () => {
@@ -95,7 +97,7 @@ export function ChangesPanel({ changes, review, onClose }: { changes: ChangesDto
               {refreshing ? "…" : "↻"}
             </button>
           )}
-          {open.length > 0 && (
+          {!review.readOnly && open.length > 0 && (
             <button type="button" className="small send-comments" onClick={() => void send()} disabled={sending} title={review.busy ? "The model is still working; it will take these when the turn ends." : undefined}>
               {sending ? "Sending…" : `Send ${open.length} to the model`}
             </button>
@@ -130,7 +132,7 @@ export function ChangesPanel({ changes, review, onClose }: { changes: ChangesDto
               </a>
             )}
           </div>
-          <Checks changes={changes} openComments={open.length} review={review} />
+          {!review.readOnly && <Checks changes={changes} openComments={open.length} review={review} />}
           {changes.truncated && <div className="changes-note small">The diff was too long to keep whole; what is here is the first part of it.</div>}
           {files.length === 0 && <p className="muted small pad">The tree is clean: nothing differs from {changes.base}.</p>}
           {files.length > 0 && (
@@ -352,9 +354,7 @@ function LineRows({
         <td className="no">{l.oldNo ?? ""}</td>
         <td className="no">{l.newNo ?? ""}</td>
         <td className="code">
-          <button type="button" className="comment-add" onClick={onCompose} aria-label={`Comment on line ${no}`} title="Comment on this line">
-            +
-          </button>
+          {!review.readOnly && <button type="button" className="comment-add" onClick={onCompose} aria-label={`Comment on line ${no}`} title="Comment on this line">+</button>}
           <span className="sign">{l.type === "add" ? "+" : l.type === "del" ? "−" : " "}</span>
           {l.text}
         </td>

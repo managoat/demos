@@ -8,8 +8,8 @@ import { gameLabel } from "../../shared/games";
 import { modelLabel } from "../../shared/models";
 import type { ChatDto, SendDto } from "../lib/api";
 import { api, turnImageUrl } from "../lib/api";
-import { arrange, gameOf } from "../lib/blocks";
-import { describeError } from "../lib/errors";
+import { arrange, assistantText, gameOf } from "../lib/blocks";
+import { describeError, errorCode } from "../lib/errors";
 import { formatTime } from "../lib/format";
 import { useAttachments } from "../lib/images";
 import type { ChatLive } from "../lib/live";
@@ -23,6 +23,8 @@ import { Composer, type ComposerHandle } from "./Composer";
 import { GameCard } from "./Game";
 import { MenuBack, MenuHeading, MenuItem, Popover } from "./Menu";
 import { shortName, splitAuthor } from "../../shared/author";
+import { PlanView, type PlanNodePatch, type PlanViewPlan } from "./Plan";
+import type { PlanOperation } from "../../shared/plans";
 
 /** The streams shown: the transcript and its stages. The runtime's raw stdout is not something a chat needs to see. */
 const STREAMS = "acp,stage";
@@ -31,7 +33,7 @@ const VISIBLE = new Set(["acp"]);
 const RUNNING_POLL_MS = 15_000;
 const IDLE_POLL_MS = 60_000;
 
-export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges }: { chat: ChatDto; sends: SendDto[]; onSent: () => void; live: ChatLive; changesOpen: boolean; onCloseChanges: () => void }) {
+export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges, onOpenChanges, planOpen, onClosePlan }: { chat: ChatDto; sends: SendDto[]; onSent: () => void; live: ChatLive; changesOpen: boolean; onCloseChanges: () => void; onOpenChanges: () => void; planOpen: boolean; onClosePlan: () => void }) {
   const { games, takeGame, changes, refreshChanges } = live;
   const { me, toast, workspace, refreshChats, refreshNotifications } = useSession();
   const fountain = useMemo(() => makeChatClient(chat.id), [chat.id]);
@@ -42,10 +44,20 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [draftingPlan, setDraftingPlan] = useState(false);
+  const [executionEvidence, setExecutionEvidence] = useState<typeof changes>(null);
+  const [noteMode, setNoteMode] = useState(false);
+  const [executionPoll, setExecutionPoll] = useState(0);
+  const draftSawRunning = useRef(false);
+  const draftStartCount = useRef(0);
   const attachments = useAttachments(useCallback((m: string) => toast(m, "error"), [toast]));
   const composer = useRef<ComposerHandle>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+
+  useEffect(() => {
+    if (!changesOpen) setExecutionEvidence(null);
+  }, [changesOpen]);
 
   const who = modelLabel(chat.settings.model);
 
@@ -160,6 +172,22 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
   // A game the transcript shows at the tool call that started it is not shown again;
   // one started from the "+" has no such place and goes after the last turn.
   const arranged = useMemo(() => folded.turns.map(({ turn, events: evs }) => ({ turn, blocks: arrange(evs, VISIBLE) })), [folded]);
+  const toolCompletions = useMemo(() => events.reduce((count, event) => count + (event.blocks?.filter((block) => block.kind === "tool_result").length ?? 0), 0), [events]);
+  const seenToolCompletions = useRef(0);
+  const toolRefreshTimer = useRef<number | null>(null);
+  useEffect(() => {
+    const previous = seenToolCompletions.current;
+    seenToolCompletions.current = toolCompletions;
+    if (!running || !chat.project || toolCompletions <= previous) return;
+    if (toolRefreshTimer.current !== null) window.clearTimeout(toolRefreshTimer.current);
+    toolRefreshTimer.current = window.setTimeout(() => {
+      toolRefreshTimer.current = null;
+      void refreshChanges("manual").catch(() => undefined);
+    }, 700);
+    return () => {
+      if (toolRefreshTimer.current !== null) window.clearTimeout(toolRefreshTimer.current);
+    };
+  }, [toolCompletions, running, chat.project, refreshChanges]);
   const looseGames = useMemo(() => {
     const placed = new Set<string>();
     for (const { blocks } of arranged) for (const b of blocks) if (b.kind === "tool_use") placed.add(gameOf(b as Parameters<typeof gameOf>[0])?.id ?? "");
@@ -184,6 +212,19 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
     if ((!prompt && !images) || sending) return;
     setSending(true);
     try {
+      if (running || noteMode) {
+        if (images) {
+          toast("Room notes are text-only. Remove the attachment or wait to send it as a turn.", "error");
+          return;
+        }
+        const note = await api.note(chat.id, prompt, running ? "next_turn" : "manual");
+        live.takeNote(note);
+        setDraft("");
+        attachments.clear();
+        setNoteMode(false);
+        toast(running ? "Saved as a room note for the next turn." : "Room note saved without starting a turn.");
+        return;
+      }
       await fountain.request("POST", `/api/conversations/${convId}/prompts`, { body: images ? { prompt, images } : { prompt } });
       setDraft("");
       attachments.clear();
@@ -193,13 +234,19 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
       void refreshNotifications();
       window.setTimeout(() => void readRecord().catch(() => undefined), 500);
     } catch (err) {
-      toast(describeError(err), "error");
+      if ((errorCode(err) === "conversation_busy" || errorCode(err) === "plan_execution_busy") && prompt && !images) {
+        try {
+          live.takeNote(await api.note(chat.id, prompt, "next_turn"));
+          setDraft("");
+          toast("The turn was already busy, so your message was saved as a next-turn room note.");
+        } catch (noteError) { toast(describeError(noteError), "error"); }
+      } else toast(describeError(err), "error");
     } finally {
       setSending(false);
     }
   }
 
-  const answer = useCallback((requestId: string, optionId: string) => fountain.resume(convId).answer(requestId, optionId), [fountain, convId]);
+  const answer = useCallback((requestId: string, optionId: string) => api.answerPermission(chat.id, requestId, optionId).then(() => undefined), [chat.id]);
 
   const retired = record?.status === "terminated" || !!chat.archivedAt;
   const mention = /(?:^|\s)@([^\s@]*)$/.exec(draft);
@@ -226,6 +273,37 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
     wasRunning.current = false;
     if (chat.project && !retired) void refreshChanges("stop").catch(() => undefined);
   }, [running, chat.project, retired, refreshChanges]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => live.updatePresence(!!draft.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [draft, live.updatePresence]);
+
+  useEffect(() => {
+    if (running && draftingPlan) draftSawRunning.current = true;
+    if (running || !draftingPlan || arranged.length <= draftStartCount.current) return;
+    const last = arranged[arranged.length - 1];
+    const text = last ? assistantText(folded.turns.find((item) => item.turn.id === last.turn.id)?.events ?? []) : "";
+    if (!text) {
+      setDraftingPlan(false);
+      toast("The plan draft turn ended without a structured draft.", "error");
+      return;
+    }
+    draftSawRunning.current = false;
+    void (async () => {
+      try {
+        const adopted = await api.adoptPlan(chat.id, JSON.parse(extractJson(text)));
+        live.setPlan("proposed" in adopted ? adopted.plan : adopted);
+        toast("Plan draft is ready for review.");
+      } catch (err) {
+        // The model's invalid output remains visible in the transcript and
+        // the authoritative plan is untouched.
+        toast(`The draft stayed in the thread: ${describeError(err)}`, "error");
+      } finally {
+        setDraftingPlan(false);
+      }
+    })();
+  }, [running, draftingPlan, arranged, folded.turns, chat.id, live.setPlan, toast]);
   const sendPrompt = useCallback(
     async (text: string) => {
       await fountain.request("POST", `/api/conversations/${convId}/prompts`, { body: { prompt: text } });
@@ -238,8 +316,52 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
   const waiting = running && (!last || last.turn.status === "running" || last.turn.status === "pending");
   const setupFailed = folded.setup.some((e) => e.kind === "stage" && e.state === "failed") && folded.turns.length === 0;
 
+  const planView: PlanViewPlan | null = live.plan ? { ...live.plan.document, events: live.plan.events, approvals: live.plan.approvals, executions: live.plan.executions, comments: live.plan.comments, proposals: live.plan.proposals } : null;
+  const currentExecution = live.plan?.executions.find((execution) => execution.status === "running" || execution.status === "queued") ?? null;
+
+  useEffect(() => {
+    const launcher = currentExecution?.launchedBy === me.email;
+    const hostRecovery = chat.role === "owner";
+    if (running || !currentExecution || (!launcher && !hostRecovery)) return;
+    const timer = window.setTimeout(() => void (async () => {
+      try {
+        await readRecord();
+        if (chat.project && !retired) await refreshChanges("stop");
+        const last = arranged[arranged.length - 1];
+        const claim = last ? assistantText(folded.turns.find((item) => item.turn.id === last.turn.id)?.events ?? []) : "";
+        const result = await api.finishPlanExecution(chat.id, currentExecution.id, launcher ? { summary: claim, modelClaims: claim ? [claim] : [] } : {});
+        live.setPlan(result.plan);
+      } catch (err) {
+        if (errorCode(err) === "execution_not_finished") setExecutionPoll((value) => value + 1);
+        else toast(describeError(err), "error");
+      }
+    })(), launcher ? 1_000 : 5_000);
+    return () => window.clearTimeout(timer);
+  }, [running, currentExecution?.id, executionPoll]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const mutatePlan = useCallback(async (operations: PlanOperation[]) => {
+    live.setPlan(await api.mutatePlan(chat.id, operations));
+  }, [chat.id, live.setPlan]);
+
+  const patchNode = useCallback(async (nodeId: string, patch: PlanNodePatch) => {
+    if (!live.plan) return;
+    const revision = live.plan.document.plan.revision;
+    const node = live.plan.document.nodes.find((candidate) => candidate.id === nodeId);
+    if (!node) return;
+    const operations: PlanOperation[] = [];
+    for (const field of ["outcome", "description", "acceptanceCriteria", "declaredScope"] as const) {
+      if (patch[field] !== undefined && JSON.stringify(patch[field]) !== JSON.stringify(node[field])) operations.push({ id: crypto.randomUUID(), expectedRevision: revision, type: "set_node_field", nodeId, field, value: patch[field] as never } as PlanOperation);
+    }
+    if (patch.dependencies) {
+      const before = live.plan.document.edges.filter((edge) => edge.toNodeId === nodeId).map((edge) => edge.fromNodeId);
+      for (const dependency of before.filter((id) => !patch.dependencies!.includes(id))) operations.push({ id: crypto.randomUUID(), expectedRevision: revision, type: "remove_edge", fromNodeId: dependency, toNodeId: nodeId });
+      for (const dependency of patch.dependencies.filter((id) => !before.includes(id))) operations.push({ id: crypto.randomUUID(), expectedRevision: revision, type: "add_edge", edgeId: crypto.randomUUID(), fromNodeId: dependency, toNodeId: nodeId });
+    }
+    if (operations.length) await mutatePlan(operations);
+  }, [live.plan, mutatePlan]);
+
   return (
-    <div className={`thread-body${changesOpen ? " with-changes" : ""}`}>
+    <div className={`thread-body${changesOpen ? " with-changes" : ""}${planOpen ? " with-plan" : ""}`}>
       <div className="thread-main">
       <div className="transcript" ref={scroller} onScroll={onScroll}>
         {loading && <div className="muted small center">Loading…</div>}
@@ -297,7 +419,7 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
                   </div>
                   <div className="reply">
                     {blocks.map((b, i) => (
-                      <BlockView key={`${turn.id}-${i}`} block={b} onAnswer={answer} games={gameHandlers} />
+                      <BlockView key={`${turn.id}-${i}`} block={b} onAnswer={chat.role === "owner" || a.email === me.email ? answer : undefined} games={gameHandlers} />
                     ))}
                     {turnRunning && blocks.length === 0 && <span className="thinking-dots" aria-label="working" />}
                   </div>
@@ -316,6 +438,29 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
         )}
       </div>
       <div className="thread-foot">
+        {(live.presence?.people.length || live.activeTurn || [...live.notes.values()].some((note) => !note.sentAt && !note.resolvedAt)) ? (
+          <div className="room-state">
+            {live.presence?.people.length ? <span>{live.presence.people.map((person) => shortName(person.email)).join(", ")} online</span> : null}
+            {live.presence?.people.some((person) => person.typing && person.email !== me.email) ? <span>{live.presence.people.filter((person) => person.typing && person.email !== me.email).map((person) => shortName(person.email)).join(", ")} typing…</span> : null}
+            {running && (authors.get(last?.turn.id ?? "")?.email || live.activeTurn?.author) ? <span>{shortName(authors.get(last?.turn.id ?? "")?.email ?? live.activeTurn!.author)} started this turn</span> : null}
+            {live.controls.at(-1) ? <span>{shortName(live.controls.at(-1)!.actor)} {live.controls.at(-1)!.action === "interrupt" ? "interrupted" : "answered a permission"} · {live.controls.at(-1)!.outcome.replace(/_/g, " ")}{live.controls.at(-1)!.winner ? ` (${shortName(live.controls.at(-1)!.winner!)} was first)` : ""}</span> : null}
+            {[...live.notes.values()].filter((note) => !note.sentAt && !note.resolvedAt).length > 0 ? <span>{[...live.notes.values()].filter((note) => !note.sentAt && !note.resolvedAt).length} room note(s)</span> : null}
+          </div>
+        ) : null}
+        {[...live.notes.values()].some((note) => !note.sentAt && !note.resolvedAt) && (
+          <div className="room-notes">
+            {[...live.notes.values()].filter((note) => !note.sentAt && !note.resolvedAt).map((note) => (
+              <div key={note.id}>
+                <Avatar email={note.author} size={20} />
+                <span><strong>{note.author === me.email ? "You" : shortName(note.author)}</strong>{note.body}</span>
+                {note.delivery === "next_turn" && <em>next turn</em>}
+                <button type="button" className="linklike tiny" onClick={() => void api.resolveNote(chat.id, note.id, true).then(live.takeNote).catch((err) => toast(describeError(err), "error"))}>Resolve</button>
+                {(note.author === me.email || chat.role === "owner") && <button type="button" className="linklike tiny" onClick={() => void api.deleteNote(chat.id, note.id).then(() => live.takeNote({ ...note, deleted: true })).catch((err) => toast(describeError(err), "error"))}>Delete</button>}
+              </div>
+            ))}
+            <button type="button" className="small ghost" disabled={running} onClick={() => void api.sendNotes(chat.id).then((result) => { for (const note of result.notes) live.takeNote(note); onSent(); }).catch((err) => toast(describeError(err), "error"))}>Send notes to the model</button>
+          </div>
+        )}
         <Composer
           ref={composer}
           value={draft}
@@ -323,7 +468,7 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
           onSend={() => void send()}
           sending={sending}
           disabled={retired}
-          placeholder={chat.archivedAt ? "This chat is archived. Restore it to keep going." : retired ? "This chat has been retired." : `Message ${who}`}
+          placeholder={chat.archivedAt ? "This chat is archived. Restore it to keep going." : retired ? "This chat has been retired." : running ? "Save a note for the next turn" : noteMode ? "Write a room note — this will not start a turn" : `Message ${who}`}
           attachments={attachments}
           suggestions={mentionMatches.length > 0 ? (
             <div className="mention-menu">
@@ -334,7 +479,7 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
           left={
             <>
               <PlusMenu
-                disabled={retired}
+                disabled={retired || running || noteMode}
                 participants={[chat.ownerEmail, ...chat.members.map((m) => m.email)]}
                 me={me.email}
                 onAttach={() => composer.current?.pickFiles()}
@@ -347,8 +492,9 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
                   }
                 }}
               />
-              {running && (
-                <button type="button" className="small ghost" onClick={() => fountain.resume(convId).interrupt().then(() => toast("Interrupted")).catch((err) => toast(describeError(err), "error"))}>
+              {!running && <button type="button" className={`small ghost${noteMode ? " on" : ""}`} onClick={() => setNoteMode((value) => !value)}>Note</button>}
+              {running && (chat.role === "owner" || (authors.get(last?.turn.id ?? "")?.email ?? live.activeTurn?.author) === me.email) && (
+                <button type="button" className="small ghost" onClick={() => api.interrupt(chat.id).then(() => toast("Interrupted")).catch((err) => toast(describeError(err), "error"))}>
                   Stop
                 </button>
               )}
@@ -357,9 +503,53 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
         />
       </div>
       </div>
-      {changesOpen && <ChangesPanel changes={changes} review={{ chatId: chat.id, comments: live.comments, takeComment: live.takeComment, busy: !!running, sendPrompt: retired ? null : sendPrompt, refresh: chat.project && !retired ? live.refreshChanges : null }} onClose={onCloseChanges} />}
+      {changesOpen && <ChangesPanel changes={executionEvidence ?? changes} review={{ chatId: chat.id, comments: executionEvidence ? new Map() : live.comments, takeComment: live.takeComment, busy: !!running, sendPrompt: executionEvidence || retired ? null : sendPrompt, refresh: executionEvidence ? null : chat.project && !retired ? live.refreshChanges : null, readOnly: !!executionEvidence }} onClose={() => { setExecutionEvidence(null); onCloseChanges(); }} />}
+      {planOpen && (
+        <PlanView
+          plan={planView}
+          me={me.email}
+          hostEmail={chat.ownerEmail}
+          busy={running}
+          drafting={draftingPlan}
+          running={!!currentExecution}
+          onClose={() => { live.updatePresence(!!draft.trim(), null); onClosePlan(); }}
+          onDraft={retired ? undefined : async () => {
+            setDraftingPlan(true); draftSawRunning.current = false; draftStartCount.current = arranged.length;
+            try { await api.draftPlan(chat.id, record?.first_prompt || chat.title); onSent(); window.setTimeout(() => void readRecord().catch(() => undefined), 500); }
+            catch (error) { setDraftingPlan(false); throw error; }
+          }}
+          onPatchNode={patchNode}
+          onPatchPlan={async (patch) => {
+            if (!live.plan) return;
+            const current = live.plan.document.plan;
+            const operations: PlanOperation[] = [];
+            for (const field of ["title", "outcome", "description"] as const) if (patch[field] !== current[field]) operations.push({ id: crypto.randomUUID(), expectedRevision: current.revision + operations.length, type: "set_plan_field", field, value: patch[field] });
+            if (operations.length) await mutatePlan(operations);
+          }}
+          onAddNode={async () => { if (!live.plan) return; const revision = live.plan.document.plan.revision; const id = `node-${crypto.randomUUID().slice(0, 8)}`; await mutatePlan([{ id: crypto.randomUUID(), expectedRevision: revision, type: "add_node", node: { id, outcome: "New outcome", description: "", acceptanceCriteria: [{ id: `${id}-criterion`, text: "Define the observable result" }], declaredScope: [], status: "pending", order: live.plan.document.nodes.length } }]); }}
+          onRemoveNode={async (nodeId) => { if (live.plan) await mutatePlan([{ id: crypto.randomUUID(), expectedRevision: live.plan.document.plan.revision, type: "remove_node", nodeId }]); }}
+          onMoveNode={async (nodeId, direction) => { if (!live.plan) return; const nodes = [...live.plan.document.nodes].sort((a, b) => a.order - b.order); const index = nodes.findIndex((node) => node.id === nodeId); const target = index + direction; if (target < 0 || target >= nodes.length) return; const afterNodeId = direction < 0 ? (nodes[target - 1]?.id ?? null) : nodes[target]!.id; await mutatePlan([{ id: crypto.randomUUID(), expectedRevision: live.plan.document.plan.revision, type: "move_node", nodeId, afterNodeId }]); }}
+          onComment={async (nodeId, field, body) => { live.takeComment(await api.comment(chat.id, { anchorKind: field ? "plan_field" : "plan_node", planNodeId: nodeId, planField: field ?? undefined, body })); }}
+          onResolveComment={async (commentId, resolved) => { live.takeComment(await api.resolveComment(chat.id, commentId, resolved)); }}
+          onDeleteComment={async (commentId) => { await api.deleteComment(chat.id, commentId); }}
+          onSendFeedback={retired ? undefined : async () => { const result = await api.sendPlanFeedback(chat.id); live.setPlan(result.plan); onSent(); }}
+          onApprove={async (revision) => live.setPlan(await api.decidePlan(chat.id, revision, "approve"))}
+          onSupport={async (revision) => live.setPlan(await api.decidePlan(chat.id, revision, "support"))}
+          onRun={retired ? undefined : async () => { const result = await api.runPlan(chat.id); live.setPlan(result.plan); onSent(); window.setTimeout(() => void readRecord().catch(() => undefined), 500); }}
+          onOpenEvidence={(execution) => { void api.planExecutionEvidence(chat.id, execution.id).then((evidence) => { setExecutionEvidence(evidence); onOpenChanges(); onClosePlan(); }).catch((err) => toast(describeError(err), "error")); }}
+          onDecideProposal={async (proposalId, decision) => live.setPlan(await api.decidePlanProposal(chat.id, proposalId, decision))}
+          presence={live.presence?.people}
+          onViewing={(nodeId, field, mode) => live.updatePresence(!!draft.trim(), nodeId ? { nodeId, field, mode } : null)}
+        />
+      )}
     </div>
   );
+}
+
+function extractJson(text: string): string {
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
+  const candidate = fenced?.[1] ?? text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+  return candidate.trim();
 }
 
 /**

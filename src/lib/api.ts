@@ -9,6 +9,8 @@ import type { ChatSettings } from "../../shared/settings";
 import type { GameDto, GameKind } from "../../shared/games";
 import type { ImageInput } from "../../shared/images";
 import type { ProjectDto } from "../../shared/projects";
+import type { ControlEventDto, NoteDelivery, PresenceDto, PresenceHeartbeatInput, RoomNoteDto } from "../../shared/control";
+import type { CriterionResultDto, PlanApprovalDto, PlanDocument, PlanDraft, PlanEventDto, PlanExecutionDto, PlanOperation, PlanProposalDto } from "../../shared/plans";
 
 export interface Me {
   email: string;
@@ -89,11 +91,26 @@ export interface SendDto {
   at: string;
 }
 
+export interface PlanStateDto {
+  document: PlanDocument;
+  events: PlanEventDto[];
+  approvals: PlanApprovalDto[];
+  executions: PlanExecutionDto[];
+  comments: CommentDto[];
+  proposals: PlanProposalDto[];
+}
+
+export interface CollaborationStateDto {
+  presence: PresenceDto;
+  activeTurn: { id: string; author: string; status: string } | null;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
     message: string,
+    readonly details: Record<string, unknown> = {},
   ) {
     super(message);
     this.name = "ApiError";
@@ -115,7 +132,9 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   }
   if (!res.ok) {
     const e = (parsed ?? {}) as { error?: string; message?: string };
-    throw new ApiError(res.status, e.error ?? `http_${res.status}`, e.message ?? `Request failed (HTTP ${res.status}).`);
+    const answeredBy = typeof (e as Record<string, unknown>).answeredBy === "string" ? (e as Record<string, unknown>).answeredBy : null;
+    const message = e.message ?? `Request failed (HTTP ${res.status}).`;
+    throw new ApiError(res.status, e.error ?? `http_${res.status}`, answeredBy ? `${message} ${answeredBy} answered first.` : message, parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {});
   }
   return parsed as T;
 }
@@ -150,6 +169,30 @@ export const api = {
   invite: (id: string) => data(call<{ data: { token: string } }>("POST", `/api/chats/${id}/invite`)),
   join: (token: string) => data(call<{ data: ChatDto }>("POST", `/api/join/${encodeURIComponent(token)}`)),
 
+  collaboration: (chatId: string) => data(call<{ data: CollaborationStateDto }>("GET", `/api/chats/${chatId}/collaboration`)),
+  presence: (chatId: string, input: PresenceHeartbeatInput) => data(call<{ data: PresenceDto }>("POST", `/api/chats/${chatId}/presence`, input)),
+  leavePresence: (chatId: string, input: PresenceHeartbeatInput) => data(call<{ data: PresenceDto }>("POST", `/api/chats/${chatId}/presence/leave`, input)),
+  notes: (chatId: string) => data(call<{ data: RoomNoteDto[] }>("GET", `/api/chats/${chatId}/notes`)),
+  note: (chatId: string, body: string, delivery: NoteDelivery = "manual") => data(call<{ data: RoomNoteDto }>("POST", `/api/chats/${chatId}/notes`, { body, delivery })),
+  queueNote: (chatId: string, noteId: string, delivery: NoteDelivery) => data(call<{ data: RoomNoteDto }>("POST", `/api/chats/${chatId}/notes/${noteId}/queue`, { delivery })),
+  resolveNote: (chatId: string, noteId: string, resolved: boolean) => data(call<{ data: RoomNoteDto }>("POST", `/api/chats/${chatId}/notes/${noteId}/resolve`, { resolved })),
+  deleteNote: (chatId: string, noteId: string) => call<{ ok: true }>("DELETE", `/api/chats/${chatId}/notes/${noteId}`),
+  sendNotes: (chatId: string) => data(call<{ data: { sent: number; prompt: string; notes: RoomNoteDto[] } }>("POST", `/api/chats/${chatId}/notes/send`)),
+  controlEvents: (chatId: string) => data(call<{ data: ControlEventDto[] }>("GET", `/api/chats/${chatId}/control-actions`)),
+  interrupt: (chatId: string) => data(call<{ data: ControlEventDto }>("POST", `/api/chats/${chatId}/interrupt`)),
+  answerPermission: (chatId: string, requestId: string, optionId: string) => data(call<{ data: ControlEventDto }>("POST", `/api/chats/${chatId}/permission-requests/${encodeURIComponent(requestId)}/answer`, { optionId })),
+
+  plan: (chatId: string) => data(call<{ data: PlanStateDto | null }>("GET", `/api/chats/${chatId}/plan`)),
+  adoptPlan: (chatId: string, draft: PlanDraft | unknown) => data(call<{ data: PlanStateDto | { proposed: true; proposal: unknown; plan: PlanStateDto } }>("POST", `/api/chats/${chatId}/plan/adopt`, { draft })),
+  mutatePlan: (chatId: string, operations: PlanOperation[]) => data(call<{ data: PlanStateDto }>("POST", `/api/chats/${chatId}/plan/operations`, { operations })),
+  decidePlan: (chatId: string, revision: number, kind: "approve" | "support") => data(call<{ data: PlanStateDto }>("POST", `/api/chats/${chatId}/plan/decisions`, { revision, kind })),
+  decidePlanProposal: (chatId: string, proposalId: string, decision: "apply" | "dismiss") => data(call<{ data: PlanStateDto }>("POST", `/api/chats/${chatId}/plan/proposals/${proposalId}`, { decision })),
+  draftPlan: (chatId: string, intent: string) => data(call<{ data: { prompt: string; currentRevision: number | null } }>("POST", `/api/chats/${chatId}/plan/draft`, { intent })),
+  sendPlanFeedback: (chatId: string) => data(call<{ data: { sent: number; prompt: string; plan: PlanStateDto } }>("POST", `/api/chats/${chatId}/plan/feedback/send`)),
+  runPlan: (chatId: string, nodeId?: string) => data(call<{ data: { execution: PlanExecutionDto; plan: PlanStateDto } }>("POST", `/api/chats/${chatId}/plan/run`, nodeId ? { nodeId } : {})),
+  finishPlanExecution: (chatId: string, executionId: string, input: { summary?: string; error?: string; failed?: boolean; interrupted?: boolean; criterionResults?: CriterionResultDto[]; modelClaims?: string[] }) => data(call<{ data: { execution: PlanExecutionDto; plan: PlanStateDto } }>("POST", `/api/chats/${chatId}/plan/executions/${executionId}/finish`, input)),
+  planExecutionEvidence: (chatId: string, executionId: string) => data(call<{ data: ChangesDto }>("GET", `/api/chats/${chatId}/plan/executions/${executionId}/evidence`)),
+
   games: (chatId: string) => data(call<{ data: GameDto[] }>("GET", `/api/chats/${chatId}/games`)),
   startGame: (chatId: string, kind: GameKind, players: [string, string]) => data(call<{ data: GameDto }>("POST", `/api/chats/${chatId}/games`, { kind, players })),
   move: (chatId: string, gameId: string, cell: number) => data(call<{ data: GameDto }>("POST", `/api/chats/${chatId}/games/${gameId}/moves`, { cell })),
@@ -162,7 +205,7 @@ export const api = {
 
   changes: (chatId: string) => data(call<{ data: ChangesDto | null }>("GET", `/api/chats/${chatId}/changes`)),
   comments: (chatId: string) => data(call<{ data: CommentDto[] }>("GET", `/api/chats/${chatId}/comments`)),
-  comment: (chatId: string, input: { path: string; side: Side; line: number; body: string }) => data(call<{ data: CommentDto }>("POST", `/api/chats/${chatId}/comments`, input)),
+  comment: (chatId: string, input: { path?: string; side?: Side; line?: number; anchorKind?: "diff_line" | "plan_node" | "plan_field"; planNodeId?: string; planField?: string; body: string }) => data(call<{ data: CommentDto }>("POST", `/api/chats/${chatId}/comments`, input)),
   resolveComment: (chatId: string, id: string, resolved: boolean) => data(call<{ data: CommentDto }>("POST", `/api/chats/${chatId}/comments/${id}/resolve`, { resolved })),
   deleteComment: (chatId: string, id: string) => call<{ ok: true }>("DELETE", `/api/chats/${chatId}/comments/${id}`),
   sendComments: (chatId: string) => data(call<{ data: { sent: number; prompt: string; comments: CommentDto[] } }>("POST", `/api/chats/${chatId}/comments/send`)),

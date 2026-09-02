@@ -88,6 +88,20 @@ nothing about agents, environments or runtimes anywhere.
   comments into one prompt, grouped by file with each person named, sent
   as whoever pressed it (`server/comments.ts`, `shared/comments.ts`). A
   comment costs nobody a turn; the send is one.
+- **Agree, then execute.** Project chats open with a durable Plan pane beside
+  the thread. Everyone edits the same node outline, dependencies stay acyclic,
+  comments and room notes cost no model turn, and the host approves one exact
+  revision. *Run approved plan* sends one dependency-ready node at a time;
+  Salon retains its starting and ending commit boundary, node-specific diff,
+  changed scope and pass/fail/unknown result for every acceptance criterion.
+  Drafts and revision proposals are validated before anyone can apply them
+  (`shared/plans.ts`, `server/plans.ts`, `src/components/Plan.tsx`).
+- **Multiplayer control is accountable.** Presence, typing and which plan node
+  people view or edit travel ephemerally on the room stream. Interrupts and
+  permission answers go through Salon's authority policy — the turn author or
+  host — and remain in an audit trail, including who answered first. A message
+  typed while the model is busy becomes a room note for the next turn instead
+  of failing (`shared/control.ts`, `server/control.ts`).
 - **Ship from the panel.** A checks strip says what stands between the
   branch and a merge — tree clean, branch pushed, pull request open,
   comments answered — and two buttons ask the model to push or to open a
@@ -140,9 +154,9 @@ in `OAUTH_CLIENTS`.
 ## Layout
 
 ```
-server/   Bun: auth, chats, the agent seam, the chat-scoped proxy, SQLite
-shared/   what both sides agree on: author tags, models, settings, skills, images
-src/      Vite + React: sign-in, sidebar, the composer and its menus, the thread
+server/   Bun: auth, chats, plans/control, the agent seam, chat proxy, SQLite
+shared/   contracts and rules: plans, control, comments, models, settings, skills
+src/      Vite + React: chat, thread, Plan and Changes review panes
 k8s/      Deployment + Service + IngressRoutes + Certificate for home-cloud
 ```
 
