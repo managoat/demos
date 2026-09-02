@@ -1,0 +1,18 @@
+{
+  "name": "managoat-demos",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Fountain demo suite: one app per directory under apps/, each deployed to <name>.demo.managoat.com.",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "typecheck": "bun run scripts/each.ts typecheck",
+    "test": "bun test",
+    "build": "bun run scripts/each.ts build",
+    "apps": "bun run scripts/apps.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.8.0"
+  }
+}

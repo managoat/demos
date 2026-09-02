@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@agentshit/fountain-sdk": "1.15.0",
+    "@managoat/fountain-app": "workspace:*",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

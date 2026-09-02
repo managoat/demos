@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "One goal, a fleet of agents: describe a mission, approve the coordinator's plan, and watch one sandboxed agent per task work it — one synthesized report at the end. Talks only to the Fountain API.",
+  "description": "One goal, a fleet of agents: describe a mission, approve the coordinator's plan, and watch one sandboxed agent per task work it \u2014 one synthesized report at the end. Talks only to the Fountain API.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -13,6 +13,7 @@
     "mock": "bun mock/server.ts"
   },
   "dependencies": {
+    "@managoat/fountain-app": "workspace:*",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { assistantText, blocksForTurn } from "./acp";
-import type { LogEvent } from "../api/types";
+import type { LogEvent } from "./types";
 
 function acp(update: unknown, id = 1): LogEvent {
   return {
@@ -15,7 +15,7 @@ function acp(update: unknown, id = 1): LogEvent {
     stage: null,
     state: null,
     turn_id: "t",
-    ts: "2026-08-19T00:00:00Z",
+    ts: "2026-08-18T00:00:00Z",
   };
 }
 
@@ -25,8 +25,18 @@ const chunk = (text: string, id = 1) =>
 describe("blocksForTurn", () => {
   test("concatenates message chunks into one text block", () => {
     const blocks = blocksForTurn([chunk("Hel", 1), chunk("lo", 2)], "claude");
-    expect(blocks).toEqual([{ kind: "text", body: "Hello", startedAt: "2026-08-19T00:00:00Z", endedAt: "2026-08-19T00:00:00Z" }]);
+    expect(blocks).toEqual([{ kind: "text", body: "Hello", startedAt: "2026-08-18T00:00:00Z", endedAt: "2026-08-18T00:00:00Z" }]);
     expect(assistantText([chunk("Hel", 1), chunk("lo", 2)], "claude")).toBe("Hello");
+  });
+  test("a text block is stamped with its first and last chunk's arrival", () => {
+    const events = [
+      { ...chunk("Hel", 1), ts: "2026-08-18T00:00:00Z" },
+      { ...chunk("lo", 2), ts: "2026-08-18T00:00:03Z" },
+      { ...chunk(" there", 3), ts: "2026-08-18T00:00:05Z" },
+    ];
+    expect(blocksForTurn(events, "claude")).toEqual([
+      { kind: "text", body: "Hello there", startedAt: "2026-08-18T00:00:00Z", endedAt: "2026-08-18T00:00:05Z" },
+    ]);
   });
 
   test("pairs a tool call with its terminal update and ignores in-flight ones", () => {
@@ -35,8 +45,8 @@ describe("blocksForTurn", () => {
         {
           sessionUpdate: "tool_call",
           toolCallId: "c1",
-          title: "Grep",
-          locations: [{ path: "lib/web/router.ex" }],
+          title: "Read file",
+          locations: [{ path: "lib/a.ex" }],
         },
         1,
       ),
@@ -46,7 +56,7 @@ describe("blocksForTurn", () => {
           sessionUpdate: "tool_call_update",
           toolCallId: "c1",
           status: "completed",
-          content: [{ type: "content", content: { type: "text", text: "scope \"/api\"" } }],
+          content: [{ type: "content", content: { type: "text", text: "defmodule A" } }],
         },
         3,
       ),
@@ -55,12 +65,12 @@ describe("blocksForTurn", () => {
       {
         kind: "tool",
         id: "c1",
-        name: "Grep",
-        summary: "lib/web/router.ex",
+        name: "Read file",
+        summary: "lib/a.ex",
         status: "done",
-        output: 'scope "/api"',
-        startedAt: "2026-08-19T00:00:00Z",
-        endedAt: "2026-08-19T00:00:00Z",
+        output: "defmodule A",
+        startedAt: "2026-08-18T00:00:00Z",
+        endedAt: "2026-08-18T00:00:00Z",
       },
     ]);
   });
@@ -73,7 +83,7 @@ describe("blocksForTurn", () => {
       chunk("done", 4),
     ];
     expect(blocksForTurn(events, "claude")).toEqual([
-      { kind: "thinking", body: "hmm", startedAt: "2026-08-19T00:00:00Z", endedAt: "2026-08-19T00:00:00Z" },
+      { kind: "thinking", body: "hmm", startedAt: "2026-08-18T00:00:00Z", endedAt: "2026-08-18T00:00:00Z" },
       {
         kind: "tool",
         id: "c2",
@@ -81,10 +91,10 @@ describe("blocksForTurn", () => {
         summary: "cmd=ls",
         status: "error",
         output: "no",
-        startedAt: "2026-08-19T00:00:00Z",
-        endedAt: "2026-08-19T00:00:00Z",
+        startedAt: "2026-08-18T00:00:00Z",
+        endedAt: "2026-08-18T00:00:00Z",
       },
-      { kind: "text", body: "done", startedAt: "2026-08-19T00:00:00Z", endedAt: "2026-08-19T00:00:00Z" },
+      { kind: "text", body: "done", startedAt: "2026-08-18T00:00:00Z", endedAt: "2026-08-18T00:00:00Z" },
     ]);
   });
 
@@ -103,7 +113,7 @@ describe("blocksForTurn", () => {
       { ...chunk("", 1), stream: "stdout", data: "plain gemini line" },
       { ...chunk("", 2), kind: "stage", stream: null, data: null, stage: "turn", state: "done" },
     ];
-    expect(blocksForTurn(events, "gemini")).toEqual([{ kind: "text", body: "plain gemini line", startedAt: "2026-08-19T00:00:00Z", endedAt: "2026-08-19T00:00:00Z" }]);
+    expect(blocksForTurn(events, "gemini")).toEqual([{ kind: "text", body: "plain gemini line", startedAt: "2026-08-18T00:00:00Z", endedAt: "2026-08-18T00:00:00Z" }]);
     expect(blocksForTurn(events, "claude")).toEqual([]);
   });
 });

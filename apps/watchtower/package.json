@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "An SRE teammate on a schedule: uptime, latency, TLS expiry and DNS for every site you name — and when something's red, you ask it to go dig. Talks only to the Fountain API.",
+  "description": "An SRE teammate on a schedule: uptime, latency, TLS expiry and DNS for every site you name \u2014 and when something's red, you ask it to go dig. Talks only to the Fountain API.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -13,6 +13,7 @@
     "mock": "bun mock/server.ts"
   },
   "dependencies": {
+    "@managoat/fountain-app": "workspace:*",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "One prompt, several brains, side by side — same sandbox platform, live streams, your vote decides. Talks only to the Fountain API.",
+  "description": "One prompt, several brains, side by side \u2014 same sandbox platform, live streams, your vote decides. Talks only to the Fountain API.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -13,6 +13,7 @@
     "mock": "bun mock/server.ts"
   },
   "dependencies": {
+    "@managoat/fountain-app": "workspace:*",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

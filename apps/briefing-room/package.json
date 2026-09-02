@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Ask for a brief, get a brief: a researcher on Fountain reads real sources and returns a clean, sourced document — not a chat transcript.",
+  "description": "Ask for a brief, get a brief: a researcher on Fountain reads real sources and returns a clean, sourced document \u2014 not a chat transcript.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -13,6 +13,7 @@
     "mock": "bun mock/server.ts"
   },
   "dependencies": {
+    "@managoat/fountain-app": "workspace:*",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

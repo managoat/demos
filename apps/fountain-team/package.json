@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@managoat/fountain-app": "workspace:*",
     "posthog-js": "^1.418.5",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

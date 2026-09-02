@@ -12,7 +12,11 @@
     "typecheck": "tsc --noEmit",
     "mock": "bun mock/server.ts"
   },
-  "dependencies": { "react": "^19.1.0", "react-dom": "^19.1.0" },
+  "dependencies": {
+    "@managoat/fountain-app": "workspace:*",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
   "devDependencies": {
     "@types/bun": "^1.2.0",
     "@types/react": "^19.1.0",
