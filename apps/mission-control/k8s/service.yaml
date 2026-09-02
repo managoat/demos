@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mission-control
+  namespace: mission-control
+  labels:
+    app: mission-control
+spec:
+  type: ClusterIP
+  selector:
+    app: mission-control
+  ports:
+    - port: 80
+      targetPort: 8080

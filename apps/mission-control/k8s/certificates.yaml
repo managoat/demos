@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mission-control-tls
+  namespace: mission-control
+spec:
+  secretName: mission-control-tls
+  issuerRef:
+    name: letsencrypt-production
+    kind: ClusterIssuer
+  dnsNames:
+    - mission-control.demo.managoat.com
