@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: table-talk-tls
+  namespace: table-talk
+spec:
+  secretName: table-talk-tls
+  issuerRef:
+    name: letsencrypt-production
+    kind: ClusterIssuer
+  dnsNames:
+    - table-talk.demo.managoat.com

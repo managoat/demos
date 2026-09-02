@@ -1,0 +1,12 @@
+<!doctype html><meta charset="utf-8"><title>dev seed</title><script>
+// Dev-only: point the app at the mock server (see mock/server.ts). Refuses
+// to touch settings anywhere but localhost so it is inert in a deployed build.
+if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
+  localStorage.setItem("table-talk.settings", JSON.stringify({ baseUrl: location.origin, apiKey: "test", via: "paste" }));
+  localStorage.setItem("table-talk.analyst", JSON.stringify({ [location.origin]: "agent-tt" }));
+  localStorage.setItem("table-talk.datasets", JSON.stringify({ [location.origin]: [{ conversationId: "c1", filename: "sales.csv", rows: 6, cols: 3, createdAt: "2026-08-19T16:00:00Z" }] }));
+  document.write("seeded — open <a href='/'>the app</a>");
+} else {
+  document.write("dev-only page; does nothing here");
+}
+</script>
