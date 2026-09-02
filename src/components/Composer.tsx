@@ -52,12 +52,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ va
   const canSend = !sending && !disabled && (!!value.trim() || !!attachments.payload);
 
   return (
-    <form
+    <div
       className={`composer${big ? " big" : ""}${dragging ? " dropping" : ""}`}
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (canSend) onSend();
-      }}
       onDragOver={(e) => {
         e.preventDefault();
         setDragging(true);
@@ -85,7 +81,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ va
         <div className="foot-left">{left}</div>
         <div className="foot-right">
           {right}
-          <button type="submit" className="send" disabled={!canSend} aria-label="Send" title="Send (Enter)">
+          <button type="button" className="send" disabled={!canSend} onClick={onSend} aria-label="Send" title="Send (Enter)">
             {sending ? "…" : "↑"}
           </button>
         </div>
@@ -102,6 +98,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ va
         }}
       />
       {dragging && <div className="drop-hint">Drop to attach</div>}
-    </form>
+    </div>
   );
 });
