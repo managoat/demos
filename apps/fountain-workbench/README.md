@@ -634,7 +634,8 @@ the SDK does not do for a browser). The server uses plain `fetch`.
 
 ## Deploy
 
-`.github/workflows/build.yml` builds the bundle on the runner, packages it
+The repository's `.github/workflows/build.yml` builds the bundle on the
+runner, packages it
 with the server as a Bun image (`Dockerfile`, multi-arch), pushes
 `ghcr.io/managoat/fountain-workbench:sha-<commit>` and pins that tag into
 `k8s/deployment.yaml`. [home-cloud](https://github.com/jhgaylor/home-cloud)

@@ -4,10 +4,13 @@
   "private": true,
   "type": "module",
   "description": "The Fountain demo suite: one app per directory under apps/, each deployed to <name>.demo.managoat.com.",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "typecheck": "bun run scripts/each.ts typecheck",
-    "test": "bun test",
+    "test": "bun run scripts/each.ts test && bun test scripts/",
     "build": "bun run scripts/each.ts build",
     "apps": "bun run scripts/apps.ts"
   },

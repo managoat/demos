@@ -1,0 +1,48 @@
+# Typecheck, test and build every app on every change — not just the ones
+# that changed.
+#
+# This is the check the split repositories could not run: a change to
+# packages/fountain-app is compiled against all fourteen consumers here,
+# rather than against whichever repository happened to get the patch first.
+# The whole sweep is about a minute, so there is nothing to save by narrowing
+# it.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Daily, for the drift job below: an app added to built-with should show up
+    # as a red build within a day even when nobody touches this repo.
+    - cron: "17 6 * * *"
+
+jobs:
+  check:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run build
+
+  # Does the demo index still name the same apps as managoat.com/built-with —
+  # and, now that they are all in one repo, the same apps as apps/ itself?
+  #
+  # Separate job: a roster that disagrees should be loud, but it must not be
+  # able to fail the build for a reason that is really the network's, so it
+  # does not gate anything the check job produces.
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd apps/fountain-demos drift

@@ -2,4 +2,7 @@ node_modules/
 dist/
 .DS_Store
 *.local
+# salon and fountain-workbench keep their SQLite file here in local dev
 data/
+# Claude Code session worktrees
+.claude/

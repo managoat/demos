@@ -214,8 +214,8 @@ Any static host works (Cloudflare Pages, GitHub Pages, an nginx container, an
 S3 bucket). The only build-time knob is `VITE_BASE`, the path the files are
 served under (default `/`); the Fountain URL is entered in the app.
 
-This repo builds an nginx image on every push to `main`
-(`.github/workflows/build.yml`), pushes it to `ghcr.io/managoat/fountain-team`
+The repository builds an nginx image whenever this app changes (root
+`.github/workflows/build.yml`), pushes it to `ghcr.io/managoat/fountain-team`
 and pins the sha into `k8s/deployment.yaml`, which Flux rolls out on
 home-cloud at https://fountain-team.demo.managoat.com/ — so the origin to
 allow on the server is `https://fountain-team.demo.managoat.com`.

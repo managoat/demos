@@ -1,19 +1,24 @@
 /**
  * The apps served under demo.managoat.com, one entry each.
  *
- * The host and the source repository are not stored: both are derived from
- * `id`, because both are the id by construction — the app answers on
- * `<id>.demo.managoat.com` and its code is at `github.com/managoat/<id>`. A
- * field that can only ever hold one value is a field that can hold a wrong
+ * The host and the source link are not stored: both are derived from `id`,
+ * because both are the id by construction — the app answers on
+ * `<id>.demo.managoat.com` and its code is at `apps/<id>` in this repository.
+ * A field that can only ever hold one value is a field that can hold a wrong
  * one.
  *
  * This is the second list of these apps. The first is `built_apps/0` in
  * BinaryBourbon/fountain, which renders managoat.com/built-with, and the two
  * disagreeing is the exact failure that retired the previous version of this
  * page — it ended three apps behind. The copy below is lifted from that list
- * verbatim so the wording matches, and `.github/workflows/ci.yml` fetches
- * built-with on every run and fails if the two rosters name different apps.
- * Drift is now a red build rather than something a reader notices.
+ * verbatim so the wording matches, and `scripts/check-drift.ts` fetches
+ * built-with on every CI run and fails if the two rosters name different
+ * apps. Drift is now a red build rather than something a reader notices.
+ *
+ * Since the suite became one repository there is a third list, and it is the
+ * one that cannot be wrong: the directories under `apps/`. The same check
+ * compares against it, which closes the case the built-with fetch never
+ * could — an app added here and nowhere else.
  */
 export type Demo = {
   id: string;
@@ -111,4 +116,4 @@ export const DEMOS: readonly Demo[] = [
 
 export const host = (d: Demo) => `${d.id}.demo.managoat.com`;
 export const url = (d: Demo) => `https://${host(d)}/`;
-export const source = (d: Demo) => `https://github.com/managoat/${d.id}`;
+export const source = (d: Demo) => `https://github.com/managoat/demos/tree/main/apps/${d.id}`;

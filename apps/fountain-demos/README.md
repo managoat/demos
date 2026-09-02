@@ -28,9 +28,13 @@ not go away, so it is now watched rather than hoped about:
 - The copy in `src/roster.ts` is lifted from built-with verbatim, so the two
   descriptions agree on the day they are written.
 - Host and source URL are not stored at all. Both are derived from `id`,
-  because both are the id: `<id>.demo.managoat.com` and
-  `github.com/managoat/<id>`. A field that can only hold one value cannot hold
-  a wrong one.
+  because both are the id: `<id>.demo.managoat.com` and `apps/<id>` in this
+  repository. A field that can only hold one value cannot hold a wrong one.
+- Since the suite became one repository there is a third list to agree with,
+  and it is the one that cannot be wrong: the directories in `apps/`. The
+  drift check compares against it too, without the network, which closes the
+  case the built-with fetch never could — an app added to the suite and to
+  nothing else.
 
 ## Adding an app
 
@@ -38,23 +42,26 @@ not go away, so it is now watched rather than hoped about:
    with the long write-up and the tests.
 2. Add the same `id`, glyph, name and blurb to `DEMOS` in `src/roster.ts`.
 
-Step 2 is not optional, and CI will say so if you skip it.
+Step 2 is not optional, and CI will say so if you skip it. If an app has to
+ship before step 1 can happen, name it in `UNLISTED_UPSTREAM` in
+`scripts/check-drift.ts` with the reason — `salon` is there now.
 
 ## Develop
 
 ```bash
-bun install
+bun install       # from anywhere in the repo; it is one workspace
 bun run build     # dist/index.html
 bun test
-bun run drift     # needs network; compares against the live built-with
+bun run drift     # compares against apps/, then against the live built-with
 ```
 
 ## Deploy
 
-`.github/workflows/build.yml` builds an nginx image on push to main, pushes
-`ghcr.io/managoat/fountain-demos`, pins the sha into `k8s/deployment.yaml`, and
-Flux in [jhgaylor/home-cloud](https://github.com/jhgaylor/home-cloud) rolls it
-out. `demos.inevitable.fyi`, this index's first home, 308s here.
+The repository's `.github/workflows/build.yml` builds an nginx image when
+this app changes, pushes `ghcr.io/managoat/fountain-demos`, pins the sha into
+`k8s/deployment.yaml`, and Flux in
+[jhgaylor/home-cloud](https://github.com/jhgaylor/home-cloud) rolls it out.
+`demos.inevitable.fyi`, this index's first home, 308s here.
 
 ## License
 

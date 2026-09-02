@@ -8,7 +8,7 @@ workflows, Kubernetes manifests, Dockerfiles, Helm charts and cloud templates on
 a schedule. When it finds something worth a pull request, an
 agent fixes it, verifies the fix, and opens one. You meet the work on GitHub.
 
-This is [Mend](https://github.com/managoat/mend)'s ambient sibling. Mend is the
+This is [Mend](../mend)'s ambient sibling. Mend is the
 interactive version: you point it at a repo, watch it work, and take a patch. Rounds is the version you turn on and forget — same audit, same agent,
 opposite defaults, because nobody is watching when it runs.
 

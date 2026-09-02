@@ -88,8 +88,9 @@ bun run build      # dist/ — static, host it anywhere
 ```
 
 The only build-time knob is `VITE_BASE`, the path the files are served under
-(default `/`). This repo builds an nginx image on every push to `main`
-(`.github/workflows/build.yml`) and Flux rolls it out on home-cloud at
+(default `/`). The repository builds an nginx image whenever this app
+changes (root `.github/workflows/build.yml`) and Flux rolls it out on
+home-cloud at
 https://fountain-conversations.demo.managoat.com/ — so the origin to allow on
 the server is `https://fountain-conversations.demo.managoat.com`.
 

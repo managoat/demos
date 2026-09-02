@@ -1,0 +1,132 @@
+# Builds the apps a push actually touched, pushes their images to
+# ghcr.io/managoat/<app>, then pins the immutable sha tags into their
+# k8s/deployment.yaml so Flux (home-cloud) rolls exactly what was built.
+#
+# Two things are deliberate here, and both come from this being one
+# repository rather than fourteen:
+#
+#   * The matrix is computed, not fixed. scripts/changed.ts decides — an app's
+#     own directory rebuilds that app, anything under packages/ or the root
+#     toolchain rebuilds all of them, because every app embeds the shared libs
+#     at build time.
+#
+#   * The pin is one job at the end, not a step inside each matrix leg.
+#     Fourteen legs each committing to main would race; one job pins every
+#     app that built and pushes once. That commit only touches k8s/, which
+#     paths-ignore excludes, so it does not retrigger this workflow.
+#
+# Multi-arch because home-cloud's k3s nodes are arm64 Lima VMs. The SPA
+# bundles are built on the runner (bun), so the docker stage is just
+# nginx/bun + dist/ and needs no QEMU-side compile.
+name: build
+
+on:
+  workflow_dispatch:
+    inputs:
+      apps:
+        description: 'Apps to build: "all", or a JSON array like ["arena","mend"]'
+        required: false
+        default: all
+  push:
+    branches: [main]
+    paths-ignore:
+      - "apps/*/k8s/**"
+      - "**/*.md"
+
+concurrency:
+  group: build-main
+  cancel-in-progress: false
+
+jobs:
+  pick:
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.pick.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+      - id: pick
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.apps }}" = "all" ]; then
+              apps=$(bun run scripts/apps.ts --json)
+            else
+              apps='${{ inputs.apps }}'
+            fi
+          else
+            apps=$(bun run scripts/changed.ts "${{ github.event.before }}" "${{ github.sha }}")
+          fi
+          echo "apps=$apps" >> "$GITHUB_OUTPUT"
+          echo "building: $apps"
+
+  build:
+    needs: pick
+    if: needs.pick.outputs.apps != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.pick.outputs.apps) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Test and build
+        run: |
+          bun install --frozen-lockfile
+          bun run --cwd packages/fountain-app test
+          bun run --cwd "apps/${{ matrix.app }}" test
+          bun run --cwd "apps/${{ matrix.app }}" build
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/${{ matrix.app }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.app }}:latest
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.app }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+  pin:
+    needs: [pick, build]
+    if: needs.pick.outputs.apps != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Pin the image sha for every app that built
+        env:
+          APPS: ${{ needs.pick.outputs.apps }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          for app in $(echo "$APPS" | tr -d '[]"' | tr ',' ' '); do
+            f="apps/$app/k8s/deployment.yaml"
+            [ -f "$f" ] || { echo "$app: no $f, skipping"; continue; }
+            sed -i -E "s#(image: ghcr\.io/${OWNER}/${app}:)sha-[0-9a-f]+#\1sha-${GITHUB_SHA}#" "$f"
+            git add "$f"
+          done
+          git diff --cached --quiet && { echo "already pinned"; exit 0; }
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "deploy: pin image sha-${GITHUB_SHA::7}"
+          # A concurrent pin is the only thing that can have moved main here,
+          # and it only ever touches other apps' k8s files.
+          git pull --rebase --autostash
+          git push

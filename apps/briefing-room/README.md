@@ -8,7 +8,7 @@ It is a static single-page app with no backend of its own — it talks only to
 the [Fountain](https://github.com/BinaryBourbon/fountain) API, where the
 researcher runs as a teammate (an agent in a sandbox with internet access; it
 holds no credentials of yours). Client patterns (OAuth, SSE, API client)
-follow [dns-desk](https://github.com/managoat/dns-desk).
+follow [dns-desk](../dns-desk).
 
 ## Run it
 

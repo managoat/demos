@@ -6,7 +6,7 @@ test("every id is a DNS label and a repo name at once", () => {
   for (const d of DEMOS) {
     expect(d.id).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
     expect(host(d)).toBe(`${d.id}.demo.managoat.com`);
-    expect(source(d)).toBe(`https://github.com/managoat/${d.id}`);
+    expect(source(d)).toBe(`https://github.com/managoat/demos/tree/main/apps/${d.id}`);
   }
 });
 

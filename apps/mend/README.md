@@ -46,8 +46,8 @@ doing. That is [Fountain](https://github.com/BinaryBourbon/fountain), and that i
 all it is here: the stagehand. Mend is a static page with no backend of its own;
 it talks to the Fountain API for the sandbox and to api.github.com for the pull
 request. Client patterns (OAuth, SSE, API client) follow
-[repo-sage](https://github.com/managoat/repo-sage) /
-[dns-desk](https://github.com/managoat/dns-desk).
+[repo-sage](../repo-sage) /
+[dns-desk](../dns-desk).
 
 ## Run it
 

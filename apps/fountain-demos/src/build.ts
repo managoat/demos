@@ -84,7 +84,7 @@ ${DEMOS.map(card).join("\n")}
     </main>
     <footer>
       Built on <a href="https://managoat.com">Managoat</a>. Every one of them is open source, under
-      <a href="https://github.com/managoat">github.com/managoat</a>.
+      <a href="https://github.com/managoat/demos">github.com/managoat/demos</a>.
     </footer>
   </div>
 </body>
