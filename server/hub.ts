@@ -10,7 +10,7 @@
  */
 import { authenticate, chatAccess, type AppContext } from "./context";
 
-export type ChatEvent = { event: "game" | "changes"; data: unknown };
+export type ChatEvent = { event: "game" | "changes" | "comment"; data: unknown };
 
 type Listener = (e: ChatEvent) => void;
 

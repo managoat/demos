@@ -3,6 +3,7 @@
  * itself is reached through the SDK at `/f/<chat>` — see store.tsx.
  */
 import type { ChangesDto } from "../../shared/changes";
+import type { CommentDto, Side } from "../../shared/comments";
 import type { ChatSettings } from "../../shared/settings";
 import type { GameDto, GameKind } from "../../shared/games";
 import type { ImageInput } from "../../shared/images";
@@ -113,6 +114,11 @@ export const api = {
   removeProjectMember: (id: string, email: string) => call<{ ok?: true; left?: boolean; data?: ProjectDto }>("DELETE", `/api/projects/${id}/members/${encodeURIComponent(email)}`),
 
   changes: (chatId: string) => data(call<{ data: ChangesDto | null }>("GET", `/api/chats/${chatId}/changes`)),
+  comments: (chatId: string) => data(call<{ data: CommentDto[] }>("GET", `/api/chats/${chatId}/comments`)),
+  comment: (chatId: string, input: { path: string; side: Side; line: number; body: string }) => data(call<{ data: CommentDto }>("POST", `/api/chats/${chatId}/comments`, input)),
+  resolveComment: (chatId: string, id: string, resolved: boolean) => data(call<{ data: CommentDto }>("POST", `/api/chats/${chatId}/comments/${id}/resolve`, { resolved })),
+  deleteComment: (chatId: string, id: string) => call<{ ok: true }>("DELETE", `/api/chats/${chatId}/comments/${id}`),
+  sendComments: (chatId: string) => data(call<{ data: { sent: number; prompt: string; comments: CommentDto[] } }>("POST", `/api/chats/${chatId}/comments/send`)),
   changesHistory: (chatId: string) => data(call<{ data: ChangesDto[] }>("GET", `/api/chats/${chatId}/changes/history`)),
 };
 

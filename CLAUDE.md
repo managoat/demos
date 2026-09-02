@@ -38,21 +38,23 @@ server/   Bun. app.ts is the route table; index.ts boots it.
           proxy.ts     /f/<chat>/api/conversations/<id>/… on the host's key
           games.ts     a chat's games: start, move
           changes.ts   the repository's changes: the hook's POST, the latest record, `record` (the one way in)
+          comments.ts  review comments on a line of the changes; `send` turns the open ones into one prompt
           hub.ts       GET /api/chats/:id/stream: what Salon itself records, live (game, changes events)
           sandbox.ts   who a computer is (bearer = $FOUNTAIN_TOKEN + conversation id), and the hook setup script
           mcp.ts       POST /mcp: Salon as an MCP server for the chat's computer (start_game, game_state)
-          db.ts        SQLite: users, sessions, chats, chat_members, sends, games, changes, projects, project_members
+          db.ts        SQLite: users, sessions, chats, chat_members, sends, games, changes, comments, projects, project_members
 shared/   what both sides agree on: author.ts, models.ts, settings.ts, skills.ts, images.ts, games.ts (the rules),
           changes.ts (the snapshot shape, and the diff/status parsers both sides use),
+          comments.ts (a comment's shape, and the prompt the open ones become),
           projects.ts (what a repository address is, where it is checked out)
 src/      Vite + React. store.tsx (session), router.ts (hash routes), lib/live.ts (the chat's own stream),
           components/Thread.tsx (transcript + composer), SettingsMenu.tsx (pill + `+`),
           Game.tsx (the board), Blocks.tsx (a start_game tool block renders as the board),
-          Changes.tsx (the repository panel beside the thread)
+          Changes.tsx (the repository panel beside the thread, with the room's comments on its lines)
 k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) applies it
 ```
 
-## Seven boundaries, easy to get wrong
+## Eight boundaries, easy to get wrong
 
 1. **The proxy is the member boundary.** A guest's browser builds
    `new Fountain({ baseUrl: "<origin>/f/<chat>", apiKey: "session" })`; the
@@ -163,6 +165,20 @@ k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) ap
    Removing a project deletes the environment (Fountain retires its
    sandboxes; `409 sandbox_mid_turn` while one runs) and detaches the
    chats, which keep their transcripts.
+
+8. **A comment is not a turn; sending them is one.** `server/comments.ts`
+   keeps a comment per line (`path`, `side` new|old, `line` in the diff of
+   the snapshot it was made on, the line's text as `quote`), anyone in the
+   chat resolves one, its author or the host removes one, and every change
+   is a `comment` event on the chat's stream. *Send N to the model* is
+   `POST …/comments/send`: `shared/comments.ts#reviewPrompt` writes the
+   open, unsent comments as one prompt grouped by file with each author
+   named inside, the server sends it to Fountain on the host's key with
+   the *sender's* tag (the proxy rule, applied here by hand), records the
+   send, and marks the comments sent. Fountain's `conversation_busy` comes
+   back with its code; nothing is marked sent then. Verified 2026-09-02:
+   a comment on the added README line, sent, became a turn that rewrote
+   the line and committed, and the next snapshot showed it.
 
 ## Run, test, ship
 

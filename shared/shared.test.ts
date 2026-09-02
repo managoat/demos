@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { initials, shortName, splitAuthor, withAuthor } from "./author";
 import { changesLine, parseDiff, parseSnapshot, parseStatus, summarise } from "./changes";
+import { lineText, parseComment, pending, reviewPrompt, type CommentDto } from "./comments";
 import { newTicTacToe, play, toMove, winnerEmail, type TicTacToe } from "./games";
 import { groupByProvider, modelLabel, modelProblem, runtimeFor } from "./models";
 import { canonical, DEFAULT_SETTINGS, derivedKey, fnv1a64, parseSettings } from "./settings";
@@ -215,5 +216,40 @@ describe("changes", () => {
     expect(typeof parseSnapshot({ diff: "x" })).toBe("string");
     expect(parseSnapshot({ branch: "b", head: "h", base: "main", status: "", diff: "", reason: "nope", pr: { url: "http://insecure" } })).toMatchObject({ reason: "manual", pr: null });
     expect(parseSnapshot({ head: "h", base: "main", reason: "session", pr: { url: "https://github.com/x/y/pull/2", state: "OPEN" } })).toMatchObject({ branch: "", status: "", diff: "", reason: "session", pr: { url: "https://github.com/x/y/pull/2", state: "OPEN", mergeable: null } });
+  });
+});
+
+describe("review comments", () => {
+  const DIFF = ["diff --git a/a.ts b/a.ts", "--- a/a.ts", "+++ b/a.ts", "@@ -5,2 +5,3 @@", " keep", "-gone", "+here", "+and", ""].join("\n");
+  const at = (over: Partial<CommentDto>): CommentDto => ({ id: "c", chatId: "x", changesSeq: 1, path: "a.ts", side: "new", line: 6, quote: "", body: "b", author: "a@x", createdAt: "2026-01-01T00:00:00Z", resolvedAt: null, resolvedBy: null, sentAt: null, sentBy: null, ...over });
+
+  test("a line is found by side and number", () => {
+    expect(lineText(DIFF, "a.ts", "new", 6)).toBe("here");
+    expect(lineText(DIFF, "a.ts", "old", 6)).toBe("gone");
+    expect(lineText(DIFF, "a.ts", "new", 99)).toBe("");
+    expect(lineText(DIFF, "nope", "new", 6)).toBe("");
+  });
+
+  test("the prompt groups by file and names each author; resolved and sent ones are left out", () => {
+    const list = [at({ id: "1", path: "b.ts", line: 2, body: "second file", quote: "x" }), at({ id: "2", line: 7, body: "later line", author: "z@x" }), at({ id: "3", line: 6, body: "first\nsecond line", quote: "here" }), at({ id: "4", resolvedAt: "t" }), at({ id: "5", sentAt: "t" })];
+    expect(pending(list).map((c) => c.id)).toEqual(["1", "2", "3"]);
+    const text = reviewPrompt(pending(list), { branch: "salon/ab", head: "0123456789" });
+    expect(text.split("\n")).toEqual([
+      "Review comments on salon/ab at 0123456. Please address each one, then say in a sentence or two what you changed.",
+      "",
+      "a.ts:",
+      "- line 6 — `here`",
+      "  a@x: first",
+      "  second line",
+      "- line 7",
+      "  z@x: later line",
+      "",
+      "b.ts:",
+      "- line 2 — `x`",
+      "  a@x: second file",
+    ]);
+    expect(reviewPrompt([at({})], null)).toStartWith("Review comments. Please");
+    expect(typeof parseComment({ path: "a", line: 0, body: "x" })).toBe("string");
+    expect(parseComment({ path: " a ", line: 3, body: " ok ", side: "old" })).toEqual({ path: "a", line: 3, body: "ok", side: "old" });
   });
 });

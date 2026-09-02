@@ -115,6 +115,24 @@ export interface ChangesRow {
   at: string;
 }
 
+/** A review comment on a line of the chat's changes (shared/comments.ts). */
+export interface CommentRow {
+  id: string;
+  chat_id: string;
+  changes_seq: number;
+  path: string;
+  side: string;
+  line: number;
+  quote: string;
+  body: string;
+  author: string;
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  sent_at: string | null;
+  sent_by: string | null;
+}
+
 export type Role = "owner" | "member";
 
 const SCHEMA = `
@@ -201,6 +219,23 @@ CREATE TABLE IF NOT EXISTS project_members (
   PRIMARY KEY (project_id, email)
 );
 CREATE INDEX IF NOT EXISTS project_members_email ON project_members(email);
+CREATE TABLE IF NOT EXISTS comments (
+  id TEXT PRIMARY KEY,
+  chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  changes_seq INTEGER NOT NULL,
+  path TEXT NOT NULL,
+  side TEXT NOT NULL,
+  line INTEGER NOT NULL,
+  quote TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL,
+  author TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  resolved_at TEXT,
+  resolved_by TEXT,
+  sent_at TEXT,
+  sent_by TEXT
+);
+CREATE INDEX IF NOT EXISTS comments_chat ON comments(chat_id, created_at);
 CREATE TABLE IF NOT EXISTS changes (
   chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
   seq INTEGER NOT NULL,
@@ -468,6 +503,39 @@ export class Db {
       .query("UPDATE games SET state = $state, status = $status, winner_email = $winner_email, seq = seq + 1, updated_at = $t WHERE id = $id")
       .run({ id, state: patch.state, status: patch.status, winner_email: patch.winner_email, t: now() });
     return this.getGame(id);
+  }
+
+  // ── comments ─────────────────────────────────────────────────────────
+
+  comments(chatId: string): CommentRow[] {
+    return this.sql.query("SELECT * FROM comments WHERE chat_id = $c ORDER BY rowid").all({ c: chatId }) as CommentRow[];
+  }
+
+  getComment(id: string): CommentRow | null {
+    return (this.sql.query("SELECT * FROM comments WHERE id = $id").get({ id }) as CommentRow | null) ?? null;
+  }
+
+  insertComment(c: CommentRow): void {
+    this.sql
+      .query(
+        `INSERT INTO comments (id, chat_id, changes_seq, path, side, line, quote, body, author, created_at, resolved_at, resolved_by, sent_at, sent_by)
+         VALUES ($id, $chat_id, $changes_seq, $path, $side, $line, $quote, $body, $author, $created_at, $resolved_at, $resolved_by, $sent_at, $sent_by)`,
+      )
+      .run(c as unknown as Record<string, string | number | null>);
+  }
+
+  updateComment(id: string, patch: Partial<Pick<CommentRow, "resolved_at" | "resolved_by" | "sent_at" | "sent_by">>): CommentRow | null {
+    const cur = this.getComment(id);
+    if (!cur) return null;
+    const next = { ...cur, ...patch };
+    this.sql
+      .query("UPDATE comments SET resolved_at = $resolved_at, resolved_by = $resolved_by, sent_at = $sent_at, sent_by = $sent_by WHERE id = $id")
+      .run({ id, resolved_at: next.resolved_at, resolved_by: next.resolved_by, sent_at: next.sent_at, sent_by: next.sent_by });
+    return this.getComment(id);
+  }
+
+  deleteComment(id: string): void {
+    this.sql.query("DELETE FROM comments WHERE id = $id").run({ id });
   }
 
   // ── changes ──────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangesDto } from "../../shared/changes";
+import type { CommentDto } from "../../shared/comments";
 import type { GameDto } from "../../shared/games";
 import { api, chatStreamUrl } from "./api";
 
@@ -15,12 +16,25 @@ export interface ChatLive {
   takeGame: (g: GameDto) => void;
   /** The latest snapshot of the repository, with its diff; null when the computer has reported none. */
   changes: ChangesDto | null;
+  /** Review comments on it, by id. */
+  comments: Map<string, CommentDto>;
+  /** Take a comment record from a call's answer, so the panel need not wait for the stream. */
+  takeComment: (c: CommentDto & { deleted?: boolean }) => void;
 }
 
 export function useChatLive(chatId: string): ChatLive {
   const [games, setGames] = useState<Map<string, GameDto>>(() => new Map());
   const [changes, setChanges] = useState<ChangesDto | null>(null);
   const changesSeq = useRef(0);
+  const [comments, setComments] = useState<Map<string, CommentDto>>(() => new Map());
+  const takeComment = useCallback((c: CommentDto & { deleted?: boolean }) => {
+    setComments((prev) => {
+      const next = new Map(prev);
+      if (c.deleted) next.delete(c.id);
+      else next.set(c.id, c);
+      return next;
+    });
+  }, []);
 
   const takeGame = useCallback((g: GameDto) => {
     setGames((prev) => {
@@ -35,6 +49,7 @@ export function useChatLive(chatId: string): ChatLive {
   useEffect(() => {
     setGames(new Map());
     setChanges(null);
+    setComments(new Map());
     changesSeq.current = 0;
     let stopped = false;
     let source: EventSource | null = null;
@@ -64,6 +79,12 @@ export function useChatLive(chatId: string): ChatLive {
         })
         .catch(() => undefined);
       readChanges();
+      api
+        .comments(chatId)
+        .then((list) => {
+          if (!stopped) setComments(new Map(list.map((c) => [c.id, c])));
+        })
+        .catch(() => undefined);
     };
     const open = () => {
       if (stopped) return;
@@ -83,6 +104,13 @@ export function useChatLive(chatId: string): ChatLive {
           // not ours
         }
       });
+      source.addEventListener("comment", (ev) => {
+        try {
+          takeComment(JSON.parse((ev as MessageEvent).data) as CommentDto & { deleted?: boolean });
+        } catch {
+          // not ours
+        }
+      });
       source.onopen = () => load(); // what changed while the stream was down
       source.onerror = () => {
         source?.close();
@@ -98,7 +126,7 @@ export function useChatLive(chatId: string): ChatLive {
       if (retry !== null) window.clearTimeout(retry);
       if (fetching !== null) window.clearTimeout(fetching);
     };
-  }, [chatId, takeGame]);
+  }, [chatId, takeGame, takeComment]);
 
-  return { games, takeGame, changes };
+  return { games, takeGame, changes, comments, takeComment };
 }

@@ -30,6 +30,11 @@
  *   POST   /api/chats/:id/games/:game/moves a move, from the player whose go it is
  *   GET    /api/chats/:id/changes           the repository's latest changes, with the diff (changes.ts)
  *   GET    /api/chats/:id/changes/history   the snapshots before it, without
+ *   GET    /api/chats/:id/comments          review comments on the changes (comments.ts)
+ *   POST   /api/chats/:id/comments          one, on a line
+ *   POST   /api/chats/:id/comments/send     the open ones, as one prompt, sent as the caller's turn
+ *   POST   /api/chats/:id/comments/:c/resolve
+ *   DELETE /api/chats/:id/comments/:c       its author, or the host
  *   POST   /mcp                             the model's way to start a game, on the conversation's key (mcp.ts)
  *   POST   /hooks/changes                   the computer's way to report changes, on the same key (changes.ts)
  *   *      /f/:id/api/...                   Fountain, scoped to the chat (proxy.ts)
@@ -39,6 +44,7 @@ import { join, normalize } from "node:path";
 import * as auth from "./auth";
 import * as changes from "./changes";
 import * as chats from "./chats";
+import * as comments from "./comments";
 import type { AppContext } from "./context";
 import * as games from "./games";
 import { errorResponse, HttpError, json } from "./http";
@@ -111,6 +117,11 @@ export function buildApp(ctx: AppContext): (req: Request) => Promise<Response> {
   on("POST", "/api/chats/:id/games/:game/moves", (req, p) => games.makeMove(ctx, req, p.id!, p.game!));
   on("GET", "/api/chats/:id/changes", (req, p) => changes.latest(ctx, req, p.id!));
   on("GET", "/api/chats/:id/changes/history", (req, p) => changes.history(ctx, req, p.id!));
+  on("GET", "/api/chats/:id/comments", (req, p) => comments.list(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/comments", (req, p) => comments.create(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/comments/send", (req, p) => comments.send(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/comments/:c/resolve", (req, p) => comments.resolve(ctx, req, p.id!, p.c!));
+  on("DELETE", "/api/chats/:id/comments/:c", (req, p) => comments.remove(ctx, req, p.id!, p.c!));
 
   on("*", "/mcp", (req) => handleMcp(ctx, req));
   on("*", "/hooks/changes", (req) => changes.hook(ctx, req));

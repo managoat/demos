@@ -892,3 +892,59 @@ describe("projects", () => {
     expect((await call("POST", "/api/chats", { cookie: host, body: { prompt: "x", settings: { ...SETTINGS, projectId: project.id } } })).status).toBe(404);
   });
 });
+
+describe("review comments", () => {
+  const DIFF = ["diff --git a/README.md b/README.md", "--- a/README.md", "+++ b/README.md", "@@ -1,2 +1,3 @@", " # Hi", "-old", "+new", "+more", ""].join("\n");
+  const forChat = (conversationId: string) => ({ authorization: "Bearer ftn_sprite", "x-fountain-conversation-id": conversationId });
+
+  test("people comment on lines, resolve them, and send the open ones to the model as one tagged prompt", async () => {
+    const { host, guest, other, chat } = await room();
+    const conv = chat.conversationId as string;
+    // Nothing to comment on until the computer has reported.
+    expect((await call("POST", `/api/chats/${chat.id}/comments`, { cookie: host, body: { path: "README.md", line: 2, body: "hm" } })).status).toBe(409);
+    await call("POST", "/hooks/changes", { body: { branch: "salon/abcd1234", head: "deadbeefcafe", base: "main", status: " M README.md\n", diff: DIFF, reason: "stop" }, headers: forChat(conv) });
+
+    expect((await call("POST", `/api/chats/${chat.id}/comments`, { cookie: host, body: { path: "README.md", line: 2 } })).status).toBe(422);
+    expect((await call("POST", `/api/chats/${chat.id}/comments`, { cookie: other, body: { path: "README.md", line: 2, body: "x" } })).status).toBe(404);
+    const c1 = ((await (await call("POST", `/api/chats/${chat.id}/comments`, { cookie: guest, body: { path: "README.md", line: 2, body: "Say hello, not new" } })).json()) as { data: Record<string, any> }).data;
+    expect(c1).toMatchObject({ chatId: chat.id, changesSeq: 1, path: "README.md", side: "new", line: 2, quote: "new", author: "guest@example.com", resolvedAt: null, sentAt: null });
+    const c2 = ((await (await call("POST", `/api/chats/${chat.id}/comments`, { cookie: host, body: { path: "README.md", line: 2, side: "old", body: "why was this removed?" } })).json()) as { data: Record<string, any> }).data;
+    expect(c2).toMatchObject({ side: "old", quote: "old", author: "host@example.com" });
+    const c3 = ((await (await call("POST", `/api/chats/${chat.id}/comments`, { cookie: host, body: { path: "README.md", line: 3, body: "drop this" } })).json()) as { data: Record<string, any> }).data;
+
+    // Resolved ones are not sent; the guest can resolve the host's.
+    const resolved = ((await (await call("POST", `/api/chats/${chat.id}/comments/${c3.id}/resolve`, { cookie: guest, body: {} })).json()) as { data: Record<string, any> }).data;
+    expect(resolved.resolvedBy).toBe("guest@example.com");
+    // Only the author or the host removes one.
+    expect((await call("DELETE", `/api/chats/${chat.id}/comments/${c2.id}`, { cookie: guest })).status).toBe(403);
+
+    const seen: unknown[] = [];
+    const off = hub.subscribe(chat.id, (e) => seen.push(e.event));
+    const sent = await call("POST", `/api/chats/${chat.id}/comments/send`, { cookie: guest });
+    off();
+    expect(sent.status).toBe(202);
+    const out = ((await sent.json()) as { data: { sent: number; prompt: string } }).data;
+    expect(out.sent).toBe(2);
+    expect(seen).toEqual(["comment", "comment"]);
+    const prompt = state.prompts.find((p) => p.id === conv)!.body as { prompt: string };
+    expect(prompt.prompt).toBe(`[from guest@example.com] ${out.prompt}`);
+    expect(out.prompt).toContain("Review comments on salon/abcd1234 at deadbee");
+    expect(out.prompt).toContain("README.md:");
+    expect(out.prompt).toContain("- line 2 — `new`\n  guest@example.com: Say hello, not new");
+    expect(out.prompt).toContain("- line 2 (removed) — `old`\n  host@example.com: why was this removed?");
+    expect(out.prompt).not.toContain("drop this");
+    // Marked sent, by whom; the send is the guest's turn in the record; nothing left to send.
+    const all = ((await (await call("GET", `/api/chats/${chat.id}/comments`, { cookie: host })).json()) as { data: Record<string, any>[] }).data;
+    expect(all.map((c) => [c.id, c.sentBy, !!c.resolvedAt])).toEqual([
+      [c1.id, "guest@example.com", false],
+      [c2.id, "guest@example.com", false],
+      [c3.id, null, true],
+    ]);
+    const shown = ((await (await call("GET", `/api/chats/${chat.id}`, { cookie: host })).json()) as { data: { sends: { email: string }[] } }).data;
+    expect(shown.sends.map((s) => s.email)).toEqual(["host@example.com", "guest@example.com"]);
+    expect((await call("POST", `/api/chats/${chat.id}/comments/send`, { cookie: host })).status).toBe(422);
+    // The host removes one; it goes out as deleted.
+    expect((await call("DELETE", `/api/chats/${chat.id}/comments/${c1.id}`, { cookie: host })).status).toBe(200);
+    expect(((await (await call("GET", `/api/chats/${chat.id}/comments`, { cookie: host })).json()) as { data: unknown[] }).data).toHaveLength(2);
+  });
+});
