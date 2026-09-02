@@ -2329,9 +2329,15 @@ describe("what a project cost this billing period, measured in turn hours", () =
   test("one conversation Fountain will not answer for is a hole it names, not a failed page", async () => {
     const p = await periodOf("carol");
     expect(p.fanout).toEqual({ candidates: 7, fetched: 5, cached: 0, skipped: 1, dropped: 0, failed: 1 });
-    // And everything it could read still adds up.
-    expect(p.measured.seconds).toBe(p.projects.reduce((n, x) => n + x.seconds, 0));
-    expect(mine(p).seconds).toBe(mine(p).items.reduce((n, w) => n + w.seconds, 0));
+    // And everything it could read still adds up. Close, not equal: foldTurn
+    // adds each turn's seconds into the measured bucket, the project and the
+    // item, so the totals below are the same numbers grouped differently, and
+    // float addition is not associative. The running turn makes the operands
+    // arbitrary — it accrues to now — so exact equality holds only by luck,
+    // and this failed in CI on a run where the luck ran out. A real accounting
+    // error here is off by seconds, not by an ulp.
+    expect(p.measured.seconds).toBeCloseTo(p.projects.reduce((n, x) => n + x.seconds, 0), 6);
+    expect(mine(p).seconds).toBeCloseTo(mine(p).items.reduce((n, w) => n + w.seconds, 0), 6);
   });
 
   test("a reload asks Fountain again only for what could have moved", async () => {
