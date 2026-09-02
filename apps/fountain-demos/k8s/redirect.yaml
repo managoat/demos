@@ -1,0 +1,22 @@
+# demos.inevitable.fyi was this index's first home. It spent a while pointed at
+# managoat.com/built-with, because there was no index here to point at; now
+# there is one again, at demo.managoat.com, sitting at the parent of every host
+# it lists. Sending the old host there rather than to built-with keeps the two
+# pages in their own lanes: this one is a directory of what is running, that
+# one is the product's case for it.
+#
+# Every path 308s, so any link anyone saved still lands somewhere true.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: moved-to-demo-index
+  namespace: fountain-demos
+spec:
+  redirectRegex:
+    # Matches any path on the host, including bare "/" — the old site was one
+    # page, so there is nothing to map per-URL the way a docs tombstone does.
+    regex: "^https?://demos\\.inevitable\\.fyi/.*"
+    replacement: "https://demo.managoat.com/"
+    # 308: permanent, and preserves the method. Browsers and crawlers both
+    # take it as "this moved", which is what happened.
+    permanent: true

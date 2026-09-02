@@ -1,0 +1,15 @@
+{
+  "name": "fountain-demos",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && bun run src/build.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "drift": "bun run scripts/check-drift.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  }
+}

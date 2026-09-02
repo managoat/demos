@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: fountain-demos
+  namespace: fountain-demos
+  labels:
+    app: fountain-demos
+spec:
+  type: ClusterIP
+  selector:
+    app: fountain-demos
+  ports:
+    - port: 80
+      targetPort: 8080
