@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fountain-conversations
+  namespace: fountain-conversations
+  labels:
+    app: fountain-conversations
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fountain-conversations
+  template:
+    metadata:
+      labels:
+        app: fountain-conversations
+    spec:
+      containers:
+        - name: web
+          # Pinned to an immutable sha tag by .github/workflows/build.yml.
+          image: ghcr.io/managoat/fountain-conversations:sha-ec03e3a4f9736bdcffd7f5002c8e0d2fa5a54369
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 20m, memory: 96Mi }
+            limits: { memory: 256Mi }

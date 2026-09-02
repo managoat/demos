@@ -1,0 +1,38 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: fountain-conversations
+  namespace: fountain-conversations
+  labels:
+    app: fountain-conversations
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`fountain-conversations.demo.managoat.com`)"
+      kind: Rule
+      services:
+        - name: fountain-conversations
+          port: 80
+  tls:
+    secretName: fountain-conversations-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: fountain-conversations-http
+  namespace: fountain-conversations
+  labels:
+    app: fountain-conversations
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: "Host(`fountain-conversations.demo.managoat.com`)"
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: fountain-conversations
+          port: 80
