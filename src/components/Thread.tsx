@@ -48,8 +48,11 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges,
   const [executionEvidence, setExecutionEvidence] = useState<typeof changes>(null);
   const [noteMode, setNoteMode] = useState(false);
   const [executionPoll, setExecutionPoll] = useState(0);
-  const draftSawRunning = useRef(false);
+  const [draftCheck, setDraftCheck] = useState(0);
   const draftStartCount = useRef(0);
+  const draftTurnId = useRef<string | null>(null);
+  const draftTerminalAt = useRef<number | null>(null);
+  const draftAdopting = useRef(false);
   const attachments = useAttachments(useCallback((m: string) => toast(m, "error"), [toast]));
   const composer = useRef<ComposerHandle>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -280,16 +283,33 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges,
   }, [draft, live.updatePresence]);
 
   useEffect(() => {
-    if (running && draftingPlan) draftSawRunning.current = true;
-    if (running || !draftingPlan || arranged.length <= draftStartCount.current) return;
-    const last = arranged[arranged.length - 1];
-    const text = last ? assistantText(folded.turns.find((item) => item.turn.id === last.turn.id)?.events ?? []) : "";
+    if (!draftingPlan || draftAdopting.current) return;
+    if (!draftTurnId.current) {
+      const submitted = arranged.slice(draftStartCount.current).find((item) => item.turn.origin !== "autonomous");
+      if (!submitted) return;
+      draftTurnId.current = submitted.turn.id;
+    }
+    const group = folded.turns.find((item) => item.turn.id === draftTurnId.current);
+    if (!group) return;
+    const status = group.turn.status ?? "";
+    if (!["completed", "failed", "interrupted", "cancelled"].includes(status)) return;
+    const text = assistantText(group.events);
     if (!text) {
+      // Turn records can become terminal just before their final output event
+      // reaches the transcript stream. Give that stream time to catch up.
+      draftTerminalAt.current ??= Date.now();
+      if (Date.now() - draftTerminalAt.current < 5_000) {
+        const timer = window.setTimeout(() => setDraftCheck((value) => value + 1), 300);
+        return () => window.clearTimeout(timer);
+      }
+      draftTurnId.current = null;
+      draftTerminalAt.current = null;
       setDraftingPlan(false);
-      toast("The plan draft turn ended without a structured draft.", "error");
+      toast(status === "failed" || status === "interrupted" ? `The plan draft turn ${status}.` : "The plan draft turn completed without a structured draft.", "error");
       return;
     }
-    draftSawRunning.current = false;
+    draftTerminalAt.current = null;
+    draftAdopting.current = true;
     void (async () => {
       try {
         const adopted = await api.adoptPlan(chat.id, JSON.parse(extractJson(text)));
@@ -300,10 +320,12 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges,
         // the authoritative plan is untouched.
         toast(`The draft stayed in the thread: ${describeError(err)}`, "error");
       } finally {
+        draftAdopting.current = false;
+        draftTurnId.current = null;
         setDraftingPlan(false);
       }
     })();
-  }, [running, draftingPlan, arranged, folded.turns, chat.id, live.setPlan, toast]);
+  }, [draftingPlan, arranged, folded.turns, draftCheck, chat.id, live.setPlan, toast]);
   const sendPrompt = useCallback(
     async (text: string) => {
       await fountain.request("POST", `/api/conversations/${convId}/prompts`, { body: { prompt: text } });
@@ -514,7 +536,7 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges,
           running={!!currentExecution}
           onClose={() => { live.updatePresence(!!draft.trim(), null); onClosePlan(); }}
           onDraft={retired ? undefined : async () => {
-            setDraftingPlan(true); draftSawRunning.current = false; draftStartCount.current = arranged.length;
+            setDraftingPlan(true); draftStartCount.current = arranged.length; draftTurnId.current = null; draftTerminalAt.current = null; draftAdopting.current = false;
             try { await api.draftPlan(chat.id, record?.first_prompt || chat.title); onSent(); window.setTimeout(() => void readRecord().catch(() => undefined), 500); }
             catch (error) { setDraftingPlan(false); throw error; }
           }}
