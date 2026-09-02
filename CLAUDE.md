@@ -176,7 +176,9 @@ k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) ap
    named inside, the server sends it to Fountain on the host's key with
    the *sender's* tag (the proxy rule, applied here by hand), records the
    send, and marks the comments sent. Fountain's `conversation_busy` comes
-   back with its code; nothing is marked sent then.
+   back with its code; nothing is marked sent then. Verified 2026-09-02:
+   a comment on the added README line, sent, became a turn that rewrote
+   the line and committed, and the next snapshot showed it.
 
 ## Run, test, ship
 
