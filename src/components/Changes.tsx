@@ -24,6 +24,7 @@ import { api, type ItemDto, type SnapshotDto } from "../lib/api";
 import { basename, parseStatus, parseUnifiedDiff, type DiffFile, type StatusEntry } from "../lib/diff";
 import { describeError, errorCode } from "../lib/errors";
 import { computerLabel, relativeTime, type Computer } from "../lib/sidebar";
+import { href } from "../router";
 import type { SandboxDiff, SandboxFile } from "../types";
 import { AgentAvatar } from "./AgentAvatar";
 
@@ -32,22 +33,8 @@ export const READABLE_ROOT = "/home/sprite";
 const WORK_DIR = `${READABLE_ROOT}/work`;
 
 export function Changes({ item, computers }: { item: ItemDto; computers: Computer[] }) {
-  const { project, lastSnapshot, toast } = useProject();
-  const [snaps, setSnaps] = useState<SnapshotDto[] | null>(null);
-
-  const load = useCallback(
-    () =>
-      api
-        .snapshots(project.id, item.id)
-        .then(setSnaps)
-        .catch((err) => toast(describeError(err), "error")),
-    [project.id, item.id, toast],
-  );
-  useEffect(() => void load(), [load]);
-  // The hook posted: re-read the state, and the computer it names pulls its diff again.
-  useEffect(() => {
-    if (lastSnapshot?.itemId === item.id) void load();
-  }, [lastSnapshot, item.id, load]);
+  const { lastSnapshot } = useProject();
+  const snaps = useItemSnapshots(item.id);
 
   // A computer with a disk we can read now, or one the hook has reported on.
   const shown = computers.filter((c) => c.sandboxId && (c.live || snaps?.some((s) => s.computer === c.key)));
@@ -61,6 +48,78 @@ export function Changes({ item, computers }: { item: ItemDto; computers: Compute
       ))}
     </section>
   );
+}
+
+/** The same checkout review, scoped to the computer behind one conversation. */
+export function ConversationChanges({ item, computer, snaps, onClose }: { item: ItemDto; computer: Computer; snaps: SnapshotDto[] | null; onClose: () => void }) {
+  const { project, lastSnapshot } = useProject();
+
+  return (
+    <aside className="conversation-changes" aria-label="Computer changes">
+      <header className="conversation-changes-head">
+        <div className="min0 grow">
+          <div className="strong">Computer changes</div>
+          <a className="muted small" href={href.item(project.id, item.id)}>
+            View all changes on {item.title}
+          </a>
+        </div>
+        <button type="button" className="icon" onClick={onClose} aria-label="Close computer changes" title="Close">
+          ×
+        </button>
+      </header>
+      <div className="conversation-changes-body">
+        <ComputerChanges
+          comp={computer}
+          loaded={snaps !== null}
+          snaps={(snaps ?? []).filter((s) => s.computer === computer.key)}
+          tick={lastSnapshot?.computer === computer.key ? lastSnapshot.at : 0}
+        />
+      </div>
+    </aside>
+  );
+}
+
+/** Snapshot state shared by the work-item view and a conversation's badge/panel. */
+export function useItemSnapshots(itemId: string | null): SnapshotDto[] | null {
+  const { project, lastSnapshot, toast } = useProject();
+  const [snaps, setSnaps] = useState<SnapshotDto[] | null>(null);
+
+  const load = useCallback(
+    () => {
+      if (!itemId) return;
+      void api
+        .snapshots(project.id, itemId)
+        .then(setSnaps)
+        .catch((err) => toast(describeError(err), "error"));
+    },
+    [project.id, itemId, toast],
+  );
+  useEffect(() => {
+    setSnaps(null);
+    load();
+  }, [load]);
+  // The hook posted: re-read the state, and the computer it names pulls its diff again.
+  useEffect(() => {
+    if (itemId && lastSnapshot?.itemId === itemId) load();
+  }, [lastSnapshot, itemId, load]);
+  return snaps;
+}
+
+/** Number on the conversation affordance: files in this computer's latest checkout states. */
+export function snapshotFileCount(snaps: SnapshotDto[], computer: string): number {
+  const byRepo = new Map<string, SnapshotDto>();
+  for (const snap of snaps) {
+    if (snap.computer !== computer) continue;
+    const have = byRepo.get(snap.repo);
+    if (!have || snap.takenAt > have.takenAt) byRepo.set(snap.repo, snap);
+  }
+  const files = new Set<string>();
+  for (const snap of byRepo.values()) {
+    for (const entry of parseStatus(snap.status).entries) {
+      if (entry.kind !== "ignored") files.add(`${snap.repo}:${entry.path}`);
+    }
+  }
+  return files.size;
 }
 
 function ComputerChanges({ comp, loaded, snaps, tick }: { comp: Computer; loaded: boolean; snaps: SnapshotDto[]; tick: number }) {

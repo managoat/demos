@@ -1,7 +1,8 @@
 /**
  * One conversation: its transcript so far (SDK history), live events from the
- * store's stream, and a composer. Chat layout: your prompts on the right, the
- * agent's blocks on the left.
+ * store's stream, and a composer. The Changes button opens the git state and
+ * diff for this conversation's computer beside the transcript; attribution
+ * stays at computer level because another conversation may share its disk.
  *
  * Two things land a reader on a turn rather than at the bottom: a ⌘K hit,
  * which arrives as `focusTurnId` off the route, and ⌘F over this conversation
@@ -24,11 +25,13 @@ import { AttachButton, AttachmentStrip, useAttachments } from "./Attachments";
 import { FindBar, useThreadFind } from "./ThreadFind";
 import { turnImageUrl } from "../lib/api";
 import { composerHint, coarsePointer } from "../lib/touch";
+import { computersOf, itemIdOf } from "../lib/sidebar";
+import { ConversationChanges, snapshotFileCount, useItemSnapshots } from "./Changes";
 
 const HISTORY_STREAMS: Stream[] = ["acp", "stdout", "stage"];
 
 export function Thread({ conversationId, onClose, context, focusTurnId }: { conversationId: string; onClose?: () => void; context?: ReactNode; focusTurnId?: string | null }) {
-  const { project, fountain, conversations, agents, sandboxes, subscribe, toast, refresh } = useProject();
+  const { project, items, fountain, conversations, agents, sandboxes, subscribe, toast, refresh } = useProject();
   // Reading a conversation is what takes it out of the feed in the top bar.
   const { markRead } = useWorkbench();
   const listed = conversations.find((c) => c.id === conversationId) ?? null;
@@ -40,6 +43,7 @@ export function Thread({ conversationId, onClose, context, focusTurnId }: { conv
   const [events, setEvents] = useState<LogEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [showStdout, setShowStdout] = useState(false);
+  const [showChanges, setShowChanges] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const attachments = useAttachments(useCallback((message: string) => toast(message, "error"), [toast]));
@@ -54,6 +58,15 @@ export function Thread({ conversationId, onClose, context, focusTurnId }: { conv
 
   const agent = conversation?.agent_id ? agents.get(conversation.agent_id) ?? null : null;
   const who = agent?.name ?? conversation?.runtime ?? "agent";
+  const item = conversation ? items.find((w) => w.id === itemIdOf(conversation)) ?? null : null;
+  const computer = useMemo(() => {
+    if (!conversation || !item) return null;
+    const itemConversations = conversations.filter((c) => itemIdOf(c) === item.id);
+    if (!itemConversations.some((c) => c.id === conversation.id)) itemConversations.push(conversation);
+    return computersOf(itemConversations, sandboxes).find((c) => c.conversations.some((candidate) => candidate.id === conversation.id)) ?? null;
+  }, [conversation, item, conversations, sandboxes]);
+  const changeSnapshots = useItemSnapshots(item?.id ?? null);
+  const changedFiles = computer ? snapshotFileCount(changeSnapshots ?? [], computer.key) : 0;
 
   // Load: the record if the list has not got it, the turns, and the history.
   useEffect(() => {
@@ -235,6 +248,17 @@ export function Thread({ conversationId, onClose, context, focusTurnId }: { conv
         <label className="check small">
           <input type="checkbox" checked={showStdout} onChange={(e) => setShowStdout(e.target.checked)} /> stdout
         </label>
+        {item && computer?.sandboxId && (
+          <button
+            type="button"
+            className={`secondary small changes-toggle${showChanges ? " on" : ""}`}
+            onClick={() => setShowChanges((open) => !open)}
+            aria-expanded={showChanges}
+            aria-controls="conversation-changes"
+          >
+            Changes{changedFiles > 0 ? ` ${changedFiles}` : ""}
+          </button>
+        )}
         {running && (
           <button
             className="secondary small"
@@ -265,71 +289,80 @@ export function Thread({ conversationId, onClose, context, focusTurnId }: { conv
         />
       )}
 
-      <div className="transcript term" ref={scroller} onScroll={onScroll}>
-        {loading && <div className="term-line muted"># loading…</div>}
-        {folded.setup.length > 0 && <SetupLine events={folded.setup} done={folded.turns.length > 0} />}
-        {folded.turns.map(({ turn, events: evs }) => (
-          <div
-            className={`turn ${turn.status}${turn.id === focus ? " found" : find.marked.has(turn.id) ? " hit" : ""}`}
-            key={turn.id}
-            data-turn={turn.id}
-          >
-            <div className="term-prompt">
-              <span className="ps1" aria-hidden="true">
-                ❯
-              </span>
-              <span className="cmd">{turn.prompt}</span>
-              <span className="term-meta">
-                #{turn.turn_number} {formatTime(turn.started_at ?? turn.inserted_at)}
-                {turn.status === "failed" ? " ✕ failed" : turn.status === "interrupted" ? " ⏹ interrupted" : ""}
-              </span>
-            </div>
-            {(turn.image_count ?? 0) > 0 && (
-              <div className="turn-images">
-                {Array.from({ length: turn.image_count ?? 0 }, (_, i) => (
-                  <a key={i} href={turnImageUrl(project.id, conversationId, turn.id, i)} target="_blank" rel="noreferrer">
-                    <img src={turnImageUrl(project.id, conversationId, turn.id, i)} alt={`attachment ${i + 1}`} loading="lazy" />
-                  </a>
-                ))}
+      <div className="thread-work">
+        <div className="thread-main">
+          <div className="transcript term" ref={scroller} onScroll={onScroll}>
+            {loading && <div className="term-line muted"># loading…</div>}
+            {folded.setup.length > 0 && <SetupLine events={folded.setup} done={folded.turns.length > 0} />}
+            {folded.turns.map(({ turn, events: evs }) => (
+              <div
+                className={`turn ${turn.status}${turn.id === focus ? " found" : find.marked.has(turn.id) ? " hit" : ""}`}
+                key={turn.id}
+                data-turn={turn.id}
+              >
+                <div className="term-prompt">
+                  <span className="ps1" aria-hidden="true">
+                    ❯
+                  </span>
+                  <span className="cmd">{turn.prompt}</span>
+                  <span className="term-meta">
+                    #{turn.turn_number} {formatTime(turn.started_at ?? turn.inserted_at)}
+                    {turn.status === "failed" ? " ✕ failed" : turn.status === "interrupted" ? " ⏹ interrupted" : ""}
+                  </span>
+                </div>
+                {(turn.image_count ?? 0) > 0 && (
+                  <div className="turn-images">
+                    {Array.from({ length: turn.image_count ?? 0 }, (_, i) => (
+                      <a key={i} href={turnImageUrl(project.id, conversationId, turn.id, i)} target="_blank" rel="noreferrer">
+                        <img src={turnImageUrl(project.id, conversationId, turn.id, i)} alt={`attachment ${i + 1}`} loading="lazy" />
+                      </a>
+                    ))}
+                  </div>
+                )}
+                <div className="term-out">
+                  {arrange(evs, visible).map((b, i) => (
+                    <BlockView key={`${turn.id}-${i}`} block={b} onAnswer={answer} />
+                  ))}
+                </div>
+              </div>
+            ))}
+            {folded.loose.length > 0 && <div className="term-line muted"># {stageLine(folded.loose)}</div>}
+            {waiting && (
+              <div className="term-line working" aria-label="working">
+                <span className="cursor">▍</span>
               </div>
             )}
-            <div className="term-out">
-              {arrange(evs, visible).map((b, i) => (
-                <BlockView key={`${turn.id}-${i}`} block={b} onAnswer={answer} />
-              ))}
-            </div>
           </div>
-        ))}
-        {folded.loose.length > 0 && <div className="term-line muted"># {stageLine(folded.loose)}</div>}
-        {waiting && (
-          <div className="term-line working" aria-label="working">
-            <span className="cursor">▍</span>
+
+          <form className="composer term" onSubmit={send}>
+            <span className="ps1" aria-hidden="true">
+              ❯
+            </span>
+            <div className="composer-main">
+              <AttachmentStrip items={attachments.items} onRemove={attachments.remove} />
+              <textarea
+                rows={2}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={onKey}
+                onPaste={attachments.paste}
+                placeholder={retired ? "retired" : composerHint(who, touch)}
+                disabled={retired}
+                spellCheck={false}
+              />
+            </div>
+            <AttachButton add={attachments.add} disabled={retired} label="Attach an image to this prompt" />
+            <button className="send" type="submit" disabled={sending || (!draft.trim() && !attachments.payload) || retired} title="Send (Enter)">
+              ⏎
+            </button>
+          </form>
+        </div>
+        {showChanges && item && computer?.sandboxId && (
+          <div id="conversation-changes" className="conversation-changes-wrap">
+            <ConversationChanges item={item} computer={computer} snaps={changeSnapshots} onClose={() => setShowChanges(false)} />
           </div>
         )}
       </div>
-
-      <form className="composer term" onSubmit={send}>
-        <span className="ps1" aria-hidden="true">
-          ❯
-        </span>
-        <div className="composer-main">
-          <AttachmentStrip items={attachments.items} onRemove={attachments.remove} />
-          <textarea
-            rows={2}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={onKey}
-            onPaste={attachments.paste}
-            placeholder={retired ? "retired" : composerHint(who, touch)}
-            disabled={retired}
-            spellCheck={false}
-          />
-        </div>
-        <AttachButton add={attachments.add} disabled={retired} label="Attach an image to this prompt" />
-        <button className="send" type="submit" disabled={sending || (!draft.trim() && !attachments.payload) || retired} title="Send (Enter)">
-          ⏎
-        </button>
-      </form>
       {attachments.dragging && !retired && <div className="drop-hint">Drop to attach</div>}
     </section>
   );

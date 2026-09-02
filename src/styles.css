@@ -597,6 +597,9 @@ button.attach:hover:not(:disabled) { background: var(--bg-2); }
 .thread-title { flex: 1; min-width: 160px; }
 .thread-title .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60ch; }
 .thread-head button.icon.on { color: var(--brand); }
+.thread-work { flex: 1; min-height: 0; display: flex; }
+.thread-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.changes-toggle.on { color: var(--brand); border-color: color-mix(in srgb, var(--brand) 45%, var(--border)); }
 
 /* ⌘F: a strip under the thread's head, the way an editor's find is — never a panel of results. */
 .find-bar { display: flex; align-items: center; gap: 8px; padding: 5px 16px; border-bottom: 1px solid var(--border); background: var(--bg-1); font-family: var(--mono); font-size: 12px; flex-wrap: wrap; }
@@ -1307,6 +1310,11 @@ body.resizing-col { cursor: col-resize; user-select: none; }
 
 /* ── changes: the hook's state and Fountain's diff, per checkout (components/Changes.tsx) ── */
 .pad { padding: 10px 12px; }
+.conversation-changes-wrap { width: min(52vw, 720px); min-width: min(420px, 45vw); flex: 0 0 auto; min-height: 0; }
+.conversation-changes { height: 100%; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--bg-1); }
+.conversation-changes-head { display: flex; align-items: flex-start; gap: 8px; padding: 10px 10px 10px 14px; border-bottom: 1px solid var(--border); }
+.conversation-changes-head a { display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-changes-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; }
 .repo-changes { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-1); padding: 8px 10px; }
 .repo-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
 .file-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
@@ -1323,3 +1331,7 @@ body.resizing-col { cursor: col-resize; user-select: none; }
 .diff tr.add td { background: color-mix(in srgb, var(--ok) 14%, transparent); }
 .diff tr.del td { background: color-mix(in srgb, var(--bad) 14%, transparent); }
 .diff tr.meta td { color: var(--muted); background: var(--bg-2); }
+
+@media (max-width: 900px) {
+  .conversation-changes-wrap { position: fixed; inset: 0 0 0 auto; z-index: 75; width: min(92vw, 720px); min-width: 0; box-shadow: -12px 0 32px rgb(0 0 0 / 22%); }
+}

@@ -80,7 +80,7 @@ const realStore = await import("../store");
 mock.module("../store", () => ({ ...realStore, useProject: () => current }));
 const realApi = await import("../lib/api");
 mock.module("../lib/api", () => ({ ...realApi, api: { ...realApi.api, snapshots: () => Promise.resolve(snapshots) } }));
-const { Changes, diskError } = await import("./Changes");
+const { Changes, ConversationChanges, diskError, snapshotFileCount } = await import("./Changes");
 
 describe("the Changes view", () => {
   test("shows the hook's state and Fountain's diff for a running computer, and reads an untracked file when opened", async () => {
@@ -168,6 +168,29 @@ describe("the Changes view", () => {
     expect(bare.container.innerHTML).toBe("");
     await bare.unmount();
   });
+
+  test("the conversation panel shows only its computer and links back to all item changes", async () => {
+    asked.length = 0;
+    const other = { ...snapshot, computer: "sb2", repo: "/home/sprite/work/other", branch: "other-branch" };
+    const m = await mount(<ConversationChanges item={item} computer={computer({})} snaps={[snapshot, other]} onClose={() => {}} />);
+    await wait(20);
+    const html = m.container.innerHTML;
+    expect(html).toContain("Computer changes");
+    expect(html).toContain("View all changes on fix foo");
+    expect(html).toContain("#/p/p1/w/w1");
+    expect(html).toContain("wb/fix-foo");
+    expect(html).not.toContain("other-branch");
+    expect(asked).toEqual(["diff sb1 /home/sprite/work/thing"]);
+    await m.unmount();
+  });
+});
+
+test("snapshotFileCount uses the latest state of each checkout on one computer", () => {
+  const older = { ...snapshot, takenAt: "2026-09-01T10:00:00Z" };
+  const clean = { ...snapshot, takenAt: "2026-09-01T11:00:00Z", status: "# branch.head wb/fix-foo" };
+  const second = { ...snapshot, repo: "/home/sprite/work/two", takenAt: "2026-09-01T11:00:00Z", status: "? NEW.md" };
+  const otherComputer = { ...snapshot, computer: "sb2", takenAt: "2026-09-01T12:00:00Z" };
+  expect(snapshotFileCount([older, clean, second, otherComputer], "sb1")).toBe(1);
 });
 
 test("diskError puts Fountain's refusals into words", () => {
