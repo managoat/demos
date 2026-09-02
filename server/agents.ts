@@ -12,7 +12,14 @@
  *     `[from someone]` tags (shared/author.ts);
  *   - the chosen skills as skills.sh installs, and the chosen connectors as
  *     `mcp_servers` (server/connectors.ts);
+ *   - Salon itself as an MCP server (`salon`, server/mcp.ts) so the model can
+ *     start a game — on the claude runtime, which is the one that writes an
+ *     `http` server with headers into its config, and only when this server
+ *     has a public address for the computer to reach;
  *   - no environment: the computer is Fountain's default.
+ *
+ * The games server is not part of the key: an agent found without it is
+ * given it in place, so a pick made before games existed keeps its agent.
  *
  * The menu (server/menu.ts) never lists these agents; they are the result of
  * a pick, not something to pick.
@@ -36,6 +43,23 @@ export const SALON_NOTE =
   "everyone in the room as a collaborator. " +
   "Keep replies conversational unless asked for something else.";
 
+export const GAMES_NOTE =
+  "People here can play games with each other on a board the chat shows. When someone wants to play " +
+  "(\"let's play tic-tac-toe\", \"me against Bob\"), call the start_game tool with the two players — the " +
+  "person asking is one of them unless they say otherwise — and then step back: the players click their " +
+  "own moves and you are not told about them. Answer \"who's winning?\" with game_state.";
+
+/** The `mcp_servers` entry that lets a chat's computer call this server as the conversation it is running. */
+export function salonServer(publicUrl: string): Record<string, unknown> {
+  // `$${…}` is Fountain's escape: the literal `${…}` reaches the runtime's config, and the claude
+  // runtime expands it from its own environment, where the conversation's key and id are.
+  return {
+    type: "http",
+    url: `${publicUrl}/mcp`,
+    headers: { Authorization: "Bearer $${FOUNTAIN_TOKEN}", "X-Fountain-Conversation-Id": "$${FOUNTAIN_CONVERSATION_ID}" },
+  };
+}
+
 export interface Materialised {
   agentId: string;
   /** The connectors that were attached, with the names the header shows. */
@@ -44,7 +68,7 @@ export interface Materialised {
   created: boolean;
 }
 
-export async function agentFor(client: FountainClient, settings: ChatSettings): Promise<Materialised> {
+export async function agentFor(client: FountainClient, settings: ChatSettings, publicUrl: string | null): Promise<Materialised> {
   // Connectors are resolved first: a stale or unusable one is refused before anything else is asked of Fountain.
   let connectors: ChosenConnector[] = [];
   let mcpServers: Record<string, unknown> = {};
@@ -53,18 +77,30 @@ export async function agentFor(client: FountainClient, settings: ChatSettings): 
     ({ mcpServers, chosen: connectors } = attach(settings.connectorIds, resolveConnectors(held?.connections ?? [], held?.providers ?? [], catalog)));
   }
 
+  const runtime = runtimeFor(settings.model);
+  const games = runtime === "claude" && publicUrl ? salonServer(publicUrl) : null;
+  const system = `${ROOM_PROMPT}\n\n${SALON_NOTE}${games ? `\n\n${GAMES_NOTE}` : ""}`;
+
   const key = derivedKey(settings);
   const agents = await client.agents();
   const existing = agents.find((a) => salonKey(a) === key);
-  if (existing) return { agentId: existing.id, connectors, created: false };
+  if (existing) {
+    // An agent from before games, from a server without a public address then, or pointed at an old one: given the server in place.
+    const held = existing.mcp_servers?.salon as { url?: unknown } | undefined;
+    if (games && held?.url !== games.url) {
+      await client.updateAgent(existing.id, { system, mcp_servers: { ...(existing.mcp_servers ?? {}), salon: games } });
+    }
+    return { agentId: existing.id, connectors, created: false };
+  }
 
   const skills = settings.skills.map(skillById).flatMap((s) => (s ? [skillEntry(s)] : []));
   const parts = [...Object.keys(mcpServers), ...settings.skills].sort();
+  if (games) mcpServers = { ...mcpServers, salon: games };
   const body: Record<string, unknown> = {
     name: `Salon · ${modelLabel(settings.model)}${parts.length ? ` · ${parts.join(", ")}` : ""}`.slice(0, 200),
-    runtime: runtimeFor(settings.model),
+    runtime,
     model: settings.model,
-    system: `${ROOM_PROMPT}\n\n${SALON_NOTE}`,
+    system,
     metadata: { salon: { key, tuple: JSON.parse(canonical(settings)) as unknown } },
   };
   if (skills.length) body.skills = skills;

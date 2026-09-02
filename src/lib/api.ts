@@ -3,6 +3,7 @@
  * itself is reached through the SDK at `/f/<chat>` — see store.tsx.
  */
 import type { ChatSettings } from "../../shared/settings";
+import type { GameDto, GameKind } from "../../shared/games";
 import type { ImageInput } from "../../shared/images";
 
 export interface Me {
@@ -97,7 +98,16 @@ export const api = {
   removeMember: (id: string, email: string) => call<{ ok?: true; left?: boolean; data?: { chat: ChatDto } }>("DELETE", `/api/chats/${id}/members/${encodeURIComponent(email)}`),
   invite: (id: string) => data(call<{ data: { token: string } }>("POST", `/api/chats/${id}/invite`)),
   join: (token: string) => data(call<{ data: ChatDto }>("POST", `/api/join/${encodeURIComponent(token)}`)),
+
+  games: (chatId: string) => data(call<{ data: GameDto[] }>("GET", `/api/chats/${chatId}/games`)),
+  startGame: (chatId: string, kind: GameKind, players: [string, string]) => data(call<{ data: GameDto }>("POST", `/api/chats/${chatId}/games`, { kind, players })),
+  move: (chatId: string, gameId: string, cell: number) => data(call<{ data: GameDto }>("POST", `/api/chats/${chatId}/games/${gameId}/moves`, { cell })),
 };
+
+/** The chat's game stream (server/games.ts): same origin, so the session cookie goes with it. */
+export function gamesStreamUrl(chatId: string): string {
+  return `/api/chats/${chatId}/games/stream`;
+}
 
 /** The SDK's base URL for one chat: Fountain as seen from inside it, on the host's key. */
 export function chatFountainBase(chatId: string): string {

@@ -6,6 +6,8 @@
  *   SALON_SECRET   encrypts stored Fountain keys; generated into DATA_DIR/secret when unset
  *   PORT           listen port (8080)
  *   STATIC_DIR     the built SPA to serve (dist/); unset serves no static files (dev, behind Vite)
+ *   PUBLIC_URL     where a chat's computer can reach this server (https://salon.demo.managoat.com);
+ *                  unset, the model cannot start games — a computer cannot reach localhost
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -18,6 +20,8 @@ export interface Config {
   secret: string;
   port: number;
   staticDir: string | null;
+  /** This server as a chat's computer reaches it, without a trailing slash; null when it cannot. */
+  publicUrl: string | null;
   sessionMaxAgeMs: number;
 }
 
@@ -43,6 +47,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     secret,
     port: Number(env.PORT ?? 8080),
     staticDir: env.STATIC_DIR === "" ? null : (env.STATIC_DIR ?? (existsSync("dist") ? "dist" : null)),
+    publicUrl: env.PUBLIC_URL?.trim().replace(/\/+$/, "") || null,
     sessionMaxAgeMs: 30 * 24 * 60 * 60 * 1000,
   };
 }

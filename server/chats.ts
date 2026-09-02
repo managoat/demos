@@ -135,7 +135,7 @@ export async function create(ctx: AppContext, req: Request): Promise<Response> {
   let connectors: ChosenConnector[];
   let agentId: string;
   try {
-    const made = await agentFor(client, settings);
+    const made = await agentFor(client, settings, ctx.config.publicUrl);
     agentId = made.agentId;
     connectors = made.connectors;
     const create: Record<string, unknown> = { agent_id: agentId, prompt, channel_id: `salon:${id}`, fresh: true };

@@ -35,10 +35,13 @@ server/   Bun. app.ts is the route table; index.ts boots it.
           agents.ts    settings → the agent Fountain runs (the seam, see below)
           chats.ts     chats, members, invites, join
           proxy.ts     /f/<chat>/api/conversations/<id>/… on the host's key
-          db.ts        SQLite: users, sessions, chats, chat_members, sends
-shared/   what both sides agree on: author.ts, models.ts, settings.ts, skills.ts, images.ts
+          games.ts     a chat's games: start, move, the server-sent game stream
+          mcp.ts       POST /mcp: Salon as an MCP server for the chat's computer (start_game, game_state)
+          db.ts        SQLite: users, sessions, chats, chat_members, sends, games
+shared/   what both sides agree on: author.ts, models.ts, settings.ts, skills.ts, images.ts, games.ts (the rules)
 src/      Vite + React. store.tsx (session), router.ts (hash routes),
-          components/Thread.tsx (transcript + composer), SettingsMenu.tsx (pill + `+`)
+          components/Thread.tsx (transcript + composer), SettingsMenu.tsx (pill + `+`),
+          Game.tsx (the board), Blocks.tsx (a start_game tool block renders as the board)
 k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) applies it
 ```
 
@@ -84,6 +87,31 @@ k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) ap
    `environment_not_allowed`, …) so `src/lib/errors.ts` can say something
    useful. Do not collapse them into a 500.
 
+5. **Games: the model starts, people play, nothing else is a turn.** The
+   derived agent (claude runtime only, and only when `PUBLIC_URL` is set)
+   carries `mcp_servers.salon = {type: "http", url: "<PUBLIC_URL>/mcp",
+   headers: {Authorization: "Bearer $${FOUNTAIN_TOKEN}",
+   "X-Fountain-Conversation-Id": "$${FOUNTAIN_CONVERSATION_ID}"}}`
+   (`agents.ts#salonServer`; an agent found without it, or with an old
+   address, is patched in place, so the derived key does not change). `$${…}`
+   is Fountain's escape: the conversation's own key is not in the
+   environment Fountain substitutes from, so the literal `${…}` must reach
+   the runtime, which expands it. `server/mcp.ts` verifies the bearer with
+   `GET /api/auth/me`, finds the chat by conversation id, and requires the
+   key's email to be the host — then `start_game` / `game_state` reach that
+   one chat. A game is a row in `games`; moves are `POST
+   /api/chats/:id/games/:g/moves` from the player whose go it is, and every
+   change goes out on `GET …/games/stream` (in-process hub, one replica).
+   The browser draws the board from the `mcp__salon__start_game` tool block
+   (`src/lib/blocks.ts#gameOf`, the live record by id), or after the last
+   turn for a game the `+` started. Known Fountain quirk (2026-09-02):
+   the ACP peer sends the agent's *raw* `mcp_servers` on `session/new`
+   (`conversation_server.ex`, `Fountain.Runtimes.ACP.mcp_servers(...)`), so
+   the runtime sees `$${X}`, expands the inner ref, and the header arrives
+   as `Bearer $ftn_…`; `mcp.ts#unescaped` drops that `$`. The project
+   `.mcp.json` copy is substituted correctly but the session copy wins.
+   Fix it in Fountain and the tolerance becomes dead code.
+
 ## Run, test, ship
 
 ```bash
@@ -109,7 +137,24 @@ and streams in about a minute; one with a skill attached also runs the
 skills.sh install first. Retire the chat afterwards (⋯ → Retire) so the
 computer is released. `[default]` is brokered (connections exist);
 `[qs-hosted]` is not, so it is also the way to see the disabled Connectors
-state.
+state — and it has no Anthropic credential, so a Claude turn there fails
+`Authentication required`; host with `[default]`.
+
+**Smoke the games tool:** the computer must reach this server, so run a
+tunnel (`cloudflared tunnel --url http://localhost:8080` prints a
+trycloudflare URL) and start the server with `PUBLIC_URL=<that url>`. A
+brokered sandbox reaches it only through `HTTPS_PROXY`, which the runtime
+honours. Start a chat, add the guest, wait for the first turn to finish
+(a prompt during a turn is `conversation_busy`), then send "let's play
+tic-tac-toe, me against <guest>"; the transcript gets an
+`mcp__salon__start_game` block and `GET /api/chats/:id/games` shows the
+row. An MCP server that failed at session start is not retried — fix,
+then start a *new* chat. To look inside the computer: `GET /api/sandboxes`
+gives `sprite_name`, and `sprite exec -s <name> --file diag.sh:/tmp/d.sh
+bash /tmp/d.sh` runs there; the runtime's MCP log is
+`~/.cache/claude-cli-nodejs/-home-sprite/mcp-logs-salon/*.jsonl`. Retire
+the chat afterwards; the derived agent keeps the tunnel URL until the next
+chat on a server with the real `PUBLIC_URL` re-patches it.
 
 **Ship:** push to `main`. `build.yml` tests, builds the SPA on the runner,
 pushes `ghcr.io/managoat/salon` (multi-arch) and commits the sha pin into
@@ -131,7 +176,15 @@ A change there rolls the Fountain pods — check nothing is provisioning first.
 - `SALON_SECRET` is generated into the volume in prod; a `salon-secrets`
   Secret in the namespace would keep it apart from the data.
 - No presence or typing indicators; guests learn of a new turn from the
-  conversation stream and a 30 s chat-list poll.
+  conversation stream and a 30 s chat-list poll. The game stream
+  (`server/games.ts#hub`) is the first channel Salon owns; presence could
+  ride on it.
+- Games are Anthropic-only: codex and gemini get no `salon` server. The
+  model never plays; a `move` tool would make each of its moves a turn.
+  Tic-tac-toe is the only game; `shared/games.ts` is where a second one's
+  rules go, keyed by `kind`.
+- Fountain sends the raw `mcp_servers` on the ACP session (boundary 5);
+  fix there, then delete `mcp.ts#unescaped`.
 - Outlook, Slack and tenant `oauth2` connections show in Connectors as "not
   usable yet": the token is brokered as an env var, so using one means
   shipping an MCP server in the sandbox that reads it.

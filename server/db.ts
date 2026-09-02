@@ -55,6 +55,23 @@ export interface SendRow {
   at: string;
 }
 
+/** A game two people in the chat are playing, or have played (shared/games.ts). */
+export interface GameRow {
+  id: string;
+  chat_id: string;
+  kind: string;
+  /** JSON: emails in mark order. */
+  players: string;
+  /** JSON: the board and whose move it is. */
+  state: string;
+  status: "playing" | "done";
+  winner_email: string | null;
+  seq: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export type Role = "owner" | "member";
 
 const SCHEMA = `
@@ -105,6 +122,20 @@ CREATE TABLE IF NOT EXISTS sends (
   at TEXT NOT NULL,
   PRIMARY KEY (chat_id, seq)
 );
+CREATE TABLE IF NOT EXISTS games (
+  id TEXT PRIMARY KEY,
+  chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  players TEXT NOT NULL,
+  state TEXT NOT NULL,
+  status TEXT NOT NULL,
+  winner_email TEXT,
+  seq INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS games_chat ON games(chat_id, created_at);
 `;
 
 export function now(): string {
@@ -220,6 +251,11 @@ export class Db {
     this.sql.query("DELETE FROM chats WHERE id = $id").run({ id });
   }
 
+  /** The chat a conversation is bound to — how the model's MCP calls find their room. */
+  chatByConversation(conversationId: string): ChatRow | null {
+    return (this.sql.query("SELECT * FROM chats WHERE conversation_id = $c").get({ c: conversationId }) as ChatRow | null) ?? null;
+  }
+
   chatByInvite(token: string): ChatRow | null {
     return (this.sql.query("SELECT * FROM chats WHERE invite_token = $t").get({ t: token }) as ChatRow | null) ?? null;
   }
@@ -259,5 +295,32 @@ export class Db {
     const seq = row.n + 1;
     this.sql.query("INSERT INTO sends (chat_id, seq, email, at) VALUES ($c, $seq, $e, $t)").run({ c: chatId, seq, e: email, t: now() });
     return seq;
+  }
+
+  // ── games ────────────────────────────────────────────────────────────
+
+  games(chatId: string): GameRow[] {
+    return this.sql.query("SELECT * FROM games WHERE chat_id = $c ORDER BY created_at, id").all({ c: chatId }) as GameRow[];
+  }
+
+  getGame(id: string): GameRow | null {
+    return (this.sql.query("SELECT * FROM games WHERE id = $id").get({ id }) as GameRow | null) ?? null;
+  }
+
+  insertGame(g: GameRow): void {
+    this.sql
+      .query(
+        `INSERT INTO games (id, chat_id, kind, players, state, status, winner_email, seq, created_by, created_at, updated_at)
+         VALUES ($id, $chat_id, $kind, $players, $state, $status, $winner_email, $seq, $created_by, $created_at, $updated_at)`,
+      )
+      .run(g as unknown as Record<string, string | number | null>);
+  }
+
+  /** A move: the new state, and the seq bumped so a browser can tell newer from older. */
+  updateGame(id: string, patch: Pick<GameRow, "state" | "status" | "winner_email">): GameRow | null {
+    this.sql
+      .query("UPDATE games SET state = $state, status = $status, winner_email = $winner_email, seq = seq + 1, updated_at = $t WHERE id = $id")
+      .run({ id, state: patch.state, status: patch.status, winner_email: patch.winner_email, t: now() });
+    return this.getGame(id);
   }
 }

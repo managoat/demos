@@ -41,6 +41,16 @@ nothing about agents, environments or runtimes anywhere.
 - **Invite by email or by link.** Email: the person finds the chat waiting
   when they sign in. Link: `#/join/<token>`, anyone signed in who opens it
   joins; the host can mint a new one at any time.
+- **Games, with the people in the room.** "Let's play tic-tac-toe, me
+  against Bob" puts a board in the transcript for everyone. The model only
+  starts it — Salon is an MCP server the chat's computer calls as the
+  conversation it is running (`server/mcp.ts`), and the tool result is the
+  game — and the board is Salon's own record: a move is a click by the
+  player whose go it is, checked by the server (`shared/games.ts`,
+  `server/games.ts`) and pushed to the other browsers on a server-sent
+  stream, never a turn. The `+` at the foot of a chat starts one without
+  the model too. Anthropic models only for now: the claude runtime is the
+  one that carries an MCP server with headers into the computer.
 - **Blocks, not dialects.** The transcript renders Fountain's server-parsed
   blocks (`?blocks=true`): text as markdown (an allow-list renderer to React
   nodes, never innerHTML), tool calls as collapsible rows, permission

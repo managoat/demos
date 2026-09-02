@@ -7,11 +7,13 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { DEFAULT_SETTINGS, derivedKey } from "../shared/settings";
-import { ROOM_PROMPT, SALON_NOTE } from "./agents";
+import { GAMES_NOTE, ROOM_PROMPT, SALON_NOTE, salonServer } from "./agents";
 import { buildApp } from "./app";
 import type { AppContext } from "./context";
 import { Cipher } from "./crypto";
 import { Db } from "./db";
+import { hub } from "./games";
+import { resetMcpCache } from "./mcp";
 
 // ── the fake Fountain ────────────────────────────────────────────────────
 
@@ -31,6 +33,8 @@ const KEYS: Record<string, { id: string; email: string }> = {
   ftn_host: { id: "u-host", email: "Host@Example.com" },
   ftn_guest: { id: "u-guest", email: "guest@example.com" },
   ftn_other: { id: "u-other", email: "other@example.com" },
+  /** The key Fountain mints for one of the host's conversations and hands its computer as $FOUNTAIN_TOKEN. */
+  ftn_sprite: { id: "u-host", email: "host@example.com" },
 };
 
 /** Accounts the egress broker is on for: connections exist there. Shaped from one real call (server/connectors.test.ts). */
@@ -53,6 +57,7 @@ const state = {
   conversations: new Map<string, Record<string, unknown>[]>(),
   prompts: [] as { key: string; id: string; body: unknown }[],
   agentPosts: [] as { key: string; body: Record<string, unknown> }[],
+  agentPatches: [] as { key: string; id: string; body: Record<string, unknown> }[],
   terminated: [] as string[],
 };
 
@@ -61,6 +66,7 @@ function reset(): void {
   state.conversations.clear();
   state.prompts = [];
   state.agentPosts = [];
+  state.agentPatches = [];
   state.terminated = [];
   state.agents.set("ftn_host", [
     { id: "a-coder", name: "Coder", runtime: "claude", model: "anthropic/claude-sonnet-5", system: "You write code.", environment_id: "e-1", skills: [{ name: "x", content: "SKILL" }], mcp_servers: { gh: { headers: { authorization: "Bearer secret" } } } },
@@ -106,6 +112,17 @@ beforeAll(() => {
         state.agents.set(key, [...(state.agents.get(key) ?? []), made]);
         return json({ data: made }, 201);
       }
+      const am = /^\/api\/agents\/([^/]+)$/.exec(p);
+      if (am && req.method === "PATCH") {
+        const body = (await req.json()) as Record<string, unknown>;
+        const list = state.agents.get(key) ?? [];
+        const cur = list.find((a) => a.id === am[1]);
+        if (!cur) return json({ error: "not_found" }, 404);
+        state.agentPatches.push({ key, id: cur.id, body });
+        const next = { ...cur, ...body } as FakeAgent;
+        state.agents.set(key, list.map((a) => (a.id === cur.id ? next : a)));
+        return json({ data: next });
+      }
       if (p === "/api/conversations" && req.method === "POST") {
         const body = (await req.json()) as Record<string, unknown>;
         if (body.agent_id === "a-broke") return json({ error: "insufficient_credits", message: "no credit", upgrade_url: "x" }, 402);
@@ -147,13 +164,20 @@ let ctx: AppContext;
 
 beforeEach(async () => {
   reset();
+  resetMcpCache();
   ctx = {
     db: new Db(":memory:"),
     cipher: await Cipher.from("a-test-secret-that-is-long-enough"),
-    config: { fountainUrl: fakeUrl, dataDir: ".", dbPath: ":memory:", secret: "x", port: 0, staticDir: null, sessionMaxAgeMs: 60_000 },
+    config: { fountainUrl: fakeUrl, dataDir: ".", dbPath: ":memory:", secret: "x", port: 0, staticDir: null, publicUrl: null, sessionMaxAgeMs: 60_000 },
   };
   app = buildApp(ctx);
 });
+
+/** The same server, reachable from a chat's computer — what production is. */
+function withPublicUrl(url = "https://salon.test"): void {
+  ctx.config.publicUrl = url;
+  app = buildApp(ctx);
+}
 
 async function call(method: string, path: string, opts: { body?: unknown; cookie?: string; headers?: Record<string, string> } = {}): Promise<Response> {
   const headers: Record<string, string> = { ...(opts.headers ?? {}) };
@@ -375,5 +399,237 @@ describe("sharing", () => {
     expect((await call("DELETE", `/api/chats/${chat.id}`, { cookie: host })).status).toBe(200);
     expect(state.terminated).toEqual([chat.conversationId]);
     expect((await call("GET", `/api/chats/${chat.id}`, { cookie: other })).status).toBe(404);
+  });
+});
+
+// ── games ────────────────────────────────────────────────────────────────
+
+describe("games on the agent", () => {
+  const SALON = salonServer("https://salon.test");
+
+  test("with a public address, a claude agent gets Salon as an MCP server on the conversation's own key, and the note", async () => {
+    withPublicUrl();
+    const cookie = await signIn("ftn_host");
+    await startChat(cookie, { ...SETTINGS, model: "anthropic/claude-sonnet-5" });
+    expect(state.agentPosts).toHaveLength(1);
+    const made = state.agentPosts[0]!.body;
+    expect(made.mcp_servers).toEqual({ salon: SALON });
+    expect(made.system).toBe(`${ROOM_PROMPT}\n\n${SALON_NOTE}\n\n${GAMES_NOTE}`);
+    // The header refs are escaped for Fountain, so the runtime — not Fountain — expands them.
+    expect(SALON).toEqual({
+      type: "http",
+      url: "https://salon.test/mcp",
+      headers: { Authorization: "Bearer $${FOUNTAIN_TOKEN}", "X-Fountain-Conversation-Id": "$${FOUNTAIN_CONVERSATION_ID}" },
+    });
+    // The key is unchanged by it: the same pick finds the agent.
+    await startChat(cookie, { ...SETTINGS, model: "anthropic/claude-sonnet-5" });
+    expect(state.agentPosts).toHaveLength(1);
+  });
+
+  test("an agent from before games is given the server in place rather than replaced", async () => {
+    withPublicUrl();
+    const cookie = await signIn("ftn_host");
+    const chat = await startChat(cookie);
+    expect(chat.agentId).toBe("a-old");
+    expect(state.agentPosts).toHaveLength(0);
+    expect(state.agentPatches).toHaveLength(1);
+    expect(state.agentPatches[0]).toMatchObject({ id: "a-old", body: { mcp_servers: { salon: SALON } } });
+    expect((state.agentPatches[0]!.body.system as string).endsWith(GAMES_NOTE)).toBe(true);
+    // Once — unless this server has moved.
+    await startChat(cookie);
+    expect(state.agentPatches).toHaveLength(1);
+    withPublicUrl("https://salon.example");
+    await startChat(cookie);
+    expect(state.agentPatches).toHaveLength(2);
+    expect(state.agentPatches[1]!.body.mcp_servers).toEqual({ salon: salonServer("https://salon.example") });
+  });
+
+  test("another runtime, or no public address, gets no server and no note", async () => {
+    withPublicUrl();
+    const cookie = await signIn("ftn_host");
+    await startChat(cookie, { ...SETTINGS, model: "openai/gpt-5.5" });
+    expect(state.agentPosts[0]!.body.mcp_servers).toBeUndefined();
+    expect(state.agentPosts[0]!.body.system).toBe(`${ROOM_PROMPT}\n\n${SALON_NOTE}`);
+    ctx.config.publicUrl = null;
+    await startChat(cookie, { ...SETTINGS, model: "anthropic/claude-sonnet-5" });
+    expect(state.agentPosts[1]!.body.mcp_servers).toBeUndefined();
+    expect(state.agentPatches).toHaveLength(0);
+  });
+});
+
+describe("playing", () => {
+  async function room(): Promise<{ host: string; guest: string; other: string; chat: Record<string, any> }> {
+    const host = await signIn("ftn_host");
+    const guest = await signIn("ftn_guest");
+    const other = await signIn("ftn_other");
+    const chat = await startChat(host);
+    await call("POST", `/api/chats/${chat.id}/members`, { cookie: host, body: { email: "guest@example.com" } });
+    return { host, guest, other, chat };
+  }
+
+  test("two people in the chat play; the server keeps the rules and everyone else watches", async () => {
+    const { host, guest, other, chat } = await room();
+    // Only people in the chat, and two different ones.
+    expect((await call("POST", `/api/chats/${chat.id}/games`, { cookie: host, body: { kind: "tictactoe", players: ["host@example.com", "other@example.com"] } })).status).toBe(422);
+    expect((await call("POST", `/api/chats/${chat.id}/games`, { cookie: host, body: { kind: "tictactoe", players: ["host@example.com", "host@example.com"] } })).status).toBe(422);
+    expect((await call("POST", `/api/chats/${chat.id}/games`, { cookie: host, body: { kind: "chess", players: ["host@example.com", "guest@example.com"] } })).status).toBe(422);
+    expect((await call("POST", `/api/chats/${chat.id}/games`, { cookie: other, body: { kind: "tictactoe", players: ["host@example.com", "guest@example.com"] } })).status).toBe(404);
+
+    // The guest can start one, and put the host first.
+    const started = await call("POST", `/api/chats/${chat.id}/games`, { cookie: guest, body: { kind: "tictactoe", players: ["Host@Example.com", "guest@example.com"] } });
+    expect(started.status).toBe(201);
+    const game = ((await started.json()) as { data: Record<string, any> }).data;
+    expect(game).toMatchObject({ chatId: chat.id, kind: "tictactoe", players: ["host@example.com", "guest@example.com"], status: "playing", winnerEmail: null, seq: 1, createdBy: "guest@example.com" });
+    expect(game.state).toEqual({ board: [null, null, null, null, null, null, null, null, null], next: "X", winner: null, line: null });
+
+    const moves = `/api/chats/${chat.id}/games/${game.id}/moves`;
+    // Not the guest's move, not a square, not a stranger.
+    expect((await call("POST", moves, { cookie: guest, body: { cell: 4 } })).status).toBe(409);
+    expect((await call("POST", moves, { cookie: host, body: { cell: 9 } })).status).toBe(409);
+    expect((await call("POST", moves, { cookie: other, body: { cell: 4 } })).status).toBe(404);
+
+    // X takes the centre; O may not take it too.
+    const first = await call("POST", moves, { cookie: host, body: { cell: 4 } });
+    expect(first.status).toBe(200);
+    expect(((await first.json()) as { data: Record<string, any> }).data).toMatchObject({ seq: 2, state: { next: "O" } });
+    expect((await call("POST", moves, { cookie: guest, body: { cell: 4 } })).status).toBe(409);
+
+    // X wins down the middle column.
+    for (const [cookie, cell] of [
+      [guest, 0],
+      [host, 1],
+      [guest, 2],
+    ] as const) {
+      expect((await call("POST", moves, { cookie, body: { cell } })).status).toBe(200);
+    }
+    const won = await call("POST", moves, { cookie: host, body: { cell: 7 } });
+    const final = ((await won.json()) as { data: Record<string, any> }).data;
+    expect(final).toMatchObject({ status: "done", winnerEmail: "host@example.com", seq: 6, state: { winner: "X", line: [1, 4, 7] } });
+    expect((await call("POST", moves, { cookie: guest, body: { cell: 8 } })).status).toBe(409);
+
+    // Everyone in the chat reads it; a stranger does not.
+    const list = (await (await call("GET", `/api/chats/${chat.id}/games`, { cookie: guest })).json()) as { data: { id: string }[] };
+    expect(list.data.map((g) => g.id)).toEqual([game.id]);
+    expect((await call("GET", `/api/chats/${chat.id}/games/${game.id}`, { cookie: host })).status).toBe(200);
+    expect((await call("GET", `/api/chats/${chat.id}/games`, { cookie: other })).status).toBe(404);
+  });
+
+  test("the game stream carries every change to whoever is in the chat", async () => {
+    const { host, guest, other, chat } = await room();
+    expect((await call("GET", `/api/chats/${chat.id}/games/stream`, { cookie: other })).status).toBe(404);
+    const ctrl = new AbortController();
+    const res = await app(new Request(`http://salon.test/api/chats/${chat.id}/games/stream`, { headers: { cookie: guest }, signal: ctrl.signal }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/event-stream");
+    expect(hub.listening(chat.id)).toBe(1);
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let got = "";
+    const until = async (needle: string) => {
+      while (!got.includes(needle)) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        got += decoder.decode(value);
+      }
+    };
+    await until(": hello");
+    const started = ((await (await call("POST", `/api/chats/${chat.id}/games`, { cookie: host, body: { kind: "tictactoe", players: ["host@example.com", "guest@example.com"] } })).json()) as { data: { id: string } }).data;
+    await until("event: game");
+    await call("POST", `/api/chats/${chat.id}/games/${started.id}/moves`, { cookie: host, body: { cell: 0 } });
+    await until('"seq":2');
+    const events = got.split("\n\n").filter((e) => e.startsWith("event: game")).map((e) => JSON.parse(e.split("\ndata: ")[1]!) as { id: string; seq: number });
+    expect(events.map((e) => [e.id, e.seq])).toEqual([
+      [started.id, 1],
+      [started.id, 2],
+    ]);
+    ctrl.abort();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(hub.listening(chat.id)).toBe(0);
+  });
+});
+
+describe("the MCP server", () => {
+  async function rpc(body: unknown, headers: Record<string, string>): Promise<Response> {
+    return app(new Request("http://salon.test/mcp", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) }));
+  }
+  function forChat(conversationId: string, key = "ftn_sprite"): Record<string, string> {
+    return { authorization: `Bearer ${key}`, "x-fountain-conversation-id": conversationId };
+  }
+  async function toolCall(conversationId: string, name: string, args: Record<string, unknown>): Promise<{ text: string; isError: boolean }> {
+    const res = await rpc({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, forChat(conversationId));
+    expect(res.status).toBe(200);
+    const r = ((await res.json()) as { result: { content: { text: string }[]; isError: boolean } }).result;
+    return { text: r.content[0]!.text, isError: r.isError };
+  }
+
+  test("the conversation's key and id name the chat; anything else is refused before a tool runs", async () => {
+    const host = await signIn("ftn_host");
+    const chat = await startChat(host);
+    const init = { jsonrpc: "2.0", id: 1, method: "initialize", params: {} };
+    expect((await rpc(init, {})).status).toBe(401);
+    expect((await rpc(init, { authorization: "Bearer ftn_sprite" })).status).toBe(400);
+    expect((await rpc(init, forChat(chat.conversationId, "ftn_nope"))).status).toBe(401);
+    // A key of someone who does not host the chat — a guest's own key, say — finds no chat.
+    expect((await rpc(init, forChat(chat.conversationId, "ftn_guest"))).status).toBe(404);
+    expect((await rpc(init, forChat("c-nope"))).status).toBe(404);
+    expect((await app(new Request("http://salon.test/mcp", { headers: forChat(chat.conversationId) }))).status).toBe(405);
+
+    const ok = await rpc(init, forChat(chat.conversationId));
+    expect(ok.status).toBe(200);
+    // As the runtime sends them today: the session copy of the config leaves a `$` in front of each expanded value.
+    const stray = await rpc(init, { authorization: "Bearer $ftn_sprite", "x-fountain-conversation-id": `$${chat.conversationId}` });
+    expect(stray.status).toBe(200);
+    expect(((await ok.json()) as { result: { serverInfo: { name: string } } }).result.serverInfo.name).toBe("salon");
+    const tools = ((await (await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" }, forChat(chat.conversationId))).json()) as { result: { tools: { name: string }[] } }).result.tools;
+    expect(tools.map((t) => t.name)).toEqual(["start_game", "game_state"]);
+    expect((await rpc({ jsonrpc: "2.0", method: "notifications/initialized" }, forChat(chat.conversationId))).status).toBe(202);
+  });
+
+  test("start_game takes names as people say them, refuses what is not in the room, and puts the board on the stream", async () => {
+    const host = await signIn("ftn_host");
+    const chat = await startChat(host);
+    await call("POST", `/api/chats/${chat.id}/members`, { cookie: host, body: { email: "guest@example.com" } });
+    const conv = chat.conversationId as string;
+
+    let r = await toolCall(conv, "start_game", { game: "chess", players: ["host", "guest"] });
+    expect(r).toMatchObject({ isError: true });
+    expect(r.text).toContain("Tic-tac-toe");
+    r = await toolCall(conv, "start_game", { game: "tictactoe", players: ["host", "bob"] });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("host@example.com, guest@example.com");
+    r = await toolCall(conv, "start_game", { game: "tictactoe", players: ["host"] });
+    expect(r.isError).toBe(true);
+    r = await toolCall(conv, "start_game", { game: "tictactoe", players: ["st", "host"] });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("could be");
+
+    const seen: unknown[] = [];
+    const off = hub.subscribe(chat.id, (g) => seen.push(g));
+    r = await toolCall(conv, "start_game", { game: "tictactoe", players: ["Guest", "host@example.com"] });
+    off();
+    expect(r.isError).toBe(false);
+    const out = JSON.parse(r.text) as { started: boolean; game: Record<string, any>; hint: string };
+    expect(out.started).toBe(true);
+    expect(out.game).toMatchObject({ chatId: chat.id, players: ["guest@example.com", "host@example.com"], createdBy: "host@example.com" });
+    expect(out.hint).toContain("guest@example.com moves first");
+    expect(seen).toHaveLength(1);
+
+    // The game is the chat's: the browser routes show it, and game_state reads it.
+    const list = (await (await call("GET", `/api/chats/${chat.id}/games`, { cookie: host })).json()) as { data: { id: string }[] };
+    expect(list.data.map((g) => g.id)).toEqual([out.game.id]);
+    await call("POST", `/api/chats/${chat.id}/games/${out.game.id}/moves`, { cookie: await signIn("ftn_guest"), body: { cell: 4 } });
+    const s = JSON.parse((await toolCall(conv, "game_state", {})).text) as { summary: string; board: string[] };
+    expect(s.summary).toContain("host@example.com to move");
+    expect(s.board).toEqual([". . .", ". X .", ". . ."]);
+    expect((await toolCall(conv, "game_state", { game_id: "nope" })).isError).toBe(true);
+    expect((await toolCall(conv, "nothing", {})).isError).toBe(true);
+  });
+
+  test("a chat with no games says so", async () => {
+    const host = await signIn("ftn_host");
+    const chat = await startChat(host);
+    const r = await toolCall(chat.conversationId as string, "game_state", {});
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("No game");
   });
 });

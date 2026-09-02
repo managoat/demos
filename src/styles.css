@@ -243,6 +243,28 @@ pre.err { color: var(--bad); }
 .permission-head { display: flex; align-items: center; gap: 8px; }
 .permission-options { display: flex; gap: 6px; flex-wrap: wrap; }
 
+/* games */
+.game { display: inline-flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); box-shadow: var(--shadow); max-width: 100%; }
+.game.my-move { border-color: var(--accent); }
+.game-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; font-size: 13px; }
+.game-kind { font-family: var(--serif); font-size: 16px; }
+.game-players { display: inline-flex; align-items: center; gap: 8px; }
+.game-player { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 3px; border-radius: 999px; border: 1px solid transparent; }
+.game-player.active { border-color: var(--line-strong); background: var(--panel); }
+.game-mark { font-family: var(--mono); color: var(--muted); font-size: 12px; }
+.board { display: grid; grid-template-columns: repeat(3, 64px); grid-template-rows: repeat(3, 64px); gap: 4px; align-self: center; }
+.cell { width: 64px; height: 64px; padding: 0; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); font-family: var(--serif); font-size: 34px; line-height: 1; display: grid; place-items: center; }
+.cell:disabled { opacity: 1; }
+.cell.x { color: var(--accent); }
+.cell.o { color: #5b7fd6; }
+.cell.open { background: var(--card); border-style: dashed; border-color: var(--line-strong); }
+.cell.open:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
+.cell.won { background: color-mix(in srgb, var(--ok) 18%, var(--card)); border-color: var(--ok); }
+.game.done .cell:not(.won) { opacity: 0.6; }
+.game-status { font-size: 13px; color: var(--muted); text-align: center; }
+.game-status.mine { color: var(--accent); font-weight: 500; }
+.loose-games { display: flex; flex-direction: column; gap: 14px; align-items: flex-start; padding-left: 36px; }
+
 /* misc */
 .empty { display: grid; place-items: center; flex: 1; text-align: center; gap: 8px; }
 .toasts { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 100; pointer-events: none; }

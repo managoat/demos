@@ -2,6 +2,7 @@
  * Arranging server-parsed blocks for display. The server does the parsing
  * (`?blocks=true`); the client only pairs and groups.
  */
+import type { GameDto } from "../../shared/games";
 import type { Block, LogEvent } from "../types";
 
 /** Fountain refuses a permission request nobody answers in five minutes. */
@@ -96,6 +97,22 @@ function permissionOf(block: Block, askedAt: string, held: Map<string, RequestSt
     optionId: state?.optionId ?? null,
     expiresAt: state?.expiresAt ?? new Date((Number.isNaN(asked) ? Date.now() : asked) + ASK_TIMEOUT_MS).toISOString(),
   };
+}
+
+/**
+ * The game a tool call started, when it is Salon's `start_game` and the
+ * result came back. The runtime names an MCP tool `mcp__<server>__<tool>`;
+ * the result is the JSON server/mcp.ts answered, with the game inside.
+ */
+export function gameOf(block: Extract<ShownBlock, { kind: "tool_use" }>): GameDto | null {
+  if (!block.name || !/^mcp__salon__start_game$/.test(block.name)) return null;
+  if (!block.result || block.result.error) return null;
+  try {
+    const v = JSON.parse(block.result.body) as { game?: GameDto };
+    return v && typeof v === "object" && v.game && typeof v.game.id === "string" ? v.game : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The assistant's text of a turn — previews. */

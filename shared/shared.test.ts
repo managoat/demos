@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { initials, shortName, splitAuthor, withAuthor } from "./author";
+import { newTicTacToe, play, toMove, winnerEmail, type TicTacToe } from "./games";
 import { groupByProvider, modelLabel, modelProblem, runtimeFor } from "./models";
 import { canonical, DEFAULT_SETTINGS, derivedKey, fnv1a64, parseSettings } from "./settings";
 import { SKILLS, skillEntry, skillNames } from "./skills";
@@ -99,5 +100,43 @@ describe("derivedKey", () => {
   test("fnv1a64 matches the reference vectors", () => {
     expect(fnv1a64("")).toBe("cbf29ce484222325");
     expect(fnv1a64("a")).toBe("af63dc4c8601ec8c");
+  });
+});
+
+describe("tic-tac-toe", () => {
+  const game = { players: ["x@example.com", "o@example.com"], state: newTicTacToe() };
+  test("X moves first, marks alternate, and the rules refuse the rest", () => {
+    expect(toMove(game)).toBe("x@example.com");
+    expect(play(game, "o@example.com", 0)).toBe("It is not your move.");
+    expect(play(game, "who@example.com", 0)).toBe("You are not playing this game.");
+    expect(play(game, "x@example.com", 9)).toBe("Pick a square on the board.");
+    expect(play(game, "x@example.com", 1.5)).toBe("Pick a square on the board.");
+    const after = play(game, "x@example.com", 4);
+    expect(after).toMatchObject({ next: "O", winner: null });
+    expect(play({ ...game, state: after as TicTacToe }, "o@example.com", 4)).toBe("That square is taken.");
+  });
+  test("a line wins, a full board draws, and a finished game takes no move", () => {
+    let s = newTicTacToe();
+    const step = (email: string, cell: number) => {
+      const r = play({ players: game.players, state: s }, email, cell);
+      if (typeof r === "string") throw new Error(r);
+      s = r;
+    };
+    step("x@example.com", 0);
+    step("o@example.com", 3);
+    step("x@example.com", 1);
+    step("o@example.com", 4);
+    step("x@example.com", 2);
+    expect(s).toMatchObject({ winner: "X", line: [0, 1, 2] });
+    expect(winnerEmail({ players: game.players, state: s })).toBe("x@example.com");
+    expect(toMove({ players: game.players, state: s })).toBeNull();
+    expect(play({ players: game.players, state: s }, "o@example.com", 5)).toBe("That game is over.");
+
+    s = newTicTacToe();
+    for (const [who, cell] of [
+      ["x", 0], ["o", 1], ["x", 2], ["o", 4], ["x", 3], ["o", 5], ["x", 7], ["o", 6], ["x", 8],
+    ] as const) step(`${who}@example.com`, cell);
+    expect(s.winner).toBe("draw");
+    expect(winnerEmail({ players: game.players, state: s })).toBeNull();
   });
 });

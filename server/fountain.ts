@@ -141,6 +141,10 @@ export class FountainClient {
     return (await this.post<{ data: AgentSummary }>("/api/agents", body)).data;
   }
 
+  async updateAgent(id: string, body: Record<string, unknown>): Promise<AgentSummary> {
+    return (await this.json<{ data: AgentSummary }>(`/api/agents/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).data;
+  }
+
   /**
    * The account's connections and the providers behind them. Both are a 404
    * `connections_not_enabled` for an account the egress broker is not on

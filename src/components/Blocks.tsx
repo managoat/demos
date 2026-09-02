@@ -1,12 +1,24 @@
 import { useEffect, useState } from "react";
+import type { GameDto } from "../../shared/games";
 import { renderMarkdown } from "../lib/markdown";
-import { timeLeft, type ShownBlock } from "../lib/blocks";
+import { gameOf, timeLeft, type ShownBlock } from "../lib/blocks";
 import { describeError, errorCode } from "../lib/errors";
+import { GameCard, type GameHandlers } from "./Game";
 
 export type AnswerRequest = (requestId: string, optionId: string) => Promise<void>;
 
+/** The chat's games, live, for the block that started one to draw its board. */
+export interface Games extends GameHandlers {
+  byId: Map<string, GameDto>;
+}
+
 /** One block of the agent's reply. */
-export function BlockView({ block, onAnswer }: { block: ShownBlock; onAnswer?: AnswerRequest }) {
+export function BlockView({ block, onAnswer, games }: { block: ShownBlock; onAnswer?: AnswerRequest; games?: Games }) {
+  // A tool call that put a game on the board is the board — the live one when the stream has it, else as started.
+  if (block.kind === "tool_use" && games) {
+    const started = gameOf(block as Extract<ShownBlock, { kind: "tool_use" }>);
+    if (started) return <GameCard game={games.byId.get(started.id) ?? started} me={games.me} onMove={games.onMove} />;
+  }
   switch (block.kind) {
     case "text":
       return <div className="block text md">{renderMarkdown(block.body ?? "")}</div>;

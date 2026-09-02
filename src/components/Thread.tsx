@@ -4,10 +4,11 @@
  * on the host's key; every person in the chat reads the same feed.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { gameLabel, type GameDto } from "../../shared/games";
 import { modelLabel } from "../../shared/models";
 import type { ChatDto, SendDto } from "../lib/api";
-import { turnImageUrl } from "../lib/api";
-import { arrange } from "../lib/blocks";
+import { api, gamesStreamUrl, turnImageUrl } from "../lib/api";
+import { arrange, gameOf } from "../lib/blocks";
 import { describeError } from "../lib/errors";
 import { formatTime } from "../lib/format";
 import { useAttachments } from "../lib/images";
@@ -15,8 +16,10 @@ import { authored, fold } from "../lib/turns";
 import { useSession, makeChatClient } from "../store";
 import type { Conversation, LogEvent, Turn } from "../types";
 import { Avatar } from "./Avatar";
-import { BlockView } from "./Blocks";
+import { BlockView, type Games } from "./Blocks";
 import { Composer, type ComposerHandle } from "./Composer";
+import { GameCard } from "./Game";
+import { MenuBack, MenuHeading, MenuItem, Popover } from "./Menu";
 import { shortName, splitAuthor } from "../../shared/author";
 
 /** The streams shown: the transcript and its stages. The runtime's raw stdout is not something a chat needs to see. */
@@ -136,14 +139,84 @@ export function Thread({ chat, sends, onSent }: { chat: ChatDto; sends: SendDto[
       .catch(() => undefined);
   }, [record?.status, record?.turn_count, record?.sandbox?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Games: the chat's own records, read once and then kept live on the chat's game stream.
+  // A record only ever moves forward, so an older one arriving late is ignored.
+  const [games, setGames] = useState<Map<string, GameDto>>(() => new Map());
+  const takeGame = useCallback((g: GameDto) => {
+    setGames((prev) => {
+      const have = prev.get(g.id);
+      if (have && have.seq >= g.seq) return prev;
+      const next = new Map(prev);
+      next.set(g.id, g);
+      return next;
+    });
+  }, []);
+  useEffect(() => {
+    let stopped = false;
+    let source: EventSource | null = null;
+    let retry: number | null = null;
+    const load = () =>
+      api
+        .games(chat.id)
+        .then((list) => {
+          if (!stopped) for (const g of list) takeGame(g);
+        })
+        .catch(() => undefined);
+    const open = () => {
+      if (stopped) return;
+      source = new EventSource(gamesStreamUrl(chat.id));
+      source.addEventListener("game", (ev) => {
+        try {
+          takeGame(JSON.parse((ev as MessageEvent).data) as GameDto);
+        } catch {
+          // not ours
+        }
+      });
+      source.onopen = () => void load(); // what changed while the stream was down
+      source.onerror = () => {
+        source?.close();
+        source = null;
+        if (!stopped) retry = window.setTimeout(open, 3000);
+      };
+    };
+    void load();
+    open();
+    return () => {
+      stopped = true;
+      source?.close();
+      if (retry !== null) window.clearTimeout(retry);
+    };
+  }, [chat.id, takeGame]);
+
+  const onMove = useCallback(
+    async (gameId: string, cell: number) => {
+      try {
+        takeGame(await api.move(chat.id, gameId, cell));
+      } catch (err) {
+        toast(describeError(err), "error");
+      }
+    },
+    [chat.id, takeGame, toast],
+  );
+  const gameHandlers = useMemo<Games>(() => ({ byId: games, me: me.email, onMove }), [games, me.email, onMove]);
+
   const folded = useMemo(() => fold(events, turns), [events, turns]);
   const authors = useMemo(() => authored(turns, sends, chat.ownerEmail), [turns, sends, chat.ownerEmail]);
+
+  // A game the transcript shows at the tool call that started it is not shown again;
+  // one started from the "+" has no such place and goes after the last turn.
+  const arranged = useMemo(() => folded.turns.map(({ turn, events: evs }) => ({ turn, blocks: arrange(evs, VISIBLE) })), [folded]);
+  const looseGames = useMemo(() => {
+    const placed = new Set<string>();
+    for (const { blocks } of arranged) for (const b of blocks) if (b.kind === "tool_use") placed.add(gameOf(b as Parameters<typeof gameOf>[0])?.id ?? "");
+    return [...games.values()].filter((g) => !placed.has(g.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }, [arranged, games]);
 
   useEffect(() => {
     const el = scroller.current;
     if (!el || !stick.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [events, turns, loading]);
+  }, [events, turns, loading, games]);
 
   const onScroll = useCallback(() => {
     const el = scroller.current;
@@ -197,9 +270,8 @@ export function Thread({ chat, sends, onSent }: { chat: ChatDto; sends: SendDto[
         {!loading && folded.setup.length > 0 && folded.turns.length === 0 && (
           <div className={`setup ${setupFailed ? "error" : ""}`}>{setupFailed ? "Something went wrong getting things ready. Try sending again in a moment." : "Getting things ready…"}</div>
         )}
-        {folded.turns.map(({ turn, events: evs }) => {
+        {arranged.map(({ turn, blocks }) => {
           const a = authors.get(turn.id) ?? { email: chat.ownerEmail, text: turn.prompt };
-          const blocks = arrange(evs, VISIBLE);
           const turnRunning = turn.status === "running" || turn.status === "pending";
           return (
             <div className="turn" key={turn.id} data-turn={turn.id}>
@@ -236,7 +308,7 @@ export function Thread({ chat, sends, onSent }: { chat: ChatDto; sends: SendDto[
                   </div>
                   <div className="reply">
                     {blocks.map((b, i) => (
-                      <BlockView key={`${turn.id}-${i}`} block={b} onAnswer={answer} />
+                      <BlockView key={`${turn.id}-${i}`} block={b} onAnswer={answer} games={gameHandlers} />
                     ))}
                     {turnRunning && blocks.length === 0 && <span className="thinking-dots" aria-label="working" />}
                   </div>
@@ -246,6 +318,13 @@ export function Thread({ chat, sends, onSent }: { chat: ChatDto; sends: SendDto[
           );
         })}
         {waiting && folded.turns.length === 0 && !loading && folded.setup.length === 0 && <div className="muted small center">Working…</div>}
+        {looseGames.length > 0 && (
+          <div className="loose-games">
+            {looseGames.map((g) => (
+              <GameCard key={g.id} game={g} me={me.email} onMove={onMove} />
+            ))}
+          </div>
+        )}
       </div>
       <div className="thread-foot">
         <Composer
@@ -259,9 +338,20 @@ export function Thread({ chat, sends, onSent }: { chat: ChatDto; sends: SendDto[
           attachments={attachments}
           left={
             <>
-              <button type="button" className="icon plus" onClick={() => composer.current?.pickFiles()} aria-label="Add photos" title="Add photos" disabled={retired}>
-                +
-              </button>
+              <PlusMenu
+                disabled={retired}
+                participants={[chat.ownerEmail, ...chat.members.map((m) => m.email)]}
+                me={me.email}
+                onAttach={() => composer.current?.pickFiles()}
+                onGame={async (opponent) => {
+                  try {
+                    takeGame(await api.startGame(chat.id, "tictactoe", [me.email, opponent]));
+                    stick.current = true;
+                  } catch (err) {
+                    toast(describeError(err), "error");
+                  }
+                }}
+              />
               {running && (
                 <button type="button" className="small ghost" onClick={() => fountain.resume(convId).interrupt().then(() => toast("Interrupted")).catch((err) => toast(describeError(err), "error"))}>
                   Stop
@@ -272,6 +362,64 @@ export function Thread({ chat, sends, onSent }: { chat: ChatDto; sends: SendDto[
         />
       </div>
     </>
+  );
+}
+
+/**
+ * The "+" at the foot of a chat: photos, and a game against someone here.
+ * Starting one this way costs nobody a turn; saying "let's play" costs the
+ * host one and is the same board.
+ */
+function PlusMenu({ disabled, participants, me, onAttach, onGame }: { disabled: boolean; participants: string[]; me: string; onAttach: () => void; onGame: (opponent: string) => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState<"root" | "games">("root");
+  const close = useCallback(() => {
+    setOpen(false);
+    setView("root");
+  }, []);
+  const others = participants.filter((p) => p !== me);
+  return (
+    <div className="pill-wrap">
+      <button type="button" className={`icon plus${open ? " on" : ""}`} onClick={() => (open ? close() : setOpen(true))} aria-label="Add" aria-haspopup="menu" aria-expanded={open} disabled={disabled}>
+        +
+      </button>
+      <Popover open={open} onClose={close} className="add-menu">
+        {view === "root" && (
+          <>
+            <MenuItem
+              icon="📎"
+              label="Add photos"
+              detail="Or paste or drop them in"
+              onClick={() => {
+                close();
+                onAttach();
+              }}
+            />
+            <div className="menu-sep" />
+            <MenuItem icon="✕" label="Games" detail={others.length ? `${gameLabel("tictactoe")} with someone here` : "Invite someone first"} arrow onClick={() => setView("games")} />
+          </>
+        )}
+        {view === "games" && (
+          <>
+            <MenuBack onClick={() => setView("root")} />
+            <MenuHeading>{gameLabel("tictactoe")} — you play X against…</MenuHeading>
+            {others.length === 0 && <MenuHeading>Nobody else is in this chat yet. Invite someone, or just say "let's play" once they are here.</MenuHeading>}
+            {others.map((email) => (
+              <MenuItem
+                key={email}
+                icon={<Avatar email={email} size={18} />}
+                label={shortName(email)}
+                detail={email}
+                onClick={() => {
+                  close();
+                  void onGame(email);
+                }}
+              />
+            ))}
+          </>
+        )}
+      </Popover>
+    </div>
   );
 }
 
