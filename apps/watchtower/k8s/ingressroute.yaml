@@ -1,0 +1,38 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: watchtower
+  namespace: watchtower
+  labels:
+    app: watchtower
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`watchtower.demo.managoat.com`)"
+      kind: Rule
+      services:
+        - name: watchtower
+          port: 80
+  tls:
+    secretName: watchtower-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: watchtower-http
+  namespace: watchtower
+  labels:
+    app: watchtower
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: "Host(`watchtower.demo.managoat.com`)"
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: watchtower
+          port: 80
