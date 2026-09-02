@@ -21,7 +21,7 @@ spec:
       containers:
         - name: web
           # Pinned to an immutable sha tag by .github/workflows/build.yml.
-          image: ghcr.io/managoat/salon:sha-2855234344a84355c4e7028c5781e7d7792c196a
+          image: ghcr.io/managoat/salon:sha-d0ce3bf13fdaaa15c2d2a2d8d884ef5432973ad6
           ports:
             - containerPort: 8080
           env:
