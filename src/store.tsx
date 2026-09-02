@@ -41,13 +41,19 @@ interface Toast {
   kind: "info" | "error";
 }
 
-export function SessionProvider({ me, onSignOut, children }: { me: Me; onSignOut: () => void; children: ReactNode }) {
+export function SessionProvider({ me, onSignOut, initialError, children }: { me: Me; onSignOut: () => void; initialError?: string | null; children: ReactNode }) {
   const [chats, setChats] = useState<ChatDto[]>([]);
   const [chatsLoaded, setChatsLoaded] = useState(false);
   const [menu, setMenu] = useState<MenuDto | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectDto[]>([]);
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [toasts, setToasts] = useState<Toast[]>(() => (initialError ? [{ id: Date.now(), text: initialError, kind: "error" }] : []));
+
+  useEffect(() => {
+    if (!initialError) return;
+    const timer = window.setTimeout(() => setToasts([]), 6000);
+    return () => window.clearTimeout(timer);
+  }, []); // the callback error belongs to this one boot
 
   const toast = useCallback((text: string, kind: Toast["kind"] = "info") => {
     const id = Date.now() + Math.random();
