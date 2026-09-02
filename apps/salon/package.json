@@ -1,0 +1,29 @@
+{
+  "name": "salon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Multiplayer chat on the Fountain API: sign in with Fountain, start a chat from a few settings, invite people in. The host pays.",
+  "scripts": {
+    "dev": "vite",
+    "server": "STATIC_DIR= DATA_DIR=./data bun --watch server/index.ts",
+    "start": "bun server/index.ts",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agentshit/fountain-sdk": "1.15.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.5.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.3.0"
+  }
+}

@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: salon
+  namespace: salon
+  labels:
+    app: salon
+spec:
+  # One replica: the state is a SQLite file on a ReadWriteOnce volume.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: salon
+  template:
+    metadata:
+      labels:
+        app: salon
+    spec:
+      containers:
+        - name: web
+          # Pinned to an immutable sha tag by .github/workflows/build.yml.
+          image: ghcr.io/managoat/salon:sha-1faeed7cc80a2f6f0d252e5111255fd361d84dee
+          ports:
+            - containerPort: 8080
+          env:
+            - name: FOUNTAIN_URL
+              value: https://managoat.com
+            - name: DATA_DIR
+              value: /data
+            - name: STATIC_DIR
+              value: /app/dist
+            # Where a chat's computer reaches this server: the model starts games over /mcp here.
+            - name: PUBLIC_URL
+              value: https://salon.demo.managoat.com
+          envFrom:
+            # SALON_SECRET, if provided: encrypts the stored Fountain keys.
+            # The same secret also carries GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY,
+            # GITHUB_APP_SLUG and the GITHUB_OAUTH_CLIENT_* pair. App installation
+            # tokens are minted at runtime and are never Kubernetes secrets.
+            # Without it the server generates one into /data/secret — it works,
+            # but the secret then lives beside the data it protects.
+            - secretRef:
+                name: salon-secrets
+                optional: true
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits: { memory: 256Mi }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: salon-data
