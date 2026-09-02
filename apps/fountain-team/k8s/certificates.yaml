@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: fountain-team-tls
+  namespace: fountain-team
+spec:
+  secretName: fountain-team-tls
+  issuerRef:
+    name: letsencrypt-production
+    kind: ClusterIssuer
+  dnsNames:
+    - fountain-team.demo.managoat.com

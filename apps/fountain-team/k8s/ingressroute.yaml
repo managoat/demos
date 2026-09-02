@@ -1,0 +1,38 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: fountain-team
+  namespace: fountain-team
+  labels:
+    app: fountain-team
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`fountain-team.demo.managoat.com`)"
+      kind: Rule
+      services:
+        - name: fountain-team
+          port: 80
+  tls:
+    secretName: fountain-team-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: fountain-team-http
+  namespace: fountain-team
+  labels:
+    app: fountain-team
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: "Host(`fountain-team.demo.managoat.com`)"
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: fountain-team
+          port: 80
