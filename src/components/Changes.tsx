@@ -2,18 +2,54 @@
  * The Changes panel: what the chat's computer has done to the repository,
  * as the latest snapshot the server holds (shared/changes.ts) — the branch
  * and where it stands, the pull request when there is one, the files, and
- * each file's diff. Every browser in the chat draws the same record.
+ * each file's diff — with the room's review comments on its lines
+ * (shared/comments.ts). Every browser in the chat draws the same records.
+ *
+ * A comment is not a turn. "Send to the model" is: the open comments go as
+ * one prompt from whoever presses it, and each is marked sent.
  */
 import { useMemo, useState } from "react";
+import { shortName } from "../../shared/author";
 import { changesLine, parseDiff, shortSha, type ChangesDto, type FileDiff, type FileStatus } from "../../shared/changes";
+import { pending, type CommentDto, type Side } from "../../shared/comments";
+import { api } from "../lib/api";
+import { describeError } from "../lib/errors";
 import { formatTime } from "../lib/format";
+import { useSession } from "../store";
+import { Avatar } from "./Avatar";
 
 /** A file with more lines than this starts folded. */
 const FOLD_OVER = 400;
 
-export function ChangesPanel({ changes, onClose }: { changes: ChangesDto | null; onClose: () => void }) {
+export interface Review {
+  chatId: string;
+  comments: Map<string, CommentDto>;
+  takeComment: (c: CommentDto & { deleted?: boolean }) => void;
+  /** True while a turn runs: comments still land, but a send would be refused. */
+  busy: boolean;
+}
+
+export function ChangesPanel({ changes, review, onClose }: { changes: ChangesDto | null; review: Review; onClose: () => void }) {
+  const { me, toast } = useSession();
   const files = useMemo(() => (changes ? parseDiff(changes.diff) : []), [changes]);
   const [current, setCurrent] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const all = useMemo(() => [...review.comments.values()], [review.comments]);
+  const open = pending(all);
+
+  const send = async () => {
+    if (sending) return;
+    setSending(true);
+    try {
+      const out = await api.sendComments(review.chatId);
+      for (const c of out.comments) review.takeComment(c);
+      toast(`${out.sent} comment${out.sent === 1 ? "" : "s"} sent to the model.`);
+    } catch (err) {
+      toast(describeError(err), "error");
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
     <aside className="changes-panel" aria-label="Changes">
@@ -22,15 +58,18 @@ export function ChangesPanel({ changes, onClose }: { changes: ChangesDto | null;
           <span className="display">Changes</span>
           {changes && <span className="muted small">{changesLine(changes.files)}</span>}
         </div>
-        <button type="button" className="icon" onClick={onClose} aria-label="Close changes">
-          ×
-        </button>
+        <div className="row">
+          {open.length > 0 && (
+            <button type="button" className="small send-comments" onClick={() => void send()} disabled={sending} title={review.busy ? "The model is still working; it will take these when the turn ends." : undefined}>
+              {sending ? "Sending…" : `Send ${open.length} to the model`}
+            </button>
+          )}
+          <button type="button" className="icon" onClick={onClose} aria-label="Close changes">
+            ×
+          </button>
+        </div>
       </div>
-      {!changes && (
-        <p className="muted small pad">
-          Nothing yet. Once the computer has a repository and touches it, what changed shows here for everyone in the chat.
-        </p>
-      )}
+      {!changes && <p className="muted small pad">Nothing yet. Once the computer has a repository and touches it, what changed shows here for everyone in the chat.</p>}
       {changes && (
         <>
           <div className="changes-where small">
@@ -50,22 +89,36 @@ export function ChangesPanel({ changes, onClose }: { changes: ChangesDto | null;
           {files.length === 0 && <p className="muted small pad">The tree is clean: nothing differs from {changes.base}.</p>}
           {files.length > 0 && (
             <nav className="changes-files">
-              {files.map((f) => (
-                <a key={f.path} href={`#file-${encodeURIComponent(f.path)}`} className={`changes-file${current === f.path ? " on" : ""}`} onClick={() => setCurrent(f.path)}>
-                  <span className={`file-status ${f.status}`}>{statusMark(f.status)}</span>
-                  <span className="file-path">{f.path}</span>
-                  <span className="file-counts">
-                    {f.additions > 0 && <span className="add">+{f.additions}</span>}
-                    {f.deletions > 0 && <span className="del">−{f.deletions}</span>}
-                  </span>
-                </a>
-              ))}
+              {files.map((f) => {
+                const n = all.filter((c) => c.path === f.path && !c.resolvedAt).length;
+                return (
+                  <a key={f.path} href={`#file-${encodeURIComponent(f.path)}`} className={`changes-file${current === f.path ? " on" : ""}`} onClick={() => setCurrent(f.path)}>
+                    <span className={`file-status ${f.status}`}>{statusMark(f.status)}</span>
+                    <span className="file-path">{f.path}</span>
+                    {n > 0 && <span className="file-comments">💬 {n}</span>}
+                    <span className="file-counts">
+                      {f.additions > 0 && <span className="add">+{f.additions}</span>}
+                      {f.deletions > 0 && <span className="del">−{f.deletions}</span>}
+                    </span>
+                  </a>
+                );
+              })}
             </nav>
           )}
           <div className="changes-body">
             {files.map((f) => (
-              <FileView key={f.path} file={f} />
+              <FileView key={f.path} file={f} comments={all.filter((c) => c.path === f.path)} review={review} me={me.email} />
             ))}
+            {orphans(all, files).length > 0 && (
+              <section className="file">
+                <header className="file-head">
+                  <span className="file-path">Comments on lines no longer in the diff</span>
+                </header>
+                {orphans(all, files).map((c) => (
+                  <CommentView key={c.id} comment={c} review={review} me={me.email} where />
+                ))}
+              </section>
+            )}
           </div>
         </>
       )}
@@ -73,9 +126,17 @@ export function ChangesPanel({ changes, onClose }: { changes: ChangesDto | null;
   );
 }
 
-function FileView({ file }: { file: FileDiff }) {
+/** Comments whose file is not in the current diff: still shown, so nothing said is lost. */
+function orphans(all: CommentDto[], files: FileDiff[]): CommentDto[] {
+  const paths = new Set(files.map((f) => f.path));
+  return all.filter((c) => !paths.has(c.path));
+}
+
+function FileView({ file, comments, review, me }: { file: FileDiff; comments: CommentDto[]; review: Review; me: string }) {
   const lines = file.hunks.reduce((n, h) => n + h.lines.length, 0);
-  const [open, setOpen] = useState(lines <= FOLD_OVER);
+  const [open, setOpen] = useState(lines <= FOLD_OVER || comments.length > 0);
+  const [composing, setComposing] = useState<{ side: Side; line: number } | null>(null);
+  const openCount = comments.filter((c) => !c.resolvedAt).length;
   return (
     <section className="file" id={`file-${encodeURIComponent(file.path)}`}>
       <header className="file-head" onClick={() => setOpen((o) => !o)}>
@@ -88,6 +149,7 @@ function FileView({ file }: { file: FileDiff }) {
           )}
           {file.path}
         </span>
+        {openCount > 0 && <span className="file-comments">💬 {openCount}</span>}
         <span className="file-counts">
           {file.additions > 0 && <span className="add">+{file.additions}</span>}
           {file.deletions > 0 && <span className="del">−{file.deletions}</span>}
@@ -100,7 +162,7 @@ function FileView({ file }: { file: FileDiff }) {
         <table className="diff">
           <tbody>
             {file.hunks.map((h, hi) => (
-              <HunkRows key={hi} hunk={h} />
+              <HunkRows key={hi} hunk={h} path={file.path} comments={comments} review={review} me={me} composing={composing} onCompose={setComposing} />
             ))}
           </tbody>
         </table>
@@ -109,7 +171,23 @@ function FileView({ file }: { file: FileDiff }) {
   );
 }
 
-function HunkRows({ hunk }: { hunk: FileDiff["hunks"][number] }) {
+function HunkRows({
+  hunk,
+  path,
+  comments,
+  review,
+  me,
+  composing,
+  onCompose,
+}: {
+  hunk: FileDiff["hunks"][number];
+  path: string;
+  comments: CommentDto[];
+  review: Review;
+  me: string;
+  composing: { side: Side; line: number } | null;
+  onCompose: (c: { side: Side; line: number } | null) => void;
+}) {
   return (
     <>
       <tr className="hunk">
@@ -119,17 +197,159 @@ function HunkRows({ hunk }: { hunk: FileDiff["hunks"][number] }) {
           @@ -{hunk.oldStart},{hunk.oldLines} +{hunk.newStart},{hunk.newLines} @@ {hunk.heading}
         </td>
       </tr>
-      {hunk.lines.map((l, i) => (
-        <tr key={i} className={l.type}>
-          <td className="no">{l.oldNo ?? ""}</td>
-          <td className="no">{l.newNo ?? ""}</td>
+      {hunk.lines.map((l, i) => {
+        // A line lives on the new side unless it was removed; comments anchor there.
+        const side: Side = l.type === "del" ? "old" : "new";
+        const no = side === "new" ? l.newNo! : l.oldNo!;
+        const here = comments.filter((c) => c.side === side && c.line === no);
+        const isComposing = composing?.side === side && composing.line === no;
+        return (
+          <LineRows key={i} line={l} here={here} composing={isComposing} onCompose={() => onCompose(isComposing ? null : { side, line: no })} onDone={() => onCompose(null)} path={path} side={side} no={no} review={review} me={me} />
+        );
+      })}
+    </>
+  );
+}
+
+function LineRows({
+  line: l,
+  here,
+  composing,
+  onCompose,
+  onDone,
+  path,
+  side,
+  no,
+  review,
+  me,
+}: {
+  line: FileDiff["hunks"][number]["lines"][number];
+  here: CommentDto[];
+  composing: boolean;
+  onCompose: () => void;
+  onDone: () => void;
+  path: string;
+  side: Side;
+  no: number;
+  review: Review;
+  me: string;
+}) {
+  return (
+    <>
+      <tr className={`${l.type}${here.length ? " commented" : ""}`}>
+        <td className="no">{l.oldNo ?? ""}</td>
+        <td className="no">{l.newNo ?? ""}</td>
+        <td className="code">
+          <button type="button" className="comment-add" onClick={onCompose} aria-label={`Comment on line ${no}`} title="Comment on this line">
+            +
+          </button>
+          <span className="sign">{l.type === "add" ? "+" : l.type === "del" ? "−" : " "}</span>
+          {l.text}
+        </td>
+      </tr>
+      {(here.length > 0 || composing) && (
+        <tr className="thread">
+          <td className="no" />
+          <td className="no" />
           <td className="code">
-            <span className="sign">{l.type === "add" ? "+" : l.type === "del" ? "−" : " "}</span>
-            {l.text}
+            {here.map((c) => (
+              <CommentView key={c.id} comment={c} review={review} me={me} />
+            ))}
+            {composing && <Compose path={path} side={side} line={no} review={review} onDone={onDone} />}
           </td>
         </tr>
-      ))}
+      )}
     </>
+  );
+}
+
+function CommentView({ comment: c, review, me, where }: { comment: CommentDto; review: Review; me: string; where?: boolean }) {
+  const { toast } = useSession();
+  const act = async (f: () => Promise<unknown>) => {
+    try {
+      await f();
+    } catch (err) {
+      toast(describeError(err), "error");
+    }
+  };
+  return (
+    <div className={`comment${c.resolvedAt ? " resolved" : ""}${c.sentAt ? " sent" : ""}`}>
+      <Avatar email={c.author} size={20} />
+      <div className="comment-body">
+        <div className="comment-meta">
+          <span className="name">{c.author === me ? "You" : shortName(c.author)}</span>
+          <span className="muted tiny">{formatTime(c.createdAt)}</span>
+          {where && (
+            <span className="muted tiny mono">
+              {c.path}:{c.line}
+            </span>
+          )}
+          {c.sentAt && <span className="tag">sent</span>}
+          {c.resolvedAt && <span className="tag">resolved</span>}
+        </div>
+        {where && c.quote && <div className="comment-quote mono">{c.quote}</div>}
+        <div className="comment-text">{c.body}</div>
+        <div className="comment-actions">
+          <button type="button" className="linklike tiny" onClick={() => void act(async () => review.takeComment(await api.resolveComment(review.chatId, c.id, !c.resolvedAt)))}>
+            {c.resolvedAt ? "Reopen" : "Resolve"}
+          </button>
+          {c.author === me && !c.sentAt && (
+            <button type="button" className="linklike tiny" onClick={() => void act(async () => (await api.deleteComment(review.chatId, c.id), review.takeComment({ ...c, deleted: true })))}>
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Compose({ path, side, line, review, onDone }: { path: string; side: Side; line: number; review: Review; onDone: () => void }) {
+  const { toast } = useSession();
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    const body = text.trim();
+    if (!body || busy) return;
+    setBusy(true);
+    try {
+      review.takeComment(await api.comment(review.chatId, { path, side, line, body }));
+      setText("");
+      onDone();
+    } catch (err) {
+      toast(describeError(err), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form
+      className="compose-comment"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void submit();
+      }}
+    >
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Say what should change here"
+        rows={2}
+        autoFocus
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submit();
+          if (e.key === "Escape") onDone();
+        }}
+      />
+      <div className="row">
+        <button type="submit" className="small" disabled={!text.trim() || busy}>
+          Comment
+        </button>
+        <button type="button" className="small ghost" onClick={onDone}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 

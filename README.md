@@ -63,6 +63,11 @@ nothing about agents, environments or runtimes anywhere.
   everyone in the chat, live: a hook inside the computer posts a snapshot
   when a session starts, after each edit and when a turn ends
   (`server/sandbox.ts`, `server/changes.ts`, `src/components/Changes.tsx`).
+- **Review together.** Anyone in the chat comments on a line of the
+  changes; threads resolve; and *Send to the model* turns the open
+  comments into one prompt, grouped by file with each person named, sent
+  as whoever pressed it (`server/comments.ts`, `shared/comments.ts`). A
+  comment costs nobody a turn; the send is one.
 - **Blocks, not dialects.** The transcript renders Fountain's server-parsed
   blocks (`?blocks=true`): text as markdown (an allow-list renderer to React
   nodes, never innerHTML), tool calls as collapsible rows, permission

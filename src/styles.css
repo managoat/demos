@@ -315,3 +315,22 @@ pre.err { color: var(--bad); }
 .project-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
 .project-form input { font-size: 13px; padding: 6px 8px; }
 .project-form button { align-self: flex-start; }
+
+/* review comments on the diff */
+.send-comments { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.file-comments { font-size: 11px; color: var(--muted); flex: none; }
+.diff td.code { position: relative; }
+.comment-add { position: absolute; left: -2px; top: 1px; width: 16px; height: 16px; padding: 0; border-radius: 4px; border: 0; background: var(--accent); color: var(--accent-ink); font-size: 12px; line-height: 1; display: none; place-items: center; }
+.diff tr:hover .comment-add { display: grid; }
+.diff tr.commented td.no:last-of-type { border-right-color: var(--accent); }
+.diff tr.thread td.code { background: var(--card); padding: 8px 12px; font-family: var(--sans); font-size: 13px; white-space: normal; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.comment { display: flex; gap: 8px; align-items: flex-start; padding: 4px 0; }
+.comment.resolved { opacity: 0.6; }
+.comment-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.comment-meta { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.comment-meta .name { font-weight: 600; }
+.comment-quote { font-size: 12px; color: var(--muted); background: var(--panel); border-radius: 6px; padding: 2px 6px; white-space: pre-wrap; }
+.comment-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.comment-actions { display: flex; gap: 10px; }
+.compose-comment { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
+.compose-comment textarea { width: 100%; resize: vertical; font-size: 13px; padding: 6px 8px; }

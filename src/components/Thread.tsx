@@ -317,7 +317,7 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
         />
       </div>
       </div>
-      {changesOpen && <ChangesPanel changes={changes} onClose={onCloseChanges} />}
+      {changesOpen && <ChangesPanel changes={changes} review={{ chatId: chat.id, comments: live.comments, takeComment: live.takeComment, busy: !!running }} onClose={onCloseChanges} />}
     </div>
   );
 }
