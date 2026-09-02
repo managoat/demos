@@ -18,7 +18,7 @@ spec:
       containers:
         - name: web
           # Pinned to an immutable sha tag by .github/workflows/build.yml.
-          image: ghcr.io/managoat/mend:sha-da7f84074de66b103b6790db7eaa596df125b7d9
+          image: ghcr.io/managoat/mend:sha-9dbb332dab6d555fa5e948c956dfa9b126f3000e
           ports:
             - containerPort: 8080
           # Everything the GitHub App needs. Optional on purpose: without the
