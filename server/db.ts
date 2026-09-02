@@ -39,6 +39,8 @@ export interface ChatRow {
   invite_token: string | null;
   /** The project the chat was started in (shared/projects.ts), or null. */
   project_id: string | null;
+  /** Set when the host archived it: the conversation was ended, the chat kept. */
+  archived_at: string | null;
   created_at: string;
 }
 
@@ -110,6 +112,7 @@ export interface ChangesRow {
   truncated: 0 | 1;
   /** JSON: `PullRequest`, or null. */
   pr: string | null;
+  ahead: number | null;
   source: string;
   reason: string;
   at: string;
@@ -166,6 +169,7 @@ CREATE TABLE IF NOT EXISTS chats (
   agent_id TEXT NOT NULL,
   invite_token TEXT UNIQUE,
   project_id TEXT,
+  archived_at TEXT,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS chats_owner ON chats(owner_email);
@@ -247,6 +251,7 @@ CREATE TABLE IF NOT EXISTS changes (
   diff TEXT NOT NULL,
   truncated INTEGER NOT NULL DEFAULT 0,
   pr TEXT,
+  ahead INTEGER,
   source TEXT NOT NULL,
   reason TEXT NOT NULL,
   at TEXT NOT NULL,
@@ -275,6 +280,9 @@ export class Db {
     if (!have.has("skills")) this.sql.exec("ALTER TABLE chats ADD COLUMN skills TEXT NOT NULL DEFAULT '[]'");
     if (!have.has("connectors")) this.sql.exec("ALTER TABLE chats ADD COLUMN connectors TEXT NOT NULL DEFAULT '[]'");
     if (!have.has("project_id")) this.sql.exec("ALTER TABLE chats ADD COLUMN project_id TEXT");
+    if (!have.has("archived_at")) this.sql.exec("ALTER TABLE chats ADD COLUMN archived_at TEXT");
+    const changes = new Set((this.sql.query("PRAGMA table_info(changes)").all() as { name: string }[]).map((c) => c.name));
+    if (!changes.has("ahead")) this.sql.exec("ALTER TABLE changes ADD COLUMN ahead INTEGER");
   }
 
   close(): void {
@@ -351,17 +359,24 @@ export class Db {
   insertChat(c: ChatRow): void {
     this.sql
       .query(
-        `INSERT INTO chats (id, owner_email, conversation_id, title, runtime, model, skills, connectors, preset_id, preset_name, environment_id, vault_id, agent_id, invite_token, project_id, created_at)
-         VALUES ($id, $owner_email, $conversation_id, $title, $runtime, $model, $skills, $connectors, $preset_id, $preset_name, $environment_id, $vault_id, $agent_id, $invite_token, $project_id, $created_at)`,
+        `INSERT INTO chats (id, owner_email, conversation_id, title, runtime, model, skills, connectors, preset_id, preset_name, environment_id, vault_id, agent_id, invite_token, project_id, archived_at, created_at)
+         VALUES ($id, $owner_email, $conversation_id, $title, $runtime, $model, $skills, $connectors, $preset_id, $preset_name, $environment_id, $vault_id, $agent_id, $invite_token, $project_id, $archived_at, $created_at)`,
       )
       .run(c as unknown as Record<string, string | null>);
   }
 
-  updateChat(id: string, patch: Partial<Pick<ChatRow, "title" | "invite_token">>): void {
+  updateChat(id: string, patch: Partial<Pick<ChatRow, "title" | "invite_token" | "archived_at" | "conversation_id">>): void {
     const cur = this.getChat(id);
     if (!cur) return;
     const next = { ...cur, ...patch };
-    this.sql.query("UPDATE chats SET title = $title, invite_token = $invite_token WHERE id = $id").run({ id, title: next.title, invite_token: next.invite_token });
+    this.sql
+      .query("UPDATE chats SET title = $title, invite_token = $invite_token, archived_at = $archived_at, conversation_id = $conversation_id WHERE id = $id")
+      .run({ id, title: next.title, invite_token: next.invite_token, archived_at: next.archived_at, conversation_id: next.conversation_id });
+  }
+
+  /** A restored chat starts a new conversation: its user turns count from one again. */
+  clearSends(chatId: string): void {
+    this.sql.query("DELETE FROM sends WHERE chat_id = $c").run({ c: chatId });
   }
 
   deleteChat(id: string): void {
@@ -546,8 +561,8 @@ export class Db {
     const seq = row.n + 1;
     this.sql
       .query(
-        `INSERT INTO changes (chat_id, seq, branch, head, base, status, files, diff, truncated, pr, source, reason, at)
-         VALUES ($chat_id, $seq, $branch, $head, $base, $status, $files, $diff, $truncated, $pr, $source, $reason, $at)`,
+        `INSERT INTO changes (chat_id, seq, branch, head, base, status, files, diff, truncated, pr, ahead, source, reason, at)
+         VALUES ($chat_id, $seq, $branch, $head, $base, $status, $files, $diff, $truncated, $pr, $ahead, $source, $reason, $at)`,
       )
       .run({ ...c, seq } as unknown as Record<string, string | number | null>);
     return { ...c, seq };
@@ -564,7 +579,7 @@ export class Db {
   /** Every snapshot kept, newest first, without the diffs. */
   changesHistory(chatId: string): ChangesRow[] {
     return this.sql
-      .query("SELECT chat_id, seq, branch, head, base, status, files, '' AS diff, truncated, pr, source, reason, at FROM changes WHERE chat_id = $c ORDER BY seq DESC")
+      .query("SELECT chat_id, seq, branch, head, base, status, files, '' AS diff, truncated, pr, ahead, source, reason, at FROM changes WHERE chat_id = $c ORDER BY seq DESC")
       .all({ c: chatId }) as ChangesRow[];
   }
 

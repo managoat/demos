@@ -56,6 +56,7 @@ const state = {
   environments: [] as { key: string; id: string; body: Record<string, unknown> }[],
   secrets: [] as { key: string; env: string; body: Record<string, unknown> }[],
   deletedEnvironments: [] as string[],
+  environmentPuts: [] as string[],
   agents: new Map<string, FakeAgent[]>(),
   conversations: new Map<string, Record<string, unknown>[]>(),
   prompts: [] as { key: string; id: string; body: unknown }[],
@@ -68,6 +69,7 @@ function reset(): void {
   state.environments = [];
   state.secrets = [];
   state.deletedEnvironments = [];
+  state.environmentPuts = [];
   state.agents.clear();
   state.conversations.clear();
   state.prompts = [];
@@ -124,6 +126,17 @@ beforeAll(() => {
         if (!state.environments.some((e) => e.id === em[1] && e.key === key)) return json({ error: "not_found" }, 404);
         state.secrets.push({ key, env: em[1]!, body });
         return json({ data: { id: `s-${state.secrets.length}`, key: body.key } }, 201);
+      }
+      if (em && !em[2] && req.method === "GET") {
+        const e = state.environments.find((x) => x.id === em[1] && x.key === key);
+        return e ? json({ data: { id: e.id, ...e.body } }) : json({ error: "not_found" }, 404);
+      }
+      if (em && !em[2] && req.method === "PUT") {
+        const e = state.environments.find((x) => x.id === em[1] && x.key === key);
+        if (!e) return json({ error: "not_found" }, 404);
+        e.body = { ...e.body, ...((await req.json()) as Record<string, unknown>) };
+        state.environmentPuts.push(e.id);
+        return json({ data: { id: e.id, ...e.body } });
       }
       if (em && !em[2] && req.method === "DELETE") {
         if (!state.environments.some((e) => e.id === em[1] && e.key === key)) return json({ error: "not_found" }, 404);
@@ -946,5 +959,55 @@ describe("review comments", () => {
     // The host removes one; it goes out as deleted.
     expect((await call("DELETE", `/api/chats/${chat.id}/comments/${c1.id}`, { cookie: host })).status).toBe(200);
     expect(((await (await call("GET", `/api/chats/${chat.id}/comments`, { cookie: host })).json()) as { data: unknown[] }).data).toHaveLength(2);
+  });
+});
+
+describe("archive and restore", () => {
+  const forChat = (conversationId: string) => ({ authorization: "Bearer ftn_sprite", "x-fountain-conversation-id": conversationId });
+
+  test("archive ends the conversation and keeps the chat; restore starts a new one on the branch, and the sends start over", async () => {
+    const { host, guest, chat } = await room();
+    const conv = chat.conversationId as string;
+    await call("POST", "/hooks/changes", { body: { branch: "salon/abcd1234", head: "deadbeefcafe", base: "main", status: "", diff: "", reason: "stop", ahead: 0 }, headers: forChat(conv) });
+    expect((await call("POST", `/api/chats/${chat.id}/archive`, { cookie: guest })).status).toBe(403);
+    const archived = ((await (await call("POST", `/api/chats/${chat.id}/archive`, { cookie: host })).json()) as { data: { chat: Record<string, any> } }).data.chat;
+    expect(archived.archivedAt).toBeTruthy();
+    expect(state.terminated).toEqual([conv]);
+    // Twice is fine; the guest still sees it; its changes are still there.
+    expect((await call("POST", `/api/chats/${chat.id}/archive`, { cookie: host })).status).toBe(200);
+    expect((await call("GET", `/api/chats/${chat.id}`, { cookie: guest })).status).toBe(200);
+    expect(((await (await call("GET", `/api/chats/${chat.id}/changes`, { cookie: guest })).json()) as { data: { branch: string } }).data.branch).toBe("salon/abcd1234");
+
+    const restored = ((await (await call("POST", `/api/chats/${chat.id}/restore`, { cookie: host })).json()) as { data: { chat: Record<string, any>; sends: { email: string }[] } }).data;
+    expect(restored.chat.archivedAt).toBeNull();
+    expect(restored.chat.conversationId).not.toBe(conv);
+    expect(restored.sends.map((s) => s.email)).toEqual(["host@example.com"]);
+    const fresh = state.conversations.get("ftn_host")!.find((c) => c.id === restored.chat.conversationId)!;
+    expect(fresh.channel_id).toBe(`salon:${chat.id}`);
+    expect(String((fresh.request as Record<string, unknown>).prompt)).toContain("check out the branch salon/abcd1234");
+    expect((fresh.request as Record<string, unknown>).agent_id).toBe(chat.agentId);
+    // The new conversation is the chat's now: the hook on the new computer, and the proxy, both find it.
+    expect((await call("POST", "/hooks/changes", { body: { branch: "salon/abcd1234", head: "1234567", base: "main", status: "", diff: "", reason: "session", ahead: 2 }, headers: forChat(restored.chat.conversationId) })).status).toBe(201);
+    expect((await call("GET", `/f/${chat.id}/api/conversations/${restored.chat.conversationId}`, { cookie: guest })).status).toBe(200);
+    expect((await call("GET", `/f/${chat.id}/api/conversations/${conv}`, { cookie: guest })).status).toBe(404);
+    const latest = ((await (await call("GET", `/api/chats/${chat.id}/changes`, { cookie: host })).json()) as { data: { ahead: number; seq: number } }).data;
+    expect([latest.seq, latest.ahead]).toEqual([2, 2]);
+  });
+});
+
+describe("a project's hook stays current", () => {
+  test("a chat start puts the environment back the way Salon writes it today, only when it differs", async () => {
+    withPublicUrl();
+    const host = await signIn("ftn_host");
+    const project = ((await (await call("POST", "/api/projects", { cookie: host, body: { repoUrl: "github.com/acme/widgets" } })).json()) as { data: { id: string } }).data;
+    await startChat(host, { ...SETTINGS, projectId: project.id });
+    expect(state.environmentPuts).toEqual([]);
+    // The environment drifted — an older hook, say.
+    state.environments[0]!.body.setup_script = "# old hook\n";
+    await startChat(host, { ...SETTINGS, projectId: project.id });
+    expect(state.environmentPuts).toEqual(["e-1"]);
+    expect(String(state.environments[0]!.body.setup_script)).toContain("/home/sprite/.salon/changes.sh");
+    await startChat(host, { ...SETTINGS, projectId: project.id });
+    expect(state.environmentPuts).toEqual(["e-1"]);
   });
 });

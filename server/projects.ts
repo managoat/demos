@@ -171,6 +171,29 @@ export async function removeMember(ctx: AppContext, req: Request, id: string, ra
   return json({ data: toDto(ctx, project, role) });
 }
 
+/**
+ * The environment as Salon would write it today, put back if it differs:
+ * the hook lives in the setup script, so a project made before a change to
+ * the hook would keep the old one forever. Called when a chat starts in the
+ * project; one read, and a write only when something moved. A write is
+ * best-effort — the chat starts either way — and a mid-turn refusal
+ * (`409 sandbox_mid_turn`) is simply tried again next time.
+ */
+export async function refreshEnvironment(ctx: AppContext, client: FountainClient, project: ProjectRow): Promise<boolean> {
+  const want = environmentBody(project, project.has_token === 1, ctx.config.publicUrl);
+  try {
+    const have = await client.environment(project.environment_id);
+    if (!have) return false;
+    const same = have.setup_script === want.setup_script && JSON.stringify(have.repositories ?? []) === JSON.stringify(want.repositories);
+    if (same) return false;
+    await client.updateEnvironment(project.environment_id, { repositories: want.repositories, packages: want.packages, setup_script: want.setup_script });
+    return true;
+  } catch (err) {
+    console.warn(`salon: could not refresh the environment of project ${project.id}:`, err instanceof Error ? err.message : err);
+    return false;
+  }
+}
+
 /** A client on the project owner's key: what its chats run on. */
 export async function projectOwnerClient(ctx: AppContext, project: ProjectRow): Promise<{ owner: UserRow; client: FountainClient }> {
   const owner = ctx.db.getUser(project.owner_email);

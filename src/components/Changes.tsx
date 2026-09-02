@@ -10,7 +10,7 @@
  */
 import { useMemo, useState } from "react";
 import { shortName } from "../../shared/author";
-import { changesLine, parseDiff, shortSha, type ChangesDto, type FileDiff, type FileStatus } from "../../shared/changes";
+import { changesLine, checks, parseDiff, shortSha, type ChangesDto, type FileDiff, type FileStatus } from "../../shared/changes";
 import { pending, type CommentDto, type Side } from "../../shared/comments";
 import { api } from "../lib/api";
 import { describeError } from "../lib/errors";
@@ -27,6 +27,8 @@ export interface Review {
   takeComment: (c: CommentDto & { deleted?: boolean }) => void;
   /** True while a turn runs: comments still land, but a send would be refused. */
   busy: boolean;
+  /** Send a prompt as the caller's turn — what the Push and Open a pull request buttons do. Null when the chat cannot take one. */
+  sendPrompt: ((text: string) => Promise<void>) | null;
 }
 
 export function ChangesPanel({ changes, review, onClose }: { changes: ChangesDto | null; review: Review; onClose: () => void }) {
@@ -85,6 +87,7 @@ export function ChangesPanel({ changes, review, onClose }: { changes: ChangesDto
               </a>
             )}
           </div>
+          <Checks changes={changes} openComments={open.length} review={review} />
           {changes.truncated && <div className="changes-note small">The diff was too long to keep whole; what is here is the first part of it.</div>}
           {files.length === 0 && <p className="muted small pad">The tree is clean: nothing differs from {changes.base}.</p>}
           {files.length > 0 && (
@@ -123,6 +126,59 @@ export function ChangesPanel({ changes, review, onClose }: { changes: ChangesDto
         </>
       )}
     </aside>
+  );
+}
+
+/**
+ * What stands between the branch and a merge, and the two asks that move it
+ * — each a prompt, so a turn, and labelled as one. Merge stays a request to
+ * the model too, until Salon can run git itself.
+ */
+function Checks({ changes, openComments, review }: { changes: ChangesDto; openComments: number; review: Review }) {
+  const { toast } = useSession();
+  const [busy, setBusy] = useState<string | null>(null);
+  const list = checks(changes);
+  const ask = async (key: string, text: string) => {
+    if (!review.sendPrompt || busy) return;
+    setBusy(key);
+    try {
+      await review.sendPrompt(text);
+    } catch (err) {
+      toast(describeError(err), "error");
+    } finally {
+      setBusy(null);
+    }
+  };
+  const pushAsk = "Commit anything still uncommitted with a clear message, push the branch to origin, and say in a sentence what went up.";
+  const prAsk = `Push the branch and open a pull request against ${changes.base} with \`gh pr create\`: a short title, a description of what changed and why, and say its address.`;
+  const canAsk = !!review.sendPrompt && !review.busy;
+  return (
+    <div className="checks">
+      {list.map((c) => (
+        <span key={c.key} className={`check${c.ok ? " ok" : ""}`}>
+          <span className="check-mark" aria-hidden="true">
+            {c.ok ? "✓" : "○"}
+          </span>
+          {c.label}
+        </span>
+      ))}
+      <span className={`check${openComments === 0 ? " ok" : ""}`}>
+        <span className="check-mark" aria-hidden="true">
+          {openComments === 0 ? "✓" : "○"}
+        </span>
+        {openComments === 0 ? "No open comments" : `${openComments} open comment${openComments === 1 ? "" : "s"}`}
+      </span>
+      {canAsk && (list.find((c) => c.key === "branch")?.ok === false || list.find((c) => c.key === "tree")?.ok === false) && (
+        <button type="button" className="tiny ghost" disabled={busy !== null} onClick={() => void ask("push", pushAsk)} title="Asks the model to commit and push. It is a turn.">
+          {busy === "push" ? "Asking…" : "Ask to push"}
+        </button>
+      )}
+      {canAsk && !changes.pr && (
+        <button type="button" className="tiny ghost" disabled={busy !== null} onClick={() => void ask("pr", prAsk)} title="Asks the model to open a pull request. It is a turn.">
+          {busy === "pr" ? "Asking…" : "Ask for a pull request"}
+        </button>
+      )}
+    </div>
   );
 }
 

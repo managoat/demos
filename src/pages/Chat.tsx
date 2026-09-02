@@ -64,6 +64,27 @@ export function Chat({ id }: { id: string }) {
     }
   }
 
+  async function archive() {
+    setMore(false);
+    try {
+      setState(await api.archiveChat(chat.id));
+      toast("Archived. The computer is let go; the chat, its changes and its comments stay.");
+      void refreshChats();
+    } catch (err) {
+      toast(describeError(err), "error");
+    }
+  }
+
+  async function restore() {
+    try {
+      setState(await api.restoreChat(chat.id));
+      toast("Starting again on a new computer.");
+      void refreshChats();
+    } catch (err) {
+      toast(describeError(err), "error");
+    }
+  }
+
   async function remove() {
     setMore(false);
     try {
@@ -101,6 +122,7 @@ export function Chat({ id }: { id: string }) {
             {settingsLine(chat.settings, modelLabel, skillNames, chat.project)}
             {owner ? " · You host this chat: you pay for it, and the people you invite chat for free" : ` · Hosted by ${shortName(chat.ownerEmail)}: they pay, you chat for free`}
             {chat.unavailable ? " · the host's key is not answering" : ""}
+            {chat.archivedAt ? " · archived" : ""}
           </div>
         </div>
         <div className="chat-tools">
@@ -123,6 +145,11 @@ export function Chat({ id }: { id: string }) {
               <People chat={chat} onChanged={setState} />
             </Popover>
           </div>
+          {owner && chat.archivedAt && (
+            <button type="button" className="small" onClick={() => void restore()}>
+              Restore
+            </button>
+          )}
           {owner && (
             <div className="pill-wrap">
               <button type="button" className="icon" onClick={() => setMore((m) => !m)} aria-label="More">
@@ -134,6 +161,13 @@ export function Chat({ id }: { id: string }) {
                     <span className="menu-label">Rename</span>
                   </span>
                 </button>
+                {!chat.archivedAt && (
+                  <TwoStep
+                    label="Archive this chat"
+                    detail={live.changes && (live.changes.ahead === null || live.changes.ahead > 0 || live.changes.status.trim()) ? "Lets the computer go. Work not pushed goes with it — check the Changes panel first." : "Lets the computer go; the chat, its changes and comments stay. Restore starts it again on the branch."}
+                    onConfirm={() => void archive()}
+                  />
+                )}
                 <TwoStep label="Retire this chat" onConfirm={() => void remove()} />
               </Popover>
             </div>
@@ -145,7 +179,7 @@ export function Chat({ id }: { id: string }) {
   );
 }
 
-function TwoStep({ label, onConfirm }: { label: string; onConfirm: () => void }) {
+function TwoStep({ label, detail, onConfirm }: { label: string; detail?: string; onConfirm: () => void }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
@@ -156,7 +190,7 @@ function TwoStep({ label, onConfirm }: { label: string; onConfirm: () => void })
     <button type="button" className="menu-item danger" onClick={() => (armed ? onConfirm() : setArmed(true))}>
       <span className="menu-text">
         <span className="menu-label">{armed ? `Sure? ${label}` : label}</span>
-        {!armed && <span className="menu-detail">Ends it for everyone. The transcript stays on your Fountain.</span>}
+        {!armed && <span className="menu-detail">{detail ?? "Ends it for everyone. The transcript stays on your Fountain."}</span>}
       </span>
     </button>
   );

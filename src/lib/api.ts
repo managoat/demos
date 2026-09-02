@@ -39,6 +39,7 @@ export interface ChatDto {
   agentId: string;
   settings: { model: string; skills: string[]; connectors: { id: string; label: string }[] };
   project: { id: string; name: string; repoUrl: string; base: string } | null;
+  archivedAt: string | null;
   createdAt: string;
   inviteToken?: string | null;
   status: string | null;
@@ -100,6 +101,8 @@ export const api = {
   deleteChat: (id: string) => call<{ ok: true }>("DELETE", `/api/chats/${id}`),
   addMember: (id: string, email: string) => data(call<{ data: { chat: ChatDto; sends: SendDto[] } }>("POST", `/api/chats/${id}/members`, { email })),
   removeMember: (id: string, email: string) => call<{ ok?: true; left?: boolean; data?: { chat: ChatDto } }>("DELETE", `/api/chats/${id}/members/${encodeURIComponent(email)}`),
+  archiveChat: (id: string) => data(call<{ data: { chat: ChatDto; sends: SendDto[] } }>("POST", `/api/chats/${id}/archive`)),
+  restoreChat: (id: string) => data(call<{ data: { chat: ChatDto; sends: SendDto[] } }>("POST", `/api/chats/${id}/restore`)),
   invite: (id: string) => data(call<{ data: { token: string } }>("POST", `/api/chats/${id}/invite`)),
   join: (token: string) => data(call<{ data: ChatDto }>("POST", `/api/join/${encodeURIComponent(token)}`)),
 
