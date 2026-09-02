@@ -1,0 +1,38 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: arena
+  namespace: arena
+  labels:
+    app: arena
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`arena.demo.managoat.com`)"
+      kind: Rule
+      services:
+        - name: arena
+          port: 80
+  tls:
+    secretName: arena-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: arena-http
+  namespace: arena
+  labels:
+    app: arena
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: "Host(`arena.demo.managoat.com`)"
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: arena
+          port: 80
