@@ -1,0 +1,38 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: rounds
+  namespace: rounds
+  labels:
+    app: rounds
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`rounds.demo.managoat.com`)"
+      kind: Rule
+      services:
+        - name: rounds
+          port: 80
+  tls:
+    secretName: rounds-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: rounds-http
+  namespace: rounds
+  labels:
+    app: rounds
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: "Host(`rounds.demo.managoat.com`)"
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: rounds
+          port: 80

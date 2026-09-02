@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rounds
+  namespace: rounds
+  labels:
+    app: rounds
+spec:
+  type: ClusterIP
+  selector:
+    app: rounds
+  ports:
+    - port: 80
+      targetPort: 8080
