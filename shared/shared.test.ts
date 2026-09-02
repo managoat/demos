@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { initials, shortName, splitAuthor, withAuthor } from "./author";
-import { changesLine, parseDiff, parseSnapshot, parseStatus, summarise } from "./changes";
+import { changesLine, checks, parseDiff, parseSnapshot, parseStatus, summarise } from "./changes";
 import { lineText, parseComment, pending, reviewPrompt, type CommentDto } from "./comments";
 import { newTicTacToe, play, toMove, winnerEmail, type TicTacToe } from "./games";
 import { groupByProvider, modelLabel, modelProblem, runtimeFor } from "./models";
@@ -251,5 +251,23 @@ describe("review comments", () => {
     expect(reviewPrompt([at({})], null)).toStartWith("Review comments. Please");
     expect(typeof parseComment({ path: "a", line: 0, body: "x" })).toBe("string");
     expect(parseComment({ path: " a ", line: 3, body: " ok ", side: "old" })).toEqual({ path: "a", line: 3, body: "ok", side: "old" });
+  });
+});
+
+describe("checks", () => {
+  test("say what stands between the branch and a merge", () => {
+    const base = { status: "", ahead: 0, pr: null, files: [] };
+    expect(checks(base).map((c) => [c.key, c.ok, c.label])).toEqual([
+      ["tree", true, "Working tree clean"],
+      ["branch", true, "Branch pushed"],
+      ["pr", false, "No pull request yet"],
+    ]);
+    expect(checks({ ...base, status: " M a\n?? b\n", ahead: null }).map((c) => c.label)).toEqual(["2 files not committed", "Branch not pushed yet", "No pull request yet"]);
+    expect(checks({ ...base, ahead: 3, pr: { url: "u", state: "OPEN", mergeable: "CONFLICTING" } }).map((c) => [c.ok, c.label])).toEqual([
+      [true, "Working tree clean"],
+      [false, "3 commits not pushed"],
+      [false, "Pull request has conflicts"],
+    ]);
+    expect(checks({ ...base, pr: { url: "u", state: "MERGED" } })[2]).toEqual({ key: "pr", ok: true, label: "Pull request merged" });
   });
 });

@@ -27,6 +27,8 @@ export interface ChangesSnapshot {
   reason: "session" | "tool" | "stop" | "manual";
   /** The pull request for the branch, when `gh` knows one. */
   pr: PullRequest | null;
+  /** Commits on the branch that its upstream lacks; null when it has no upstream, so nothing is pushed. */
+  ahead: number | null;
 }
 
 export interface PullRequest {
@@ -62,6 +64,7 @@ export interface ChangesDto {
   /** True when the diff was cut to fit; `files` counts what survived. */
   truncated: boolean;
   pr: PullRequest | null;
+  ahead: number | null;
   /** How the snapshot reached the server. */
   source: "hook" | "exec";
   reason: ChangesSnapshot["reason"];
@@ -91,7 +94,29 @@ export function parseSnapshot(v: unknown): ChangesSnapshot | string {
       pr = { url: p.url.slice(0, 500), state: typeof p.state === "string" ? p.state.slice(0, 20) : "OPEN", mergeable: typeof p.mergeable === "string" ? p.mergeable.slice(0, 20) : null };
     }
   }
-  return { branch, head, base, status: s("status", 200_000), diff: s("diff", DIFF_MAX_CHARS + 1), reason, pr };
+  const ahead = typeof r.ahead === "number" && Number.isInteger(r.ahead) && r.ahead >= 0 ? r.ahead : null;
+  return { branch, head, base, status: s("status", 200_000), diff: s("diff", DIFF_MAX_CHARS + 1), reason, pr, ahead };
+}
+
+/** What stands between the branch and a merge, as the panel's checks strip says it. */
+export interface Check {
+  key: "tree" | "branch" | "pr";
+  ok: boolean;
+  label: string;
+}
+
+export function checks(c: Pick<ChangesDto, "status" | "ahead" | "pr" | "files">): Check[] {
+  const dirty = parseStatus(c.status).length;
+  const out: Check[] = [];
+  out.push({ key: "tree", ok: dirty === 0, label: dirty === 0 ? "Working tree clean" : `${dirty} file${dirty === 1 ? "" : "s"} not committed` });
+  if (c.ahead === null) out.push({ key: "branch", ok: false, label: "Branch not pushed yet" });
+  else if (c.ahead > 0) out.push({ key: "branch", ok: false, label: `${c.ahead} commit${c.ahead === 1 ? "" : "s"} not pushed` });
+  else out.push({ key: "branch", ok: true, label: "Branch pushed" });
+  if (!c.pr) out.push({ key: "pr", ok: false, label: "No pull request yet" });
+  else if (c.pr.state.toUpperCase() === "MERGED") out.push({ key: "pr", ok: true, label: "Pull request merged" });
+  else if (c.pr.state.toUpperCase() === "OPEN") out.push({ key: "pr", ok: c.pr.mergeable !== "CONFLICTING", label: c.pr.mergeable === "CONFLICTING" ? "Pull request has conflicts" : "Pull request open" });
+  else out.push({ key: "pr", ok: false, label: `Pull request ${c.pr.state.toLowerCase()}` });
+  return out;
 }
 
 // ── git status --porcelain=v1 ────────────────────────────────────────────

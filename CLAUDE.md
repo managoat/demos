@@ -54,7 +54,7 @@ src/      Vite + React. store.tsx (session), router.ts (hash routes), lib/live.t
 k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) applies it
 ```
 
-## Eight boundaries, easy to get wrong
+## Nine boundaries, easy to get wrong
 
 1. **The proxy is the member boundary.** A guest's browser builds
    `new Fountain({ baseUrl: "<origin>/f/<chat>", apiKey: "session" })`; the
@@ -180,6 +180,31 @@ k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) ap
    a comment on the added README line, sent, became a turn that rewrote
    the line and committed, and the next snapshot showed it.
 
+9. **Ship: the checks are the snapshot, the asks are turns, archive keeps
+   the chat.** The hook also reports `ahead` (commits past the upstream;
+   null when there is no upstream) and the `gh pr view` record, and
+   `shared/changes.ts#checks` turns status, `ahead` and `pr` into the
+   strip on the panel — tree clean, branch pushed, pull request — with the
+   open-comment count beside it. *Ask to push* and *Ask for a pull
+   request* send a fixed prompt through the proxy: they are turns and say
+   so; merge stays "ask the model" until Salon can run git itself (the
+   exec API follow-up). Archive (`POST …/archive`, host) terminates the
+   conversation and sets `chats.archived_at`; changes and comments stay,
+   and unpushed work goes with the computer, which the ⋯ menu says when
+   the last snapshot shows it. Restore starts a *new* conversation on the
+   same agent and environment with a prompt to fetch and check out the
+   pushed branch, swaps `chats.conversation_id`, and clears `sends` (the
+   new conversation's user turns count from one). The hook lives in the
+   environment's setup script, so a project made before a hook change
+   would keep the old one: `projects.ts#refreshEnvironment` puts the
+   environment back the way Salon writes it today whenever a chat starts
+   in the project and something differs (one GET, a PUT only then).
+   Verified 2026-09-02: a chat start refreshed an older environment's
+   hook; `ahead: null` arrived for a branch with no upstream; archive
+   terminated the conversation; restore opened a new one whose hook
+   posted under the new id, and the model said the unpushed branch was
+   not on origin, which is what the archive warning is for.
+
 ## Run, test, ship
 
 ```bash
@@ -259,6 +284,8 @@ A change there rolls the Fountain pods — check nothing is provisioning first.
   conversation stream and a 30 s chat-list poll. The game stream
   (`server/hub.ts`) is the channel Salon owns; presence could
   ride on it.
+- Merge is still a prompt. With a sandbox exec API (above), *Merge* and
+  *Push* become buttons that run git, not turns.
 - Games are Anthropic-only: codex and gemini get no `salon` server. The
   model never plays; a `move` tool would make each of its moves a turn.
   Tic-tac-toe is the only game; `shared/games.ts` is where a second one's

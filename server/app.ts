@@ -16,6 +16,8 @@
  *   POST   /api/chats/:id/members           host
  *   DELETE /api/chats/:id/members/:email    host, or yourself
  *   POST   /api/chats/:id/invite            host: a join link
+ *   POST   /api/chats/:id/archive           host: end the conversation, keep the chat
+ *   POST   /api/chats/:id/restore           host: start it again on the pushed branch
  *   POST   /api/join/:token                 take the link up
  *   GET    /api/projects                    mine: owned and in (projects.ts)
  *   POST   /api/projects                    a repository, as an environment on my Fountain
@@ -101,6 +103,8 @@ export function buildApp(ctx: AppContext): (req: Request) => Promise<Response> {
   on("POST", "/api/chats/:id/members", (req, p) => chats.addMember(ctx, req, p.id!));
   on("DELETE", "/api/chats/:id/members/:email", (req, p) => chats.removeMember(ctx, req, p.id!, p.email!));
   on("POST", "/api/chats/:id/invite", (req, p) => chats.invite(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/archive", (req, p) => chats.archive(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/restore", (req, p) => chats.restore(ctx, req, p.id!));
   on("POST", "/api/join/:token", (req, p) => chats.join(ctx, req, p.token!));
 
   on("GET", "/api/projects", (req) => projects.list(ctx, req));

@@ -68,6 +68,12 @@ nothing about agents, environments or runtimes anywhere.
   comments into one prompt, grouped by file with each person named, sent
   as whoever pressed it (`server/comments.ts`, `shared/comments.ts`). A
   comment costs nobody a turn; the send is one.
+- **Ship from the panel.** A checks strip says what stands between the
+  branch and a merge — tree clean, branch pushed, pull request open,
+  comments answered — and two buttons ask the model to push or to open a
+  pull request (each is a turn, and says so). Archive lets the computer
+  go and keeps the chat, its changes and its comments; Restore starts it
+  again on the pushed branch.
 - **Blocks, not dialects.** The transcript renders Fountain's server-parsed
   blocks (`?blocks=true`): text as markdown (an allow-list renderer to React
   nodes, never innerHTML), tool calls as collapsible rows, permission

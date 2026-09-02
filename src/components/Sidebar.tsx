@@ -12,12 +12,13 @@ export function Sidebar({ route, onClose }: { route: Route; onClose: () => void 
   // A chat in a project sits under the project; the rest under who hosts them.
   const byProject = new Map<string, { name: string; items: ChatDto[] }>();
   for (const c of chats) {
-    if (!c.project) continue;
+    if (!c.project || c.archivedAt) continue;
     const g = byProject.get(c.project.id) ?? { name: c.project.name, items: [] };
     g.items.push(c);
     byProject.set(c.project.id, g);
   }
-  const loose = chats.filter((c) => !c.project);
+  const archived = chats.filter((c) => c.archivedAt);
+  const loose = chats.filter((c) => !c.project && !c.archivedAt);
   const hosting = loose.filter((c) => c.role === "owner");
   const invited = loose.filter((c) => c.role !== "owner");
   const current = route.page === "chat" ? route.id : null;
@@ -40,6 +41,7 @@ export function Sidebar({ route, onClose }: { route: Route; onClose: () => void 
         ))}
         {hosting.length > 0 && <Group label="Your chats" items={hosting} current={current} />}
         {invited.length > 0 && <Group label="Shared with you" items={invited} current={current} />}
+        {archived.length > 0 && <Group label="Archived" items={archived} current={current} />}
       </div>
       <div className="side-foot">
         <Avatar email={me.email} />

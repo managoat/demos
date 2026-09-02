@@ -8,6 +8,8 @@
  *   GET    /api/chats/:id                 the chat, its people, and who sent each turn
  *   PATCH  /api/chats/:id                 host: { title }
  *   DELETE /api/chats/:id                 host: retire the conversation and forget the chat
+ *   POST   /api/chats/:id/archive         host: end the conversation, keep the chat
+ *   POST   /api/chats/:id/restore         host: a new conversation on the same setup, on the pushed branch
  *   POST   /api/chats/:id/members         host: { email }
  *   DELETE /api/chats/:id/members/:email  host, or yourself (leave)
  *   POST   /api/chats/:id/invite          host: mint (or re-mint) the join link's token
@@ -24,7 +26,7 @@ import { randomToken } from "./crypto";
 import { now, type ChatRow, type Role, type UserRow } from "./db";
 import { FountainHttpError, type ConversationSummary } from "./fountain";
 import { HttpError, isEmail, json, normalizeEmail, readJson, str } from "./http";
-import { projectOwnerClient } from "./projects";
+import { projectOwnerClient, refreshEnvironment } from "./projects";
 
 export interface ChatDto {
   id: string;
@@ -41,6 +43,8 @@ export interface ChatDto {
   createdAt: string;
   /** The host only: the join link's token, when one has been made. */
   inviteToken?: string | null;
+  /** Set when the host archived it: the computer was let go, the chat kept; restore starts it again on the branch. */
+  archivedAt: string | null;
   /** From Fountain, when the host's key answered. */
   status: string | null;
   lastActiveAt: string | null;
@@ -60,6 +64,7 @@ function toDto(ctx: AppContext, chat: ChatRow, role: Role, conv: ConversationSum
     agentId: chat.agent_id,
     settings: { model: chat.model, skills: parseJson<string[]>(chat.skills, []), connectors: parseJson<ChosenConnector[]>(chat.connectors, []) },
     project: projectOf(ctx, chat),
+    archivedAt: chat.archived_at,
     createdAt: chat.created_at,
     status: conv?.status ?? null,
     lastActiveAt: conv?.last_active_at ?? null,
@@ -147,6 +152,7 @@ export async function create(ctx: AppContext, req: Request): Promise<Response> {
   if (settings.projectId) {
     if (!projectRow || !ctx.db.projectRoleIn(projectRow.id, user.email)) throw new HttpError(404, "not_found", "No such project.");
     ({ owner: host, client } = await projectOwnerClient(ctx, projectRow));
+    await refreshEnvironment(ctx, client, projectRow);
     settings.environmentId = projectRow.environment_id;
     project = { name: projectRow.name, repoUrl: projectRow.repo_url, repoPath: projectRow.mount_path, base: projectRow.base };
   }
@@ -186,6 +192,7 @@ export async function create(ctx: AppContext, req: Request): Promise<Response> {
     agent_id: agentId,
     invite_token: null,
     project_id: projectRow?.id ?? null,
+    archived_at: null,
     created_at: now(),
   };
   ctx.db.insertChat(chat);
@@ -226,6 +233,60 @@ export async function remove(ctx: AppContext, req: Request, id: string): Promise
   }
   ctx.db.deleteChat(chat.id);
   return json({ ok: true });
+}
+
+/**
+ * Archive: end the conversation, so the computer goes, and keep the chat —
+ * its transcript on Fountain, its changes and comments here. What was not
+ * pushed is gone with the computer; the checks strip said so beforehand.
+ */
+export async function archive(ctx: AppContext, req: Request, id: string): Promise<Response> {
+  const user = await authenticate(ctx, req);
+  const { chat, role } = chatAccess(ctx, user, id);
+  requireOwner(role);
+  if (chat.archived_at) return await show(ctx, req, id);
+  try {
+    await (await ownerClient(ctx, chat)).terminate(chat.conversation_id);
+  } catch (err) {
+    if (err instanceof FountainHttpError) throw err.toHttp("Fountain would not end the conversation.");
+    throw err;
+  }
+  ctx.db.updateChat(chat.id, { archived_at: now() });
+  return await show(ctx, req, id);
+}
+
+/**
+ * Restore: a fresh conversation on the same agent and environment — a new
+ * computer — told to pick the branch up where it was pushed. The old
+ * conversation stays on Fountain; this chat now shows the new one, and
+ * its user turns count from one again.
+ */
+export async function restore(ctx: AppContext, req: Request, id: string): Promise<Response> {
+  const user = await authenticate(ctx, req);
+  const { chat, role } = chatAccess(ctx, user, id);
+  requireOwner(role);
+  if (!chat.archived_at) return await show(ctx, req, id);
+  const latest = ctx.db.latestChanges(chat.id);
+  const branch = latest?.branch && latest.branch !== latest.base ? latest.branch : null;
+  const prompt = branch
+    ? `We are picking this chat up again on a new computer. Fetch and check out the branch ${branch} from origin (it was pushed from the previous computer), then say in a sentence where things stand.`
+    : "We are picking this chat up again on a new computer. Say in a sentence where things stand.";
+  const client = await ownerClient(ctx, chat);
+  let conversation: ConversationSummary;
+  try {
+    const create: Record<string, unknown> = { agent_id: chat.agent_id, prompt, channel_id: `salon:${chat.id}`, fresh: true };
+    if (chat.environment_id) create.environment_id = chat.environment_id;
+    if (chat.vault_id) create.vault_id = chat.vault_id;
+    if (chat.title) create.title = chat.title;
+    conversation = await client.createConversation(create);
+  } catch (err) {
+    if (err instanceof FountainHttpError) throw err.toHttp("Fountain would not start the chat again.");
+    throw err;
+  }
+  ctx.db.clearSends(chat.id);
+  ctx.db.updateChat(chat.id, { archived_at: null, conversation_id: conversation.id });
+  ctx.db.addSend(chat.id, user.email);
+  return await show(ctx, req, id);
 }
 
 export async function addMember(ctx: AppContext, req: Request, id: string): Promise<Response> {

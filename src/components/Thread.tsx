@@ -199,7 +199,15 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
 
   const answer = useCallback((requestId: string, optionId: string) => fountain.resume(convId).answer(requestId, optionId), [fountain, convId]);
 
-  const retired = record?.status === "terminated";
+  const retired = record?.status === "terminated" || !!chat.archivedAt;
+  const sendPrompt = useCallback(
+    async (text: string) => {
+      await fountain.request("POST", `/api/conversations/${convId}/prompts`, { body: { prompt: text } });
+      onSent();
+      window.setTimeout(() => void readRecord().catch(() => undefined), 500);
+    },
+    [fountain, convId, onSent, readRecord],
+  );
   const last = folded.turns[folded.turns.length - 1];
   const waiting = running && (!last || last.turn.status === "running" || last.turn.status === "pending");
   const setupFailed = folded.setup.some((e) => e.kind === "stage" && e.state === "failed") && folded.turns.length === 0;
@@ -289,7 +297,7 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
           onSend={() => void send()}
           sending={sending}
           disabled={retired}
-          placeholder={retired ? "This chat has been retired." : `Message ${who}`}
+          placeholder={chat.archivedAt ? "This chat is archived. Restore it to keep going." : retired ? "This chat has been retired." : `Message ${who}`}
           attachments={attachments}
           left={
             <>
@@ -317,7 +325,7 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
         />
       </div>
       </div>
-      {changesOpen && <ChangesPanel changes={changes} review={{ chatId: chat.id, comments: live.comments, takeComment: live.takeComment, busy: !!running }} onClose={onCloseChanges} />}
+      {changesOpen && <ChangesPanel changes={changes} review={{ chatId: chat.id, comments: live.comments, takeComment: live.takeComment, busy: !!running, sendPrompt: retired ? null : sendPrompt }} onClose={onCloseChanges} />}
     </div>
   );
 }

@@ -172,6 +172,15 @@ export class FountainClient {
     return (await this.post<{ data: EnvironmentSummary }>("/api/environments", body)).data;
   }
 
+  async environment(id: string): Promise<EnvironmentSummary | null> {
+    try {
+      return (await this.json<{ data: EnvironmentSummary }>(`/api/environments/${encodeURIComponent(id)}`)).data ?? null;
+    } catch (err) {
+      if (err instanceof FountainHttpError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
   async updateEnvironment(id: string, body: Record<string, unknown>): Promise<EnvironmentSummary> {
     return (await this.json<{ data: EnvironmentSummary }>(`/api/environments/${encodeURIComponent(id)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).data;
   }

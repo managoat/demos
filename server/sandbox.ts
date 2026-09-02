@@ -189,14 +189,16 @@ while IFS= read -r f; do
   git diff --no-index -- /dev/null "$f" >> "$WORK/diff" 2>/dev/null || true
 done < <(git ls-files --others --exclude-standard 2>/dev/null)
 head -c ${DIFF_CAP} "$WORK/diff" > "$WORK/diff.cut" && mv "$WORK/diff.cut" "$WORK/diff"
+AHEAD=null
+if git rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then AHEAD=$(git rev-list --count '@{u}..HEAD' 2>/dev/null || echo null); fi
 PR=null
 if command -v gh >/dev/null 2>&1 && [ -n "\${GH_TOKEN:-\${GITHUB_TOKEN:-}}" ]; then
   PR=$(GH_TOKEN="\${GH_TOKEN:-$GITHUB_TOKEN}" gh pr view --json url,state,mergeable 2>/dev/null || echo null)
   [ -n "$PR" ] || PR=null
 fi
-jq -n --arg branch "$BRANCH" --arg head "$HEAD_SHA" --arg base "$BASE" --arg reason "$REASON" --argjson pr "$PR" \\
+jq -n --arg branch "$BRANCH" --arg head "$HEAD_SHA" --arg base "$BASE" --arg reason "$REASON" --argjson pr "$PR" --argjson ahead "$AHEAD" \\
   --rawfile status "$WORK/status" --rawfile diff "$WORK/diff" \\
-  '{branch:$branch, head:$head, base:$base, status:$status, diff:$diff, reason:$reason, pr:$pr}' > "$WORK/body" 2>/dev/null || exit 0
+  '{branch:$branch, head:$head, base:$base, status:$status, diff:$diff, reason:$reason, pr:$pr, ahead:$ahead}' > "$WORK/body" 2>/dev/null || exit 0
 curl -sS -m 30 -X POST "$URL" \\
     -H "Authorization: Bearer $FOUNTAIN_TOKEN" \\
     -H "X-Fountain-Conversation-Id: $FOUNTAIN_CONVERSATION_ID" \\
