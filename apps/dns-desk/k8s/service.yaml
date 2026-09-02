@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dns-desk
+  namespace: dns-desk
+  labels:
+    app: dns-desk
+spec:
+  type: ClusterIP
+  selector:
+    app: dns-desk
+  ports:
+    - port: 80
+      targetPort: 8080
