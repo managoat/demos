@@ -32,6 +32,9 @@
  *   POST   /api/chats/:id/games/:game/moves a move, from the player whose go it is
  *   GET    /api/chats/:id/changes           the repository's latest changes, with the diff (changes.ts)
  *   GET    /api/chats/:id/changes/history   the snapshots before it, without
+ *   POST   /api/chats/:id/changes/refresh   read the repository through Fountain now, as a snapshot (files.ts)
+ *   GET    /api/chats/:id/files?path=       a directory of the repository, in the computer, now
+ *   GET    /api/chats/:id/file?path=        one file of it
  *   GET    /api/chats/:id/comments          review comments on the changes (comments.ts)
  *   POST   /api/chats/:id/comments          one, on a line
  *   POST   /api/chats/:id/comments/send     the open ones, as one prompt, sent as the caller's turn
@@ -48,6 +51,7 @@ import * as changes from "./changes";
 import * as chats from "./chats";
 import * as comments from "./comments";
 import type { AppContext } from "./context";
+import * as files from "./files";
 import * as games from "./games";
 import { errorResponse, HttpError, json } from "./http";
 import * as hub from "./hub";
@@ -121,6 +125,9 @@ export function buildApp(ctx: AppContext): (req: Request) => Promise<Response> {
   on("POST", "/api/chats/:id/games/:game/moves", (req, p) => games.makeMove(ctx, req, p.id!, p.game!));
   on("GET", "/api/chats/:id/changes", (req, p) => changes.latest(ctx, req, p.id!));
   on("GET", "/api/chats/:id/changes/history", (req, p) => changes.history(ctx, req, p.id!));
+  on("POST", "/api/chats/:id/changes/refresh", (req, p) => files.refresh(ctx, req, p.id!));
+  on("GET", "/api/chats/:id/files", (req, p) => files.list(ctx, req, p.id!));
+  on("GET", "/api/chats/:id/file", (req, p) => files.show(ctx, req, p.id!));
   on("GET", "/api/chats/:id/comments", (req, p) => comments.list(ctx, req, p.id!));
   on("POST", "/api/chats/:id/comments", (req, p) => comments.create(ctx, req, p.id!));
   on("POST", "/api/chats/:id/comments/send", (req, p) => comments.send(ctx, req, p.id!));

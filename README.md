@@ -62,7 +62,16 @@ nothing about agents, environments or runtimes anywhere.
   repository — the branch, the files, every hunk — shows in a panel for
   everyone in the chat, live: a hook inside the computer posts a snapshot
   when a session starts, after each edit and when a turn ends
-  (`server/sandbox.ts`, `server/changes.ts`, `src/components/Changes.tsx`).
+  (`server/sandbox.ts`, `server/changes.ts`, `src/components/Changes.tsx`),
+  and Salon reads the repository itself through Fountain's read-only
+  sandbox routes — `git diff`, and the `.git` refs — when anyone presses
+  ↻ or a turn ends (`server/files.ts`). That read is not a turn, works
+  whatever model the chat runs, and never wakes a parked computer.
+- **Files, as they are now.** The panel's Files view browses the
+  repository in the computer, one directory or one file at a time, the
+  same way; *open* on a changed file shows the whole of it. Fountain
+  offers no way to run a command on a computer from outside, on purpose,
+  so nothing here does: to change something, say so in the chat.
 - **Review together.** Anyone in the chat comments on a line of the
   changes; threads resolve; and *Send to the model* turns the open
   comments into one prompt, grouped by file with each person named, sent

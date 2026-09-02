@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { initials, shortName, splitAuthor, withAuthor } from "./author";
-import { changesLine, checks, parseDiff, parseSnapshot, parseStatus, summarise } from "./changes";
+import { AHEAD_UNKNOWN, changesLine, checks, parseDiff, parseSnapshot, parseStatus, statusFromDiffs, summarise } from "./changes";
+import { cleanPath, joinPath, parentOf, segments } from "./files";
 import { lineText, parseComment, pending, reviewPrompt, type CommentDto } from "./comments";
 import { newTicTacToe, play, toMove, winnerEmail, type TicTacToe } from "./games";
 import { groupByProvider, modelLabel, modelProblem, runtimeFor } from "./models";
@@ -269,5 +270,35 @@ describe("checks", () => {
       [false, "Pull request has conflicts"],
     ]);
     expect(checks({ ...base, pr: { url: "u", state: "MERGED" } })[2]).toEqual({ key: "pr", ok: true, label: "Pull request merged" });
+    // A read of the ref files sees the upstream is behind but cannot count.
+    expect(checks({ ...base, ahead: AHEAD_UNKNOWN })[1]).toEqual({ key: "branch", ok: false, label: "Commits not pushed" });
+    expect(parseSnapshot({ branch: "b", base: "main", ahead: AHEAD_UNKNOWN })).toMatchObject({ ahead: AHEAD_UNKNOWN });
+    expect(parseSnapshot({ branch: "b", base: "main", ahead: -2 })).toMatchObject({ ahead: null });
+  });
+});
+
+describe("status from two diffs", () => {
+  const staged = "diff --git a/new.txt b/new.txt\nnew file mode 100644\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+x\ndiff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -1 +1 @@\n-1\n+2\n";
+  const unstaged = "diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -1 +1 @@\n-2\n+3\ndiff --git a/gone.txt b/gone.txt\ndeleted file mode 100644\n--- a/gone.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n";
+  test("fills the two columns of porcelain, so the checks strip can count", () => {
+    expect(statusFromDiffs(staged, unstaged)).toBe("A  new.txt\nMM a.md\n D gone.txt\n");
+    expect(parseStatus(statusFromDiffs(staged, unstaged)).map((e) => e.code)).toEqual(["A ", "MM", " D"]);
+    expect(statusFromDiffs("", "")).toBe("");
+  });
+});
+
+describe("repository paths", () => {
+  test("stay inside the repository", () => {
+    expect(cleanPath("")).toBe("");
+    expect(cleanPath("src//app.ts")).toBe("src/app.ts");
+    expect(cleanPath("./src/../README.md")).toBe("README.md");
+    expect(cleanPath("../etc")).toBeNull();
+    expect(cleanPath("/etc/passwd")).toBe("etc/passwd");
+    expect(cleanPath("a\\b")).toBe("a/b");
+    expect(cleanPath(5)).toBeNull();
+    expect(segments("a/b")).toEqual(["a", "b"]);
+    expect(joinPath("", "x")).toBe("x");
+    expect(parentOf("a/b/c")).toBe("a/b");
+    expect(parentOf("a")).toBe("");
   });
 });

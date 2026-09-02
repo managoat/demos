@@ -38,6 +38,7 @@ server/   Bun. app.ts is the route table; index.ts boots it.
           proxy.ts     /f/<chat>/api/conversations/<id>/… on the host's key
           games.ts     a chat's games: start, move
           changes.ts   the repository's changes: the hook's POST, the latest record, `record` (the one way in)
+          files.ts     the repository read through Fountain's read-only sandbox routes: refresh (a snapshot into `record`), a directory, a file
           comments.ts  review comments on a line of the changes; `send` turns the open ones into one prompt
           hub.ts       GET /api/chats/:id/stream: what Salon itself records, live (game, changes events)
           sandbox.ts   who a computer is (bearer = $FOUNTAIN_TOKEN + conversation id), and the hook setup script
@@ -45,12 +46,13 @@ server/   Bun. app.ts is the route table; index.ts boots it.
           db.ts        SQLite: users, sessions, chats, chat_members, sends, games, changes, comments, projects, project_members
 shared/   what both sides agree on: author.ts, models.ts, settings.ts, skills.ts, images.ts, games.ts (the rules),
           changes.ts (the snapshot shape, and the diff/status parsers both sides use),
+          files.ts (a directory listing and a file as the panel browses them; paths stay inside the repository),
           comments.ts (a comment's shape, and the prompt the open ones become),
           projects.ts (what a repository address is, where it is checked out)
 src/      Vite + React. store.tsx (session), router.ts (hash routes), lib/live.ts (the chat's own stream),
           components/Thread.tsx (transcript + composer), SettingsMenu.tsx (pill + `+`),
           Game.tsx (the board), Blocks.tsx (a start_game tool block renders as the board),
-          Changes.tsx (the repository panel beside the thread, with the room's comments on its lines)
+          Changes.tsx (the repository panel beside the thread, with the room's comments on its lines, Refresh, and Files)
 k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) applies it
 ```
 
@@ -121,9 +123,8 @@ k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) ap
    `.mcp.json` copy is substituted correctly but the session copy wins.
    Fix it in Fountain and the tolerance becomes dead code.
 
-6. **Changes come out of the computer by a hook, and go in by one function.**
-   Fountain's API has no file, exec or diff route on a sandbox, so the
-   computer reports: `sandbox.ts#hookSetupScript` is the bash a project's
+6. **Changes come out of the computer two ways, and go in by one function.**
+   The first is the hook: `sandbox.ts#hookSetupScript` is the bash a project's
    environment runs as its `setup_script`, writing `/home/sprite/.salon/changes.sh`
    and Claude Code's `~/.claude/settings.local.json` with `SessionStart`,
    `PostToolUse` (Edit|Write|MultiEdit|NotebookEdit|Bash) and `Stop` hooks.
@@ -143,6 +144,37 @@ k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) ap
    caller, same table, same stream — it keeps the last twenty per chat,
    cuts a diff at 1 MB and says so. The hook is claude-only, like games.
    Verified end to end 2026-09-02 against `github.com/managoat/salon`.
+   The second is Salon reading the computer itself, through Fountain's
+   three read-only sandbox routes — `GET /api/sandboxes/:id/files`, `/file`,
+   `/diff` (Fountain PR #1397, ADR 0039: full-scope key, a `ready` sandbox
+   only, paths under the home, values of the environment redacted; **there
+   is no exec route and there will not be one** — #1361 proposed it and
+   was closed). `server/files.ts#refresh` (`POST …/changes/refresh`, any
+   member; the ↻ on the panel, and every browser when a turn ends) finds
+   the sandbox by the conversation's `sandbox_id`, and assembles the same
+   snapshot the hook posts: `git diff <base>` (the local base as cloned,
+   else `origin/<base>`, else HEAD), `git diff` and `git diff --cached` as
+   the two columns of a `git status` (`shared/changes.ts#statusFromDiffs`),
+   and the `.git` ref files for the branch, the head and the upstream —
+   `ahead` is 0 when the remote ref matches, null when there is none, and
+   `AHEAD_UNKNOWN` (−1) when it differs, since the routes cannot count.
+   What it cannot see: untracked files (the panel says so), and the pull
+   request, carried over from the branch's last snapshot. It works on every
+   runtime, which is how a codex or gemini chat gets a panel at all. A
+   turn-end refresh is skipped when a snapshot under eight seconds old is
+   held (the hook's own Stop post), and refreshes in flight are shared per
+   chat. `GET …/files?path=` and `GET …/file?path=` are the panel's Files
+   view: paths are relative to the repository and kept inside it
+   (`shared/files.ts#cleanPath`) before Fountain confines them again. Every
+   refusal passes through with Fountain's code (`sandbox_not_ready` 409 —
+   a parked computer is never woken for a read — `path_not_found`,
+   `sandbox_unreachable`); a Fountain without the routes is a 501
+   `files_unavailable`. Verified 2026-09-02 on managoat.com with a codex
+   chat in a project (no hook there): the early refresh was refused
+   `sandbox_not_ready` while the computer started; after the turn, the
+   refresh showed the branch, the unpushed head and the one-line diff, and
+   Files listed the checkout and read a file. The fake's shapes are the
+   real ones.
 
 7. **A project is the owner's environment, and its chats are the owner's.**
    `server/projects.ts` turns a repository address into one Environment on
@@ -160,8 +192,14 @@ k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) ap
    chat in it, on create and when someone is added; removal takes back
    only what the project put in. The derived agent gets `on <project>` in
    its name (names are unique on Fountain) and `agents.ts#codeNote` in
-   its prompt: where the repo is, the branch is already made, commit as
-   you go, `gh pr create` when asked, `Co-authored-by` for tagged senders.
+   its prompt: where the repo is, branch off the base before the first
+   change if the checkout is still on it (`salon/<conv id[0:8]>`, the same
+   name the hook uses — the hook does it for claude at session start, the
+   model does it everywhere else, since the setup script never sees the
+   conversation id and is checkpointed for the next chat), commit as you
+   go, `gh pr create` when asked, `Co-authored-by` for tagged senders. A
+   derived agent whose prompt differs from today's is patched in place, so
+   a change to the note reaches existing picks.
    Removing a project deletes the environment (Fountain retires its
    sandboxes; `409 sandbox_mid_turn` while one runs) and detaches the
    chats, which keep their transcripts.
@@ -187,8 +225,9 @@ k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) ap
    strip on the panel — tree clean, branch pushed, pull request — with the
    open-comment count beside it. *Ask to push* and *Ask for a pull
    request* send a fixed prompt through the proxy: they are turns and say
-   so; merge stays "ask the model" until Salon can run git itself (the
-   exec API follow-up). Archive (`POST …/archive`, host) terminates the
+   so, and they stay turns: Fountain will not run a command on a sandbox
+   for an app (boundary 6), so pushing and merging are the model's to do.
+   Archive (`POST …/archive`, host) terminates the
    conversation and sets `chats.archived_at`; changes and comments stay,
    and unpushed work goes with the computer, which the ⋯ menu says when
    the last snapshot shows it. Restore starts a *new* conversation on the
@@ -246,8 +285,10 @@ detached. For the hook: create an Environment on `[default]` with
 simply `POST /api/projects {"repoUrl": "github.com/managoat/salon"}` and
 start a chat with `settings.projectId`, which is the same thing through
 the seam (verified 2026-09-02: branch, commit, clean tree, diff against
-main, all on the panel). A missed POST is not retried: send another
-prompt. A
+main, all on the panel). A missed POST is not retried: press ↻ on the
+panel, which reads the repository through Fountain instead. Without a
+tunnel, ↻ is the only source, which is a fine smoke of `files.ts` on its
+own (a codex chat in a project needs no tunnel at all). A
 brokered sandbox reaches it only through `HTTPS_PROXY`, which the runtime
 honours. Start a chat, add the guest, wait for the first turn to finish
 (a prompt during a turn is `conversation_busy`), then send "let's play
@@ -284,18 +325,27 @@ A change there rolls the Fountain pods — check nothing is provisioning first.
   conversation stream and a 30 s chat-list poll. The game stream
   (`server/hub.ts`) is the channel Salon owns; presence could
   ride on it.
-- Merge is still a prompt. With a sandbox exec API (above), *Merge* and
-  *Push* become buttons that run git, not turns.
+- Merge and push are prompts, and stay prompts: there will be no exec
+  route (#1361 closed). If buttons are ever wanted, the way is a narrow
+  git verb on Fountain's side (push this branch, open a PR), not a shell.
 - Games are Anthropic-only: codex and gemini get no `salon` server. The
   model never plays; a `move` tool would make each of its moves a turn.
   Tic-tac-toe is the only game; `shared/games.ts` is where a second one's
   rules go, keyed by `kind`.
 - Fountain sends the raw `mcp_servers` on the ACP session (boundary 5);
   fix there, then delete `sandbox.ts#unescaped`.
-- Fountain has no exec or file route on a sandbox. Add `POST
-  /api/sandboxes/:id/exec` and `GET /api/sandboxes/:id/files?path=` there
-  (full-scope keys only), and `changes.ts#record` gets a second caller that
-  works on every runtime, plus Push / Open PR buttons that are not turns.
+- A refresh cannot see untracked files or `gh pr view`; if Fountain's diff
+  route ever grows an `untracked` flag, `files.ts#snapshot` is the one
+  place to use it. No new Fountain API is planned for Salon: what the
+  panel cannot read, the model is asked for.
+- Commits from a codex chat were authored `AoD <aod@local>` although
+  `~/.gitconfig` held the owner's identity from the setup script (read
+  through the file route), so the runtime's environment must carry
+  `GIT_AUTHOR_*`/`GIT_COMMITTER_*`. Worth a look before attribution
+  matters; not a Salon bug.
+- Removing a project deletes its environment but not the agents derived
+  on it (`Salon · … · on <project>`); they are harmless and findable by
+  name, but a cleanup on project removal would be tidy.
 - Fountain's claude runtime overwrites `~/.claude/settings.json` after the
   setup script; a merge there would let the hook live in the user file.
 - Outlook, Slack and tenant `oauth2` connections show in Connectors as "not

@@ -32,7 +32,7 @@ const RUNNING_POLL_MS = 15_000;
 const IDLE_POLL_MS = 60_000;
 
 export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges }: { chat: ChatDto; sends: SendDto[]; onSent: () => void; live: ChatLive; changesOpen: boolean; onCloseChanges: () => void }) {
-  const { games, takeGame, changes } = live;
+  const { games, takeGame, changes, refreshChanges } = live;
   const { me, toast } = useSession();
   const fountain = useMemo(() => makeChatClient(chat.id), [chat.id]);
   const convId = chat.conversationId;
@@ -200,6 +200,18 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
   const answer = useCallback((requestId: string, optionId: string) => fountain.resume(convId).answer(requestId, optionId), [fountain, convId]);
 
   const retired = record?.status === "terminated" || !!chat.archivedAt;
+
+  // A turn just ended in a project chat: read the repository through Fountain, unless the hook already reported (the server knows).
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (running) {
+      wasRunning.current = true;
+      return;
+    }
+    if (!wasRunning.current) return;
+    wasRunning.current = false;
+    if (chat.project && !retired) void refreshChanges("stop").catch(() => undefined);
+  }, [running, chat.project, retired, refreshChanges]);
   const sendPrompt = useCallback(
     async (text: string) => {
       await fountain.request("POST", `/api/conversations/${convId}/prompts`, { body: { prompt: text } });
@@ -325,7 +337,7 @@ export function Thread({ chat, sends, onSent, live, changesOpen, onCloseChanges 
         />
       </div>
       </div>
-      {changesOpen && <ChangesPanel changes={changes} review={{ chatId: chat.id, comments: live.comments, takeComment: live.takeComment, busy: !!running, sendPrompt: retired ? null : sendPrompt }} onClose={onCloseChanges} />}
+      {changesOpen && <ChangesPanel changes={changes} review={{ chatId: chat.id, comments: live.comments, takeComment: live.takeComment, busy: !!running, sendPrompt: retired ? null : sendPrompt, refresh: chat.project && !retired ? live.refreshChanges : null }} onClose={onCloseChanges} />}
     </div>
   );
 }

@@ -32,6 +32,8 @@ export interface ConversationSummary {
   first_prompt?: string | null;
   agent_id?: string | null;
   status?: string;
+  /** The machine it runs on, while it has one. */
+  sandbox_id?: string | null;
   inserted_at?: string;
   last_active_at?: string | null;
   unread?: boolean;
@@ -45,6 +47,32 @@ export interface EnvironmentSummary {
   repositories?: { url: string; mount_path: string; ref?: string | null; secret_key?: string | null }[];
   setup_script?: string | null;
   [k: string]: unknown;
+}
+
+/** `GET /api/sandboxes/:id/files`: one directory. */
+export interface SandboxListing {
+  path: string;
+  entries: { name: string; type: string; size: number | null }[];
+  truncated: boolean;
+}
+
+/** `GET /api/sandboxes/:id/file`: one file's bytes, text or base64, redacted. */
+export interface SandboxFile {
+  path: string;
+  size: number;
+  truncated: boolean;
+  encoding: string;
+  content: string;
+}
+
+/** `GET /api/sandboxes/:id/diff`: `git diff` of the repository at `path`. */
+export interface SandboxDiff {
+  path: string;
+  repo_root: string;
+  staged: boolean;
+  ref: string | null;
+  diff: string;
+  truncated: boolean;
 }
 
 export interface Catalog {
@@ -212,6 +240,29 @@ export class FountainClient {
       if (err instanceof FountainHttpError && err.status === 404) return null;
       throw err;
     }
+  }
+
+  // ── a sandbox's disk, read-only (Fountain's ADR 0039) ──────────────────
+  // Full-scope key only, a `ready` sandbox only, paths confined to the home;
+  // Fountain's refusals come back as FountainHttpError with their code
+  // (`sandbox_not_ready`, `path_not_found`, `path_outside_sandbox`, …).
+
+  async sandboxFiles(sandboxId: string, path: string): Promise<SandboxListing> {
+    return (await this.json<{ data: SandboxListing }>(`/api/sandboxes/${encodeURIComponent(sandboxId)}/files?${new URLSearchParams({ path })}`)).data;
+  }
+
+  async sandboxFile(sandboxId: string, path: string, maxBytes?: number): Promise<SandboxFile> {
+    const qs = new URLSearchParams({ path });
+    if (maxBytes) qs.set("max_bytes", String(maxBytes));
+    return (await this.json<{ data: SandboxFile }>(`/api/sandboxes/${encodeURIComponent(sandboxId)}/file?${qs}`)).data;
+  }
+
+  async sandboxDiff(sandboxId: string, path: string, opts: { ref?: string | null; staged?: boolean; maxBytes?: number } = {}): Promise<SandboxDiff> {
+    const qs = new URLSearchParams({ path });
+    if (opts.ref) qs.set("ref", opts.ref);
+    if (opts.staged) qs.set("staged", "true");
+    if (opts.maxBytes) qs.set("max_bytes", String(opts.maxBytes));
+    return (await this.json<{ data: SandboxDiff }>(`/api/sandboxes/${encodeURIComponent(sandboxId)}/diff?${qs}`)).data;
   }
 
   /** Retire a conversation. Idempotent for one that is already dead. */

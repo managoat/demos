@@ -20,6 +20,8 @@ export interface ChatLive {
   comments: Map<string, CommentDto>;
   /** Take a comment record from a call's answer, so the panel need not wait for the stream. */
   takeComment: (c: CommentDto & { deleted?: boolean }) => void;
+  /** Read the repository through Fountain now (server/files.ts). Not a turn; the record comes back and goes on the stream. */
+  refreshChanges: (reason: "manual" | "stop") => Promise<ChangesDto>;
 }
 
 export function useChatLive(chatId: string): ChatLive {
@@ -35,6 +37,18 @@ export function useChatLive(chatId: string): ChatLive {
       return next;
     });
   }, []);
+
+  const refreshChanges = useCallback(
+    async (reason: "manual" | "stop") => {
+      const c = await api.refreshChanges(chatId, reason);
+      if (c.seq >= changesSeq.current) {
+        changesSeq.current = c.seq;
+        setChanges(c);
+      }
+      return c;
+    },
+    [chatId],
+  );
 
   const takeGame = useCallback((g: GameDto) => {
     setGames((prev) => {
@@ -128,5 +142,5 @@ export function useChatLive(chatId: string): ChatLive {
     };
   }, [chatId, takeGame, takeComment]);
 
-  return { games, takeGame, changes, comments, takeComment };
+  return { games, takeGame, changes, comments, takeComment, refreshChanges };
 }

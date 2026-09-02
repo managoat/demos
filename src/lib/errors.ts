@@ -37,6 +37,20 @@ export function describeError(err: unknown): string {
       return "Connectors are not switched on for this Fountain account.";
     case "bad_invite":
       return "That invite link is not valid any more.";
+    case "sandbox_not_ready":
+      return "The computer is parked. Send it a message to wake it, then try again.";
+    case "sandbox_unreachable":
+      return "Could not reach the computer just now. Try again shortly.";
+    case "files_unavailable":
+      return "This Fountain cannot read a computer's files yet.";
+    case "no_computer":
+      return "The chat has no computer right now.";
+    case "no_repository":
+      return "This chat was not started in a project, so there is no repository to read.";
+    case "path_not_found":
+      return "There is no such file in the repository now.";
+    case "not_a_repository":
+      return "The project's folder is not a git repository in the computer.";
   }
   if (err instanceof ApiError) return err.message;
   if (err instanceof FountainError) {

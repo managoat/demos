@@ -5,11 +5,13 @@
  * chat.
  *
  * Where a snapshot comes from is the server's business (server/changes.ts):
- * today a hook inside the computer posts one at the start of a session, after
- * each edit and at the end of every turn; a sandbox exec API would be a second
- * source of the same record. This file is the wire shape and the two parsers —
- * `git status --porcelain` and a unified diff — shared so the server can count
- * what changed and the browser can draw it without asking again.
+ * a hook inside the computer posts one at the start of a session, after each
+ * edit and at the end of every turn (claude only), and the server reads one
+ * itself through Fountain's read-only sandbox routes — `git diff`, and the
+ * `.git` ref files — when someone presses Refresh or a turn ends
+ * (server/files.ts, every runtime). This file is the wire shape and the two
+ * parsers — `git status --porcelain` and a unified diff — shared so the server
+ * can count what changed and the browser can draw it without asking again.
  */
 
 /** What the hook (or any source) hands the server. Everything but `diff` is small. */
@@ -27,9 +29,18 @@ export interface ChangesSnapshot {
   reason: "session" | "tool" | "stop" | "manual";
   /** The pull request for the branch, when `gh` knows one. */
   pr: PullRequest | null;
-  /** Commits on the branch that its upstream lacks; null when it has no upstream, so nothing is pushed. */
+  /**
+   * Commits on the branch that its upstream lacks; null when it has no
+   * upstream, so nothing is pushed. `AHEAD_UNKNOWN` when the source can see
+   * the upstream differs but cannot count (a read of the ref files can).
+   */
   ahead: number | null;
+  /** The diff was cut before it got here, so the record must say so whatever its length. */
+  truncated?: boolean;
 }
+
+/** `ahead` for "the upstream is behind, by a number nobody counted". */
+export const AHEAD_UNKNOWN = -1;
 
 export interface PullRequest {
   url: string;
@@ -65,8 +76,8 @@ export interface ChangesDto {
   truncated: boolean;
   pr: PullRequest | null;
   ahead: number | null;
-  /** How the snapshot reached the server. */
-  source: "hook" | "exec";
+  /** How the snapshot reached the server: posted by the hook in the computer, or read through Fountain. */
+  source: "hook" | "fountain";
   reason: ChangesSnapshot["reason"];
   at: string;
 }
@@ -94,7 +105,7 @@ export function parseSnapshot(v: unknown): ChangesSnapshot | string {
       pr = { url: p.url.slice(0, 500), state: typeof p.state === "string" ? p.state.slice(0, 20) : "OPEN", mergeable: typeof p.mergeable === "string" ? p.mergeable.slice(0, 20) : null };
     }
   }
-  const ahead = typeof r.ahead === "number" && Number.isInteger(r.ahead) && r.ahead >= 0 ? r.ahead : null;
+  const ahead = typeof r.ahead === "number" && Number.isInteger(r.ahead) && (r.ahead >= 0 || r.ahead === AHEAD_UNKNOWN) ? r.ahead : null;
   return { branch, head, base, status: s("status", 200_000), diff: s("diff", DIFF_MAX_CHARS + 1), reason, pr, ahead };
 }
 
@@ -110,6 +121,7 @@ export function checks(c: Pick<ChangesDto, "status" | "ahead" | "pr" | "files">)
   const out: Check[] = [];
   out.push({ key: "tree", ok: dirty === 0, label: dirty === 0 ? "Working tree clean" : `${dirty} file${dirty === 1 ? "" : "s"} not committed` });
   if (c.ahead === null) out.push({ key: "branch", ok: false, label: "Branch not pushed yet" });
+  else if (c.ahead === AHEAD_UNKNOWN) out.push({ key: "branch", ok: false, label: "Commits not pushed" });
   else if (c.ahead > 0) out.push({ key: "branch", ok: false, label: `${c.ahead} commit${c.ahead === 1 ? "" : "s"} not pushed` });
   else out.push({ key: "branch", ok: true, label: "Branch pushed" });
   if (!c.pr) out.push({ key: "pr", ok: false, label: "No pull request yet" });
@@ -139,6 +151,26 @@ export function parseStatus(porcelain: string): StatusEntry[] {
     else out.push({ code, path: rest, oldPath: null });
   }
   return out;
+}
+
+/**
+ * `git status --porcelain=v1` as far as two diffs can tell it: the index
+ * against HEAD (`git diff --cached`) fills the first column, the working
+ * tree against the index (`git diff`) the second. What neither diff shows —
+ * an untracked file — is not in it: the hook's status has those, this one
+ * says so with `??` for nothing. Good enough for the checks strip, which
+ * only asks whether anything is uncommitted.
+ */
+export function statusFromDiffs(staged: string, unstaged: string): string {
+  const col = (f: FileSummary): string => (f.status === "added" ? "A" : f.status === "deleted" ? "D" : f.status === "renamed" ? "R" : "M");
+  const rows = new Map<string, { x: string; y: string; oldPath: string | null }>();
+  for (const f of summarise(staged)) rows.set(f.path, { x: col(f), y: " ", oldPath: f.oldPath });
+  for (const f of summarise(unstaged)) {
+    const have = rows.get(f.path);
+    if (have) have.y = col(f);
+    else rows.set(f.path, { x: " ", y: col(f), oldPath: f.oldPath });
+  }
+  return [...rows.entries()].map(([path, r]) => `${r.x}${r.y} ${r.oldPath ? `${r.oldPath} -> ` : ""}${path}`).join("\n") + (rows.size ? "\n" : "");
 }
 
 // ── a unified diff ───────────────────────────────────────────────────────

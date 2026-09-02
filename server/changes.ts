@@ -6,11 +6,13 @@
  *   GET  /api/chats/:id/changes         the latest record, with its diff
  *   GET  /api/chats/:id/changes/history the records before it, without their diffs
  *
- * `record` is the one way in. The hook is its first caller; a sandbox exec
- * API on Fountain would be the second, and would land in the same table,
- * on the same stream, in the same panel. The server keeps the last twenty
- * snapshots per chat: enough to see a turn's before and after, not a
- * history of the branch — that is git's.
+ *   POST /api/chats/:id/changes/refresh a snapshot the server reads itself, through Fountain (server/files.ts)
+ *
+ * `record` is the one way in. The hook is one caller; `files.ts#refresh`,
+ * which reads the computer through Fountain's sandbox routes on every
+ * runtime, is the other — same table, same stream, same panel. The server
+ * keeps the last twenty snapshots per chat: enough to see a turn's before
+ * and after, not a history of the branch — that is git's.
  */
 import { DIFF_MAX_CHARS, parseSnapshot, summarise, type ChangesDto, type ChangesSnapshot } from "../shared/changes";
 import { authenticate, chatAccess, type AppContext } from "./context";
@@ -42,7 +44,7 @@ export function toDto(r: ChangesRow, withDiff = true): ChangesDto {
 
 /** Keep a snapshot, prune the old ones, and tell every browser in the chat. */
 export function record(ctx: AppContext, chat: ChatRow, snap: ChangesSnapshot, source: ChangesDto["source"]): ChangesDto {
-  const truncated = snap.diff.length > DIFF_MAX_CHARS;
+  const truncated = snap.truncated === true || snap.diff.length > DIFF_MAX_CHARS;
   const diff = truncated ? snap.diff.slice(0, DIFF_MAX_CHARS) : snap.diff;
   const row = ctx.db.insertChanges({
     chat_id: chat.id,

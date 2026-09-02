@@ -4,6 +4,7 @@
  */
 import type { ChangesDto } from "../../shared/changes";
 import type { CommentDto, Side } from "../../shared/comments";
+import type { DirListing, FileContents } from "../../shared/files";
 import type { ChatSettings } from "../../shared/settings";
 import type { GameDto, GameKind } from "../../shared/games";
 import type { ImageInput } from "../../shared/images";
@@ -123,6 +124,10 @@ export const api = {
   deleteComment: (chatId: string, id: string) => call<{ ok: true }>("DELETE", `/api/chats/${chatId}/comments/${id}`),
   sendComments: (chatId: string) => data(call<{ data: { sent: number; prompt: string; comments: CommentDto[] } }>("POST", `/api/chats/${chatId}/comments/send`)),
   changesHistory: (chatId: string) => data(call<{ data: ChangesDto[] }>("GET", `/api/chats/${chatId}/changes/history`)),
+  /** Read the repository through Fountain now, as a snapshot. Not a turn. */
+  refreshChanges: (chatId: string, reason: "manual" | "stop") => data(call<{ data: ChangesDto }>("POST", `/api/chats/${chatId}/changes/refresh`, { reason })),
+  files: (chatId: string, path: string) => data(call<{ data: DirListing }>("GET", `/api/chats/${chatId}/files?${new URLSearchParams({ path })}`)),
+  file: (chatId: string, path: string) => data(call<{ data: FileContents }>("GET", `/api/chats/${chatId}/file?${new URLSearchParams({ path })}`)),
 };
 
 /** The chat's own stream (server/hub.ts): games and changes, same origin, so the session cookie goes with it. */

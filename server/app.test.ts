@@ -52,7 +52,23 @@ const PROVIDERS = [
 ];
 const OLD_KEY = derivedKey({ ...DEFAULT_SETTINGS });
 
+/** One machine's disk as the read-only sandbox routes see it: absolute path → bytes ("base64:…" for what is not text), and what `git diff` would print. */
+interface FakeSandbox {
+  key: string;
+  status: string;
+  disk: Record<string, string>;
+  /** `${ref}|${staged}` → the diff. */
+  diffs: Record<string, string>;
+  /** Refs git knows; any other `ref` is `ref_not_found`. */
+  refs: string[];
+}
+
 const state = {
+  sandboxes: new Map<string, FakeSandbox>(),
+  /** What the sandbox routes were asked, in order: "diff ?path=…". */
+  sandboxReads: [] as string[],
+  /** A Fountain from before the routes existed answers them like any unknown path. */
+  sandboxRoutes: true,
   environments: [] as { key: string; id: string; body: Record<string, unknown> }[],
   secrets: [] as { key: string; env: string; body: Record<string, unknown> }[],
   deletedEnvironments: [] as string[],
@@ -66,6 +82,9 @@ const state = {
 };
 
 function reset(): void {
+  state.sandboxes.clear();
+  state.sandboxReads = [];
+  state.sandboxRoutes = true;
   state.environments = [];
   state.secrets = [];
   state.deletedEnvironments = [];
@@ -167,11 +186,50 @@ beforeAll(() => {
       if (p === "/api/conversations" && req.method === "POST") {
         const body = (await req.json()) as Record<string, unknown>;
         if (body.agent_id === "a-broke") return json({ error: "insufficient_credits", message: "no credit", upgrade_url: "x" }, 402);
-        const conv = { id: `c-${crypto.randomUUID().slice(0, 8)}`, status: "pending", agent_id: body.agent_id, channel_id: body.channel_id, turn_count: 1, first_prompt: body.prompt, title: null, last_active_at: null, request: body };
+        const id = `c-${crypto.randomUUID().slice(0, 8)}`;
+        // A conversation names the machine it runs on; the fake's is ready from the start, with an empty disk until a test fills it.
+        state.sandboxes.set(`sb-${id}`, { key, status: "ready", disk: {}, diffs: {}, refs: [] });
+        const conv = { id, status: "pending", sandbox_id: `sb-${id}`, agent_id: body.agent_id, channel_id: body.channel_id, turn_count: 1, first_prompt: body.prompt, title: null, last_active_at: null, request: body };
         state.conversations.set(key, [...(state.conversations.get(key) ?? []), conv]);
         return json({ data: conv }, 201);
       }
       if (p === "/api/conversations" && req.method === "GET") return json({ data: state.conversations.get(key) ?? [] });
+      // The read-only sandbox routes (Fountain PR #1397, ADR 0039), shaped from its controller: `{data: …}`, full scope, a ready sandbox only, paths under the home.
+      const sm = /^\/api\/sandboxes\/([^/]+)\/(files|file|diff)$/.exec(p);
+      if (sm && state.sandboxRoutes) {
+        const sb = state.sandboxes.get(sm[1]!);
+        if (!sb || sb.key !== key) return json({ error: "not_found" }, 404);
+        if (sb.status !== "ready") return json({ error: "sandbox_not_ready", message: `the sandbox is ${sb.status}; files are read from a ready one only`, status: sb.status }, 409);
+        const path = (url.searchParams.get("path") ?? "/home/sprite").replace(/\/$/, "");
+        if (path !== "/home/sprite" && !path.startsWith("/home/sprite/")) return json({ error: "path_outside_sandbox", message: "path must be under the sandbox home or the agent's working directory" }, 422);
+        state.sandboxReads.push(`${sm[2]} ${url.search}`);
+        const max = Number(url.searchParams.get("max_bytes") ?? 262144);
+        if (sm[2] === "files") {
+          if (path in sb.disk) return json({ error: "not_a_directory", message: "path is not a directory" }, 422);
+          const seen = new Map<string, { name: string; type: string; size: number | null }>();
+          for (const [f, body] of Object.entries(sb.disk)) {
+            if (!f.startsWith(`${path}/`)) continue;
+            const rest = f.slice(path.length + 1);
+            const name = rest.split("/")[0]!;
+            if (rest.includes("/")) seen.set(name, { name, type: "directory", size: null });
+            else seen.set(name, { name, type: "file", size: body.length });
+          }
+          if (seen.size === 0) return json({ error: "path_not_found" }, 404);
+          const entries = [...seen.values()].sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === "directory" ? -1 : 1));
+          return json({ data: { path, entries, truncated: false } });
+        }
+        if (sm[2] === "file") {
+          const body = sb.disk[path];
+          if (body === undefined) return json({ error: "path_not_found" }, 404);
+          if (body.startsWith("base64:")) return json({ data: { path, size: 99, truncated: false, encoding: "base64", content: body.slice(7) } });
+          return json({ data: { path, size: body.length, truncated: body.length > max, encoding: "utf-8", content: body.slice(0, max) } });
+        }
+        const ref = url.searchParams.get("ref");
+        const staged = url.searchParams.get("staged") === "true";
+        if (ref && !sb.refs.includes(ref)) return json({ error: "ref_not_found", message: "no such commit, branch or tag" }, 404);
+        const text = sb.diffs[`${ref ?? ""}|${staged}`] ?? "";
+        return json({ data: { path, repo_root: "/home/sprite/work/widgets", staged, ref, diff: text.slice(0, max), truncated: text.length > max } });
+      }
       const m = /^\/api\/conversations\/([^/]+)(\/.*)?$/.exec(p);
       if (m) {
         const conv = (state.conversations.get(key) ?? []).find((c) => c.id === m[1]);
@@ -288,6 +346,10 @@ describe("starting a chat", () => {
     const conv = state.conversations.get("ftn_host")![0]!;
     expect(conv.request).toMatchObject({ agent_id: "a-old", prompt: "hello room", channel_id: `salon:${chat.id}`, fresh: true });
     expect((conv.request as Record<string, unknown>).environment_id).toBeUndefined();
+    // Its prompt was written before this one: brought up to date in place, and left alone the next time.
+    expect(state.agentPatches).toEqual([{ key: "ftn_host", id: "a-old", body: { system: `${ROOM_PROMPT}\n\n${SALON_NOTE}` } }]);
+    await startChat(cookie);
+    expect(state.agentPatches).toHaveLength(1);
   });
 
   test("a new model derives a plain room agent on the runtime the provider implies, and finds it again", async () => {
@@ -1009,5 +1071,176 @@ describe("a project's hook stays current", () => {
     expect(String(state.environments[0]!.body.setup_script)).toContain("/home/sprite/.salon/changes.sh");
     await startChat(host, { ...SETTINGS, projectId: project.id });
     expect(state.environmentPuts).toEqual(["e-1"]);
+  });
+});
+
+describe("the repository, read through Fountain", () => {
+  const REPO = "/home/sprite/work/widgets";
+  const AGAINST_MAIN = ["diff --git a/README.md b/README.md", "--- a/README.md", "+++ b/README.md", "@@ -1,2 +1,3 @@", " # Hi", "-old", "+new", "+more", "diff --git a/new.txt b/new.txt", "new file mode 100644", "--- /dev/null", "+++ b/new.txt", "@@ -0,0 +1 @@", "+hello", ""].join("\n");
+  const UNSTAGED = ["diff --git a/README.md b/README.md", "--- a/README.md", "+++ b/README.md", "@@ -1 +1 @@", "-x", "+y", ""].join("\n");
+  const STAGED = ["diff --git a/new.txt b/new.txt", "new file mode 100644", "--- /dev/null", "+++ b/new.txt", "@@ -0,0 +1 @@", "+hello", ""].join("\n");
+
+  /** A project chat with the guest in it, and its computer's disk as a fresh session leaves it: on the chat's branch, nothing pushed. */
+  async function projectChat(): Promise<{ host: string; guest: string; chat: Record<string, any>; sb: FakeSandbox }> {
+    withPublicUrl();
+    const host = await signIn("ftn_host");
+    const guest = await signIn("ftn_guest");
+    const project = ((await (await call("POST", "/api/projects", { cookie: host, body: { repoUrl: "github.com/acme/widgets" } })).json()) as { data: Record<string, any> }).data;
+    expect((await call("POST", `/api/projects/${project.id}/members`, { cookie: host, body: { email: "guest@example.com" } })).status).toBe(200);
+    const chat = await startChat(host, { ...SETTINGS, projectId: project.id });
+    const sb = state.sandboxes.get(`sb-${chat.conversationId}`)!;
+    sb.disk = {
+      [`${REPO}/.git/HEAD`]: "ref: refs/heads/salon/abcd1234\n",
+      [`${REPO}/.git/refs/heads/salon/abcd1234`]: "deadbeefcafe\n",
+      [`${REPO}/README.md`]: "# Hi\nnew\nmore\n",
+      [`${REPO}/src/app.ts`]: "export {};\n",
+      [`${REPO}/logo.png`]: "base64:iVBORw0KGgo=",
+    };
+    sb.refs = ["main"];
+    sb.diffs = { "main|false": AGAINST_MAIN, "|false": UNSTAGED, "|true": STAGED };
+    return { host, guest, chat, sb };
+  }
+
+  test("refresh reads the diff, the status and the refs on the host's key, records the snapshot, and the room sees it", async () => {
+    const { host, guest, chat } = await projectChat();
+    const seen: unknown[] = [];
+    const off = hub.subscribe(chat.id, (e) => seen.push(e));
+    const res = await call("POST", `/api/chats/${chat.id}/changes/refresh`, { cookie: guest, body: {} });
+    expect(res.status).toBe(201);
+    const snap = ((await res.json()) as { data: Record<string, any> }).data;
+    expect(snap).toMatchObject({ source: "fountain", reason: "manual", branch: "salon/abcd1234", head: "deadbeefcafe", base: "main", ahead: null, pr: null, truncated: false, seq: 1 });
+    expect(snap.files.map((f: { path: string; status: string }) => [f.path, f.status])).toEqual([
+      ["README.md", "modified"],
+      ["new.txt", "added"],
+    ]);
+    expect(snap.diff).toBe(AGAINST_MAIN);
+    // `git status` as two diffs tell it: the index has new.txt, the tree has README.md.
+    expect(snap.status).toBe("A  new.txt\n M README.md\n");
+    expect(seen).toEqual([{ event: "changes", data: expect.objectContaining({ seq: 1, source: "fountain", diff: "" }) }]);
+    off();
+    expect(state.sandboxReads).toContain(`diff ?path=${encodeURIComponent(REPO)}&ref=main&max_bytes=1000001`);
+    expect(state.sandboxReads).toContain(`diff ?path=${encodeURIComponent(REPO)}&staged=true&max_bytes=1000001`);
+    expect(state.sandboxReads).toContain(`file ?path=${encodeURIComponent(`${REPO}/.git/HEAD`)}`);
+    const latest = ((await (await call("GET", `/api/chats/${chat.id}/changes`, { cookie: host })).json()) as { data: Record<string, any> }).data;
+    expect(latest.seq).toBe(1);
+    expect(latest.source).toBe("fountain");
+
+    // A stranger is told the chat does not exist; a chat outside a project has nothing to read.
+    const other = await signIn("ftn_other");
+    expect((await call("POST", `/api/chats/${chat.id}/changes/refresh`, { cookie: other })).status).toBe(404);
+    const plain = await startChat(host);
+    const none = await call("POST", `/api/chats/${plain.id}/changes/refresh`, { cookie: host });
+    expect(none.status).toBe(422);
+    expect(((await none.json()) as { error: string }).error).toBe("no_repository");
+  });
+
+  test("whether the branch is pushed comes from the remote ref; packed refs and a detached head are read too", async () => {
+    const { host, chat, sb } = await projectChat();
+    const refresh = async () => ((await (await call("POST", `/api/chats/${chat.id}/changes/refresh`, { cookie: host })).json()) as { data: Record<string, any> }).data;
+    sb.disk[`${REPO}/.git/refs/remotes/origin/salon/abcd1234`] = "deadbeefcafe\n";
+    expect((await refresh()).ahead).toBe(0);
+    sb.disk[`${REPO}/.git/refs/remotes/origin/salon/abcd1234`] = "0000000older\n";
+    expect((await refresh()).ahead).toBe(-1);
+    // After a `git gc` the refs are lines in packed-refs.
+    delete sb.disk[`${REPO}/.git/refs/heads/salon/abcd1234`];
+    delete sb.disk[`${REPO}/.git/refs/remotes/origin/salon/abcd1234`];
+    sb.disk[`${REPO}/.git/packed-refs`] = "# pack-refs with: peeled fully-peeled sorted \nfeedfacefeed refs/heads/salon/abcd1234\nfeedfacefeed refs/remotes/origin/salon/abcd1234\n^tagpeel\n";
+    expect(await refresh()).toMatchObject({ branch: "salon/abcd1234", head: "feedfacefeed", ahead: 0 });
+    sb.disk[`${REPO}/.git/HEAD`] = "cafebabe0000\n";
+    expect(await refresh()).toMatchObject({ branch: "", head: "cafebabe0000", ahead: null });
+  });
+
+  test("the diff is against the base as cloned, else the remote's, else HEAD; a cut diff says so; the pull request carries over on the same branch", async () => {
+    const { host, chat, sb } = await projectChat();
+    const refresh = async () => ((await (await call("POST", `/api/chats/${chat.id}/changes/refresh`, { cookie: host })).json()) as { data: Record<string, any> }).data;
+    sb.refs = ["origin/main"];
+    sb.diffs["origin/main|false"] = STAGED;
+    expect((await refresh()).diff).toBe(STAGED);
+    sb.refs = [];
+    expect((await refresh()).diff).toBe(UNSTAGED);
+    // On the base branch itself, the remote's ref is what the work is measured against.
+    sb.refs = ["main", "origin/main"];
+    sb.disk[`${REPO}/.git/HEAD`] = "ref: refs/heads/main\n";
+    sb.disk[`${REPO}/.git/refs/heads/main`] = "deadbeefcafe\n";
+    expect((await refresh()).diff).toBe(STAGED);
+    sb.disk[`${REPO}/.git/HEAD`] = "ref: refs/heads/salon/abcd1234\n";
+    sb.refs = ["main"];
+    sb.diffs["main|false"] = `${AGAINST_MAIN}${"+".repeat(1_000_100)}`;
+    const cut = await refresh();
+    expect(cut.truncated).toBe(true);
+    expect(cut.diff.length).toBe(1_000_000);
+    // The hook knew of a pull request; a read through Fountain cannot ask gh, so it keeps what the branch's last snapshot said.
+    sb.diffs["main|false"] = AGAINST_MAIN;
+    const hooked = await call("POST", "/hooks/changes", { body: { branch: "salon/abcd1234", head: "deadbeefcafe", base: "main", status: "", diff: "", reason: "stop", pr: { url: "https://github.com/acme/widgets/pull/7", state: "OPEN" } }, headers: { authorization: "Bearer ftn_sprite", "x-fountain-conversation-id": chat.conversationId } });
+    expect(hooked.status).toBe(201);
+    expect((await refresh()).pr).toEqual({ url: "https://github.com/acme/widgets/pull/7", state: "OPEN", mergeable: null });
+    sb.disk[`${REPO}/.git/HEAD`] = "ref: refs/heads/other\n";
+    sb.disk[`${REPO}/.git/refs/heads/other`] = "1234567abcde\n";
+    expect((await refresh()).pr).toBeNull();
+  });
+
+  test("a turn-end refresh defers to a snapshot the hook just posted, and browsers asking together share one read", async () => {
+    const { host, guest, chat } = await projectChat();
+    const hooked = await call("POST", "/hooks/changes", { body: { branch: "salon/abcd1234", head: "deadbeefcafe", base: "main", status: "", diff: "", reason: "stop" }, headers: { authorization: "Bearer ftn_sprite", "x-fountain-conversation-id": chat.conversationId } });
+    expect(hooked.status).toBe(201);
+    const deferred = await call("POST", `/api/chats/${chat.id}/changes/refresh`, { cookie: guest, body: { reason: "stop" } });
+    expect(deferred.status).toBe(200);
+    expect(((await deferred.json()) as { data: { seq: number; source: string } }).data).toMatchObject({ seq: 1, source: "hook" });
+    expect(state.sandboxReads).toEqual([]);
+    // Two people press Refresh at once: one read, one record, both get it.
+    const [a, b] = await Promise.all([call("POST", `/api/chats/${chat.id}/changes/refresh`, { cookie: host }), call("POST", `/api/chats/${chat.id}/changes/refresh`, { cookie: guest })]);
+    expect([a.status, b.status]).toEqual([201, 201]);
+    expect(((await a.json()) as { data: { seq: number } }).data.seq).toBe(2);
+    expect(((await b.json()) as { data: { seq: number } }).data.seq).toBe(2);
+    expect(state.sandboxReads.filter((r) => r.startsWith("diff ") && r.includes("ref=main"))).toHaveLength(1);
+  });
+
+  test("Fountain's refusals pass through with their code: a parked computer, a Fountain without the routes, an archived chat", async () => {
+    const { host, chat, sb } = await projectChat();
+    sb.status = "suspended";
+    const parked = await call("POST", `/api/chats/${chat.id}/changes/refresh`, { cookie: host });
+    expect(parked.status).toBe(409);
+    expect(((await parked.json()) as { error: string }).error).toBe("sandbox_not_ready");
+    sb.status = "ready";
+    state.sandboxRoutes = false;
+    const old = await call("GET", `/api/chats/${chat.id}/files?path=`, { cookie: host });
+    expect(old.status).toBe(501);
+    expect(((await old.json()) as { error: string }).error).toBe("files_unavailable");
+    state.sandboxRoutes = true;
+    expect((await call("POST", `/api/chats/${chat.id}/archive`, { cookie: host })).status).toBe(200);
+    const gone = await call("POST", `/api/chats/${chat.id}/changes/refresh`, { cookie: host });
+    expect(gone.status).toBe(409);
+    expect(((await gone.json()) as { error: string }).error).toBe("no_computer");
+  });
+
+  test("anyone in the chat browses the repository as it is now, and never outside it", async () => {
+    const { guest, chat } = await projectChat();
+    const root = ((await (await call("GET", `/api/chats/${chat.id}/files?path=`, { cookie: guest })).json()) as { data: Record<string, any> }).data;
+    expect(root.path).toBe("");
+    expect(root.entries).toEqual([
+      { name: ".git", type: "directory", size: null },
+      { name: "src", type: "directory", size: null },
+      { name: "logo.png", type: "file", size: 19 },
+      { name: "README.md", type: "file", size: 14 },
+    ]);
+    const src = ((await (await call("GET", `/api/chats/${chat.id}/files?path=src/`, { cookie: guest })).json()) as { data: Record<string, any> }).data;
+    expect(src).toEqual({ path: "src", entries: [{ name: "app.ts", type: "file", size: 11 }], truncated: false });
+    const file = ((await (await call("GET", `/api/chats/${chat.id}/file?path=src/app.ts`, { cookie: guest })).json()) as { data: Record<string, any> }).data;
+    expect(file).toEqual({ path: "src/app.ts", size: 11, truncated: false, encoding: "utf-8", content: "export {};\n" });
+    expect(state.sandboxReads.at(-1)).toBe(`file ?path=${encodeURIComponent(`${REPO}/src/app.ts`)}&max_bytes=262144`);
+    const png = ((await (await call("GET", `/api/chats/${chat.id}/file?path=logo.png`, { cookie: guest })).json()) as { data: Record<string, any> }).data;
+    expect(png).toMatchObject({ encoding: "base64", content: "iVBORw0KGgo=" });
+    // Above the repository is refused here, before Fountain would confine it to the home.
+    expect((await call("GET", `/api/chats/${chat.id}/files?path=../`, { cookie: guest })).status).toBe(422);
+    expect((await call("GET", `/api/chats/${chat.id}/file?path=/etc/passwd`, { cookie: guest })).status).toBe(404);
+    expect((await call("GET", `/api/chats/${chat.id}/file?path=`, { cookie: guest })).status).toBe(422);
+    const missing = await call("GET", `/api/chats/${chat.id}/file?path=nope.txt`, { cookie: guest });
+    expect(missing.status).toBe(404);
+    expect(((await missing.json()) as { error: string }).error).toBe("path_not_found");
+    const other = await signIn("ftn_other");
+    expect((await call("GET", `/api/chats/${chat.id}/files?path=`, { cookie: other })).status).toBe(404);
+    // Every read went under the repository: a leading slash is not an absolute path here.
+    expect(state.sandboxReads.every((r) => r.includes(`?path=${encodeURIComponent(REPO)}`))).toBe(true);
+    expect(state.sandboxReads).toContain(`file ?path=${encodeURIComponent(`${REPO}/etc/passwd`)}&max_bytes=262144`);
   });
 });

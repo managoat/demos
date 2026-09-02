@@ -126,10 +126,10 @@ export function Chat({ id }: { id: string }) {
           </div>
         </div>
         <div className="chat-tools">
-          {live.changes && (
-            <button type="button" className={`changes-btn${changesOpen ? " on" : ""}`} onClick={() => setChangesOpen((o) => !o)} aria-pressed={changesOpen} title={`${live.changes.branch || live.changes.head.slice(0, 7)} against ${live.changes.base}`}>
+          {(live.changes || chat.project) && (
+            <button type="button" className={`changes-btn${changesOpen ? " on" : ""}`} onClick={() => setChangesOpen((o) => !o)} aria-pressed={changesOpen} title={live.changes ? `${live.changes.branch || live.changes.head.slice(0, 7)} against ${live.changes.base}` : `${chat.project?.name}: nothing reported yet`}>
               <span>Changes</span>
-              <span className="muted">{changesLine(live.changes.files)}</span>
+              {live.changes && <span className="muted">{changesLine(live.changes.files)}</span>}
             </button>
           )}
           <div className="pill-wrap">
@@ -164,7 +164,7 @@ export function Chat({ id }: { id: string }) {
                 {!chat.archivedAt && (
                   <TwoStep
                     label="Archive this chat"
-                    detail={live.changes && (live.changes.ahead === null || live.changes.ahead > 0 || live.changes.status.trim()) ? "Lets the computer go. Work not pushed goes with it — check the Changes panel first." : "Lets the computer go; the chat, its changes and comments stay. Restore starts it again on the branch."}
+                    detail={live.changes && (live.changes.ahead !== 0 || live.changes.status.trim()) ? "Lets the computer go. Work not pushed goes with it — check the Changes panel first." : "Lets the computer go; the chat, its changes and comments stay. Restore starts it again on the branch."}
                     onConfirm={() => void archive()}
                   />
                 )}

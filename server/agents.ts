@@ -18,8 +18,9 @@
  *     has a public address for the computer to reach;
  *   - no environment: the computer is Fountain's default.
  *
- * The games server is not part of the key: an agent found without it is
- * given it in place, so a pick made before games existed keeps its agent.
+ * Neither the games server nor the prompt is part of the key: an agent
+ * found without the server, or with a prompt written before this one, is
+ * brought up to date in place, so a pick made earlier keeps its agent.
  *
  * The menu (server/menu.ts) never lists these agents; they are the result of
  * a pick, not something to pick.
@@ -46,8 +47,10 @@ export const SALON_NOTE =
 /** What a project's repository is, and how to work in it, for an agent derived on one. */
 export function codeNote(project: ProjectContext): string {
   return (
-    `This chat has a repository: ${project.repoUrl}, checked out at ${project.repoPath}, on a branch of its own off ${project.base} ` +
-    "(the branch is made for you before your first turn; do not switch to another). Work there. Make the smallest change that " +
+    `This chat has a repository: ${project.repoUrl}, checked out at ${project.repoPath}. The chat works on a branch of its own off ` +
+    `${project.base}: if the checkout is still on ${project.base} when you start, run ` +
+    "`git checkout -b \"salon/${FOUNTAIN_CONVERSATION_ID:0:8}\"` before changing anything (the id is in your environment), and stay " +
+    `on that branch; never commit on ${project.base}. Make the smallest change that ` +
     "does what was asked, and commit as you go with a clear message; push the branch when a piece of work is done, so nothing is " +
     "lost if the computer goes away. When someone asks for a pull request, push and open one with `gh pr create` against " +
     `${project.base}, and say its address. People in the chat can see every change you make beside the transcript, so describe ` +
@@ -105,11 +108,12 @@ export async function agentFor(client: FountainClient, settings: ChatSettings, p
   const agents = await client.agents();
   const existing = agents.find((a) => salonKey(a) === key);
   if (existing) {
-    // An agent from before games, from a server without a public address then, or pointed at an old one: given the server in place.
+    // An agent from before games, from a server without a public address then, or pointed at an old one: given the server in place. A prompt from before this one likewise.
     const held = existing.mcp_servers?.salon as { url?: unknown } | undefined;
-    if (games && held?.url !== games.url) {
-      await client.updateAgent(existing.id, { system, mcp_servers: { ...(existing.mcp_servers ?? {}), salon: games } });
-    }
+    const patch: Record<string, unknown> = {};
+    if (games && held?.url !== games.url) patch.mcp_servers = { ...(existing.mcp_servers ?? {}), salon: games };
+    if (existing.system !== system) patch.system = system;
+    if (Object.keys(patch).length) await client.updateAgent(existing.id, patch);
     return { agentId: existing.id, connectors, created: false };
   }
 

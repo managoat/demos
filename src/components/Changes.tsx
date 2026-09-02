@@ -7,11 +7,17 @@
  *
  * A comment is not a turn. "Send to the model" is: the open comments go as
  * one prompt from whoever presses it, and each is marked sent.
+ *
+ * Refresh reads the repository through Fountain now (server/files.ts) —
+ * not a turn either, and the way a chat on a runtime without the hook
+ * gets a snapshot at all. Files browses the repository as it is in the
+ * computer, one directory or one file at a time, the same way.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { shortName } from "../../shared/author";
 import { changesLine, checks, parseDiff, shortSha, type ChangesDto, type FileDiff, type FileStatus } from "../../shared/changes";
 import { pending, type CommentDto, type Side } from "../../shared/comments";
+import { FILE_MAX_BYTES, joinPath, parentOf, segments, type DirListing, type FileContents } from "../../shared/files";
 import { api } from "../lib/api";
 import { describeError } from "../lib/errors";
 import { formatTime } from "../lib/format";
@@ -29,15 +35,33 @@ export interface Review {
   busy: boolean;
   /** Send a prompt as the caller's turn — what the Push and Open a pull request buttons do. Null when the chat cannot take one. */
   sendPrompt: ((text: string) => Promise<void>) | null;
+  /** Read the repository through Fountain now. Null when the chat has no repository, or no computer any more. */
+  refresh: ((reason: "manual") => Promise<unknown>) | null;
 }
+
+type View = { kind: "diff" } | { kind: "dir"; path: string } | { kind: "file"; path: string };
 
 export function ChangesPanel({ changes, review, onClose }: { changes: ChangesDto | null; review: Review; onClose: () => void }) {
   const { me, toast } = useSession();
   const files = useMemo(() => (changes ? parseDiff(changes.diff) : []), [changes]);
   const [current, setCurrent] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [view, setView] = useState<View>({ kind: "diff" });
   const all = useMemo(() => [...review.comments.values()], [review.comments]);
   const open = pending(all);
+
+  const refresh = async () => {
+    if (!review.refresh || refreshing) return;
+    setRefreshing(true);
+    try {
+      await review.refresh("manual");
+    } catch (err) {
+      toast(describeError(err), "error");
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const send = async () => {
     if (sending) return;
@@ -61,6 +85,16 @@ export function ChangesPanel({ changes, review, onClose }: { changes: ChangesDto
           {changes && <span className="muted small">{changesLine(changes.files)}</span>}
         </div>
         <div className="row">
+          {review.refresh && (
+            <button type="button" className={`tiny ghost${view.kind !== "diff" ? " on" : ""}`} onClick={() => setView((v) => (v.kind === "diff" ? { kind: "dir", path: "" } : { kind: "diff" }))} title="Browse the repository as it is in the computer now.">
+              Files
+            </button>
+          )}
+          {review.refresh && (
+            <button type="button" className="icon" onClick={() => void refresh()} disabled={refreshing} aria-label="Refresh" title="Read the repository now, through Fountain. Not a turn.">
+              {refreshing ? "…" : "↻"}
+            </button>
+          )}
           {open.length > 0 && (
             <button type="button" className="small send-comments" onClick={() => void send()} disabled={sending} title={review.busy ? "The model is still working; it will take these when the turn ends." : undefined}>
               {sending ? "Sending…" : `Send ${open.length} to the model`}
@@ -71,8 +105,14 @@ export function ChangesPanel({ changes, review, onClose }: { changes: ChangesDto
           </button>
         </div>
       </div>
-      {!changes && <p className="muted small pad">Nothing yet. Once the computer has a repository and touches it, what changed shows here for everyone in the chat.</p>}
-      {changes && (
+      {view.kind !== "diff" && <FilesView chatId={review.chatId} view={view} onView={setView} />}
+      {view.kind === "diff" && !changes && (
+        <p className="muted small pad">
+          Nothing yet. Once the computer has a repository and touches it, what changed shows here for everyone in the chat.
+          {review.refresh ? " Press ↻ to read it now." : ""}
+        </p>
+      )}
+      {view.kind === "diff" && changes && (
         <>
           <div className="changes-where small">
             <span className="mono">{changes.branch || shortSha(changes.head)}</span>
@@ -80,7 +120,10 @@ export function ChangesPanel({ changes, review, onClose }: { changes: ChangesDto
             <span className="muted">
               against <span className="mono">{changes.base}</span>
             </span>
-            <span className="muted">· {formatTime(changes.at)}</span>
+            <span className="muted" title={changes.source === "fountain" ? "Read through Fountain" : "Reported by the computer"}>
+              · {formatTime(changes.at)}
+            </span>
+            {changes.source === "fountain" && changes.status.trim() === "" && <span className="muted tiny">untracked files not counted</span>}
             {changes.pr && (
               <a className="pr-link" href={changes.pr.url} target="_blank" rel="noreferrer">
                 Pull request · {prWord(changes.pr.state)}
@@ -110,7 +153,7 @@ export function ChangesPanel({ changes, review, onClose }: { changes: ChangesDto
           )}
           <div className="changes-body">
             {files.map((f) => (
-              <FileView key={f.path} file={f} comments={all.filter((c) => c.path === f.path)} review={review} me={me.email} />
+              <FileView key={f.path} file={f} comments={all.filter((c) => c.path === f.path)} review={review} me={me.email} onOpen={review.refresh && f.status !== "deleted" ? () => setView({ kind: "file", path: f.path }) : null} />
             ))}
             {orphans(all, files).length > 0 && (
               <section className="file">
@@ -188,7 +231,7 @@ function orphans(all: CommentDto[], files: FileDiff[]): CommentDto[] {
   return all.filter((c) => !paths.has(c.path));
 }
 
-function FileView({ file, comments, review, me }: { file: FileDiff; comments: CommentDto[]; review: Review; me: string }) {
+function FileView({ file, comments, review, me, onOpen }: { file: FileDiff; comments: CommentDto[]; review: Review; me: string; onOpen: (() => void) | null }) {
   const lines = file.hunks.reduce((n, h) => n + h.lines.length, 0);
   const [open, setOpen] = useState(lines <= FOLD_OVER || comments.length > 0);
   const [composing, setComposing] = useState<{ side: Side; line: number } | null>(null);
@@ -210,6 +253,19 @@ function FileView({ file, comments, review, me }: { file: FileDiff; comments: Co
           {file.additions > 0 && <span className="add">+{file.additions}</span>}
           {file.deletions > 0 && <span className="del">−{file.deletions}</span>}
         </span>
+        {onOpen && (
+          <button
+            type="button"
+            className="linklike tiny"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen();
+            }}
+            title="The whole file, as it is in the computer now."
+          >
+            open
+          </button>
+        )}
         <span className="muted tiny">{open ? "▾" : "▸"}</span>
       </header>
       {open && file.binary && <div className="muted small pad">A binary file.</div>}
@@ -407,6 +463,97 @@ function Compose({ path, side, line, review, onDone }: { path: string; side: Sid
       </div>
     </form>
   );
+}
+
+/** The repository as it is now: one directory, or one file, read through Fountain when asked for. */
+function FilesView({ chatId, view, onView }: { chatId: string; view: Exclude<View, { kind: "diff" }>; onView: (v: View) => void }) {
+  const [listing, setListing] = useState<DirListing | null>(null);
+  const [file, setFile] = useState<FileContents | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const path = view.path;
+
+  useEffect(() => {
+    let stopped = false;
+    setProblem(null);
+    setLoading(true);
+    const read = async () => {
+      if (view.kind === "dir") {
+        const l = await api.files(chatId, path);
+        if (stopped) return;
+        setListing(l);
+        setFile(null);
+      } else {
+        const f = await api.file(chatId, path);
+        if (stopped) return;
+        setFile(f);
+        setListing(null);
+      }
+    };
+    read()
+      .catch((err) => !stopped && setProblem(describeError(err)))
+      .finally(() => !stopped && setLoading(false));
+    return () => {
+      stopped = true;
+    };
+  }, [chatId, view.kind, path]);
+
+  const crumbs = segments(path);
+  return (
+    <div className="files">
+      <nav className="files-crumbs small" aria-label="Where">
+        <button type="button" className="linklike" onClick={() => onView({ kind: "dir", path: "" })}>
+          repository
+        </button>
+        {crumbs.map((seg, i) => {
+          const here = crumbs.slice(0, i + 1).join("/");
+          const last = i === crumbs.length - 1;
+          return (
+            <span key={here}>
+              <span className="muted"> / </span>
+              {last ? <span className="mono">{seg}</span> : <button type="button" className="linklike mono" onClick={() => onView({ kind: "dir", path: here })}>{seg}</button>}
+            </span>
+          );
+        })}
+        {loading && <span className="muted"> …</span>}
+      </nav>
+      {problem && <p className="muted small pad">{problem}</p>}
+      {!problem && view.kind === "dir" && listing && (
+        <div className="files-list">
+          {path && (
+            <button type="button" className="files-entry" onClick={() => onView({ kind: "dir", path: parentOf(path) })}>
+              <span className="file-kind">↰</span>
+              <span className="file-path">..</span>
+            </button>
+          )}
+          {listing.entries.length === 0 && <p className="muted small pad">An empty directory.</p>}
+          {listing.entries.map((e) => (
+            <button key={e.name} type="button" className="files-entry" disabled={e.type === "other"} onClick={() => onView(e.type === "directory" ? { kind: "dir", path: joinPath(path, e.name) } : { kind: "file", path: joinPath(path, e.name) })}>
+              <span className="file-kind">{e.type === "directory" ? "▸" : e.type === "symlink" ? "↗" : " "}</span>
+              <span className="file-path">{e.name}</span>
+              {e.size !== null && <span className="muted tiny mono">{bytes(e.size)}</span>}
+            </button>
+          ))}
+          {listing.truncated && <p className="muted small pad">More files than the listing could carry.</p>}
+        </div>
+      )}
+      {!problem && view.kind === "file" && file && (
+        <div className="files-file">
+          <div className="muted tiny pad-x">
+            {bytes(file.size)}
+            {file.truncated ? ` · the first ${bytes(FILE_MAX_BYTES)} of it` : ""}
+          </div>
+          {file.encoding === "base64" ? <p className="muted small pad">Not a text file.</p> : <pre className="file-text">{file.content}</pre>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function bytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function statusMark(s: FileStatus): string {
