@@ -95,10 +95,11 @@ the merge:
 git log --full-history -- apps/arena/src/lib/spec.ts
 ```
 
-The image tags the old repositories pushed
-(`ghcr.io/managoat/<name>:sha-<commit>`) still name commits that exist here,
-which is why the merge preserved the original SHAs rather than rewriting
-them.
+The fourteen old repositories are archived, each pointing here from its
+description. Their image tags (`ghcr.io/managoat/<name>:sha-<commit>`) still
+name commits that exist in this repository — which is why the merge preserved
+the original SHAs rather than rewriting them, and why those packages were kept
+rather than recreated.
 
 ## License
 
