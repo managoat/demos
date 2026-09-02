@@ -107,6 +107,8 @@ beforeAll(() => {
       if (p === "/api/agents" && req.method === "GET") return json({ data: state.agents.get(key) ?? [] });
       if (p === "/api/agents" && req.method === "POST") {
         const body = (await req.json()) as Record<string, unknown>;
+        // Names are unique per account (seen live 2026-09-02: a 422 with `errors.name`).
+        if ((state.agents.get(key) ?? []).some((a) => a.name === body.name)) return json({ errors: { name: ["has already been taken"] } }, 422);
         state.agentPosts.push({ key, body });
         const made = { id: `a-${state.agentPosts.length}`, ...body } as unknown as FakeAgent;
         state.agents.set(key, [...(state.agents.get(key) ?? []), made]);
@@ -743,5 +745,20 @@ describe("changes from the computer", () => {
     }
     // A path with a quote in it stays one word.
     expect(hookSetupScript({ publicUrl: "https://s", repoPath: "/it's", base: "main" })).toContain(`REPO='/it'\\''s'`);
+  });
+});
+
+describe("a chat on an environment", () => {
+  test("names the environment on its agent — Fountain keeps names unique — and starts the conversation on it", async () => {
+    const host = await signIn("ftn_host");
+    const plain = await startChat(host);
+    const onEnv = await startChat(host, { ...SETTINGS, environmentId: "e-1" });
+    const onOther = await startChat(host, { ...SETTINGS, environmentId: "e-2" });
+    const names = state.agentPosts.map((a) => a.body.name);
+    expect(names).toEqual(["Salon · Opus 5 · on e-1", "Salon · Opus 5 · on e-2"]);
+    expect(new Set([plain.agentId, onEnv.agentId, onOther.agentId]).size).toBe(3);
+    const convs = state.conversations.get("ftn_host")!;
+    expect((convs.find((c) => c.id === onEnv.conversationId)!.request as Record<string, unknown>).environment_id).toBe("e-1");
+    expect((convs.find((c) => c.id === plain.conversationId)!.request as Record<string, unknown>).environment_id).toBeUndefined();
   });
 });
