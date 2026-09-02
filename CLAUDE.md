@@ -199,6 +199,11 @@ k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) ap
    would keep the old one: `projects.ts#refreshEnvironment` puts the
    environment back the way Salon writes it today whenever a chat starts
    in the project and something differs (one GET, a PUT only then).
+   Verified 2026-09-02: a chat start refreshed an older environment's
+   hook; `ahead: null` arrived for a branch with no upstream; archive
+   terminated the conversation; restore opened a new one whose hook
+   posted under the new id, and the model said the unpushed branch was
+   not on origin, which is what the archive warning is for.
 
 ## Run, test, ship
 
