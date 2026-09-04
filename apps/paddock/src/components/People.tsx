@@ -7,11 +7,17 @@
  * brief asked for — people invited to a thread — and it is a much smaller
  * thing to hand out than a whole computer.
  *
- * The warning is still the important part of the panel, because the reduction
- * is real but partial: a tab is a shell on the machine, so anyone who can type
- * into one can still ask the agent to read the disk. What per-tab invites buy
- * is that they cannot read *your other conversations*, and that revoking one
- * terminal does not disturb the rest.
+ * The panel is two doors and a guest list, so it is laid out as two doors and
+ * a guest list. Each door is a card that names itself in two words, puts its
+ * control on the next line, and only then explains itself; the tab's title is
+ * said once, in the header, instead of inside three headings that a generated
+ * title then wraps to three lines.
+ *
+ * The warning is still the important part of the link card, because the
+ * reduction is real but partial: a tab is a shell on the machine, so anyone
+ * who can type into one can still ask the agent to read the disk. Its first
+ * sentence is always on screen; the rest of the explanation is a disclosure,
+ * because a wall of caveat above a button is how the button got lost.
  */
 import { useState } from "react";
 import type { Role, TabPeopleDto } from "../api/paddock";
@@ -59,23 +65,26 @@ export function People({ tab, tabTitle, role, meLabel, ownerEmail, here, onInvit
   return (
     <div className="panel people">
       <header className="panel-head">
-        <div>
-          <h2>{tabTitle}</h2>
-          <p className="dim">{isOwner ? "who is in this terminal" : `${ownerEmail}'s machine`}</p>
+        <div className="head-copy">
+          <h2>People</h2>
+          <p className="dim clip" title={tabTitle}>
+            {isOwner ? <>in {tabTitle}</> : <>in {tabTitle}, on {ownerEmail}'s machine</>}
+          </p>
         </div>
       </header>
 
       <section>
-        <div className="section-head">
-          <h3>
-            Here now <span className="dim">— across the machine</span>
-          </h3>
-        </div>
-        <ul className="rows">
-          {here.map((p) => (
-            <li className="row" key={p.label}>
-              <span className="dot busy" />
-              <span className="row-label">{p.label === meLabel ? `${p.label} (you)` : p.label}</span>
+        <h4 className="loud">
+          Here now <span className="dim">· across the machine</span>
+        </h4>
+        <ul className="who">
+          {here.map((p, i) => (
+            <li key={`${p.label}-${i}`}>
+              <span className="who-dot" />
+              <span className="who-name clip" title={p.label}>
+                {p.label}
+              </span>
+              {p.label === meLabel && <span className="badge">you</span>}
               <span className="dim">{p.role}</span>
             </li>
           ))}
@@ -87,30 +96,27 @@ export function People({ tab, tabTitle, role, meLabel, ownerEmail, here, onInvit
         <p className="fine">…</p>
       ) : isOwner ? (
         <>
-          <section>
-            <div className="section-head">
-              <h3>
-                Invite to {tabTitle} <span className="dim">— by email</span>
-              </h3>
-              <p className="fine">
-                They sign in with Fountain and find this terminal waiting. Turns run on your account, so you pay for what they
-                do here.
-              </p>
+          <section className="act">
+            <div className="act-head">
+              <h3>Invite by email</h3>
+              <span className="badge">they sign in</span>
             </div>
-            <ul className="rows">
-              {tab.members.map((m) => (
-                <li className="row" key={m.email}>
-                  <span className="row-label">{m.email}</span>
-                  <button className="ghost" onClick={() => void run(() => onRemove(m.email))} disabled={busy}>
-                    remove
-                  </button>
-                </li>
-              ))}
-              {tab.members.length === 0 && <li className="fine">nobody yet</li>}
-            </ul>
-            <div className="editor-row">
-              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@example.com" spellCheck={false} />
+            <div className="act-do">
+              <input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="someone@example.com"
+                spellCheck={false}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" || busy || !email.trim()) return;
+                  void run(async () => {
+                    await onInvite(email.trim());
+                    setEmail("");
+                  });
+                }}
+              />
               <button
+                className="primary"
                 onClick={() =>
                   void run(async () => {
                     await onInvite(email.trim());
@@ -119,31 +125,38 @@ export function People({ tab, tabTitle, role, meLabel, ownerEmail, here, onInvit
                 }
                 disabled={busy || !email.trim()}
               >
-                invite
+                Invite
               </button>
             </div>
+            <p className="fine">They sign in with Fountain and find this terminal waiting. Their turns run on your account.</p>
+            <ul className="rows act-list">
+              {tab.members.map((m) => (
+                <li className="row" key={m.email}>
+                  <span className="row-label clip" title={m.email}>
+                    {m.email}
+                  </span>
+                  <span className="spacer" />
+                  <button className="ghost danger-text" onClick={() => void run(() => onRemove(m.email))} disabled={busy}>
+                    remove
+                  </button>
+                </li>
+              ))}
+              {tab.members.length === 0 && <li className="fine">nobody invited by email yet</li>}
+            </ul>
           </section>
 
-          <section>
-            <div className="section-head">
-              <h3>
-                Invite to {tabTitle} <span className="dim">— by link, no account needed</span>
-              </h3>
-              <p className="fine">Anyone who opens it lands in this terminal, with no sign-in at all. You pay for what they do.</p>
+          <section className="act">
+            <div className="act-head">
+              <h3>Invite by link</h3>
+              <span className="badge">no account needed</span>
             </div>
-
-            <p className="note warn">
-              <strong>They get a shell on this machine.</strong> It is one terminal — they cannot see your other ones or open
-              another — but a terminal is still a way to ask the agent to read the disk, including your environment secrets. If
-              something must stay private while somebody is in here, keep it as a <strong>vault</strong> secret: those never
-              touch the box.
-            </p>
 
             {tab.inviteUrl ? (
               <>
-                <div className="editor-row">
+                <div className="act-do">
                   <input value={absolute(tab.inviteUrl)} readOnly spellCheck={false} onFocus={(e) => e.currentTarget.select()} />
                   <button
+                    className="primary"
                     onClick={() => {
                       void navigator.clipboard?.writeText(absolute(tab.inviteUrl!)).then(
                         () => {
@@ -154,31 +167,48 @@ export function People({ tab, tabTitle, role, meLabel, ownerEmail, here, onInvit
                       );
                     }}
                   >
-                    {copied ? "copied" : "copy"}
+                    {copied ? "Copied" : "Copy"}
                   </button>
                 </div>
-                <div className="editor-row">
-                  <button className="ghost" onClick={() => void run(onMintLink)} disabled={busy}>
-                    new link
-                  </button>
-                  <button className="ghost" onClick={() => void run(onCloseLink)} disabled={busy}>
-                    close the link
-                  </button>
-                  <span className="fine">Either evicts whoever came in on the old one — from this terminal only.</span>
-                </div>
+                <p className="fine">The link is live. Anyone who opens it lands in this terminal with no sign-in, on your account.</p>
               </>
             ) : (
-              <div className="editor-row">
-                <button onClick={() => void run(onMintLink)} disabled={busy}>
-                  make a link
+              <>
+                <div className="act-do">
+                  <button className="primary wide" onClick={() => void run(onMintLink)} disabled={busy}>
+                    Make a link
+                  </button>
+                </div>
+                <p className="fine">No link for this terminal, so nobody can join it anonymously.</p>
+              </>
+            )}
+
+            <details className="caveat">
+              <summary>
+                <span className="glyph">⚠</span> They get a shell on this machine
+              </summary>
+              <p>
+                It is one terminal — they cannot see your other ones or open another — but a terminal is still a way to ask the
+                agent to read the disk, including your environment secrets. If something must stay private while somebody is in
+                here, keep it as a <strong>vault</strong> secret: those never touch the box.
+              </p>
+            </details>
+
+            {tab.inviteUrl && (
+              <div className="act-more">
+                <button className="ghost" onClick={() => void run(onMintLink)} disabled={busy}>
+                  New link
                 </button>
-                <span className="fine">No link for this terminal, so nobody can join it anonymously.</span>
+                <button className="ghost danger-text" onClick={() => void run(onCloseLink)} disabled={busy}>
+                  Close the link
+                </button>
+                <span className="fine">Either evicts whoever came in on the old one, from this terminal only.</span>
               </div>
             )}
 
             {tab.guests.length > 0 && (
-              <>
-                <h4>Guests in {tabTitle}</h4>
+              <div className="act-list">
+                <h4 className="loud">In on the link · {tab.guests.length}</h4>
                 <div className="chips">
                   {tab.guests.map((g) => (
                     <span className="chip" key={g.handle}>
@@ -187,16 +217,18 @@ export function People({ tab, tabTitle, role, meLabel, ownerEmail, here, onInvit
                   ))}
                 </div>
                 <p className="fine">The link is the credential, so a new link is how you remove one.</p>
-              </>
+              </div>
             )}
           </section>
         </>
       ) : (
-        <section>
+        <section className="act">
+          <div className="act-head">
+            <h3>You are {role === "member" ? "a member here" : "a guest here"}</h3>
+          </div>
           <p className="fine">
-            You are {role === "member" ? "a member of" : "a guest in"} {tabTitle} on {ownerEmail}'s machine. You can use this
-            terminal and read the files it can see. The machine's other terminals, and what is installed on it, are not yours to
-            change.
+            You can use this terminal and read the files it can see. The machine's other terminals, and what is installed on it,
+            belong to {ownerEmail}.
           </p>
         </section>
       )}
