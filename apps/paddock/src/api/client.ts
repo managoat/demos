@@ -92,6 +92,7 @@ export class FountainClient {
     system?: string;
     environment_id?: string;
     vault_id?: string;
+    sandbox_mode?: SandboxMode;
     metadata?: Record<string, unknown>;
   }): Promise<Agent> {
     return this.json<{ data: Agent }>("POST", "/api/agents", input).then((r) => r.data);
@@ -152,11 +153,37 @@ export class FountainClient {
    * The first tab: provisions the machine. `sandbox_mode: "persistent"` is
    * what makes it the agent identity's home rather than something torn down
    * when the conversation ends.
+   *
+   * `prompt` is required here because every app in the suite that starts a
+   * fresh conversation sends one in this same call — salon
+   * (`server/chats.ts`), and fountain-conversations, which will not even
+   * submit the form without one (`src/pages/New.tsx`). Whether Fountain
+   * *demands* it is not something this file knows; what it knows is that no
+   * app has ever left it out, and paddock sending the first turn separately
+   * was the one difference when starting a machine began returning 422.
+   *
+   * `POST /api/team` does provision a machine with no prompt at all, and a
+   * teammate sits waiting for its first turn. That is the team endpoint rather
+   * than this one, and paddock does not use it on purpose: it would put
+   * paddock's agent on the account's actual team, where every other app would
+   * list it. Salon avoids the same thing for the same reason.
    */
-  startBox(input: { agent_id: string; title?: string; channel_id?: string; environment_id?: string; vault_id?: string }): Promise<Conversation> {
+  startBox(input: {
+    agent_id: string;
+    prompt: string;
+    title?: string;
+    channel_id?: string;
+    environment_id?: string;
+    vault_id?: string;
+    /** The agent's own default, so this call knows whether it has to override. */
+    agentDefaultMode?: SandboxMode | null;
+  }): Promise<Conversation> {
+    const { agentDefaultMode, ...rest } = input;
     return this.json<{ data: Conversation }>("POST", "/api/conversations", {
-      ...input,
-      sandbox_mode: "persistent" satisfies SandboxMode,
+      ...rest,
+      // Only an override travels; the agent's own default stays implicit, the
+      // same rule fountain-conversations follows in src/pages/New.tsx.
+      ...(agentDefaultMode === "persistent" ? {} : { sandbox_mode: "persistent" satisfies SandboxMode }),
     }).then((r) => r.data);
   }
 

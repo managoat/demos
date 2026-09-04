@@ -252,14 +252,18 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
   async function startBox(id: Identity) {
     setStarting(true);
     try {
-      const conv = await client.startBox({
+      // The first turn goes in the same call that starts the machine: a fresh
+      // conversation with nothing to do is a 422, and a machine that failed to
+      // start is worth an error rather than a silent catch.
+      await client.startBox({
         agent_id: id.agent.id,
+        prompt: bootstrapPrompt({ slug: "t1", repoPath: primaryRepoPath(id.environment) }),
+        agentDefaultMode: id.agent.sandbox_mode ?? null,
         title: "Terminal 1",
         channel_id: channelFor("t1", configRev(id.agent)),
         ...(id.environment ? { environment_id: id.environment.id } : {}),
         ...(id.vault ? { vault_id: id.vault.id } : {}),
       });
-      await client.sendPrompt(conv.id, bootstrapPrompt({ slug: "t1", repoPath: primaryRepoPath(id.environment) })).catch(() => undefined);
       setActiveSlug("t1");
       await refreshConversations();
     } catch (err) {

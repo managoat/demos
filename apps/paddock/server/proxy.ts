@@ -262,6 +262,18 @@ async function forward(client: FountainClient, req: Request, method: string, tar
   const type = res.headers.get("content-type");
   if (type) headers["content-type"] = type;
   if (type?.includes("text/event-stream")) headers["cache-control"] = "no-cache";
+
+  // A refusal from Fountain reaches the browser intact but left no trace here,
+  // which made a 422 on "start my machine" a guessing game. Log it: the status,
+  // the call, and whatever Fountain said. Never the body we sent — it can carry
+  // a secret value on its way to /secrets/:key.
+  if (res.status >= 400 && type?.includes("application/json")) {
+    void res
+      .clone()
+      .text()
+      .then((text) => console.error(`paddock: fountain ${res.status} on ${method} ${target}: ${text.slice(0, 500)}`))
+      .catch(() => undefined);
+  }
   return new Response(res.body, { status: res.status, headers });
 }
 

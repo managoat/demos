@@ -74,6 +74,8 @@ export interface SecretKey {
 export interface Agent {
   id: string;
   name: string;
+  /** An agent's default. Paddock's is `persistent`: the machine is the point. */
+  sandbox_mode?: SandboxMode | null;
   description?: string | null;
   system?: string | null;
   model: string;

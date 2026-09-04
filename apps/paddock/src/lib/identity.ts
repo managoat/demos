@@ -61,6 +61,12 @@ export async function ensureIdentity(client: FountainClient, choice: { runtime: 
     name: IDENTITY_NAME,
     model: choice.model,
     runtime: choice.runtime,
+    // The identity's own default, so every conversation on it — the first one
+    // and every tab after — gets the same home without having to say so.
+    // fountain-conversations only sends `sandbox_mode` on a conversation when
+    // it *differs* from the agent's default; declaring it here is what makes
+    // that default right.
+    sandbox_mode: "persistent",
     description: "The agent that lives on your Paddock machine.",
     system: systemPrompt(),
     environment_id: environment.id,
