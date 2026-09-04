@@ -46,6 +46,7 @@ export function Skills({ agent, onSave }: { agent: Agent; onSave: (patch: Partia
   return (
     <Editor
       title="Skills"
+      summary={entries.length ? entries.map(skillLabel).join(", ") : "none"}
       info={
         <>
           Search is skills.sh, not Fountain — Fountain curates no list of skills, so nothing here is verified by anyone, and

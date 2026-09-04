@@ -74,6 +74,16 @@ export interface SetupProps {
   computerName: string;
   /** Back to the rows these forms produce, and to the button that applies them. */
   onDetails: () => void;
+  /**
+   * The gesture the session tier is named after.
+   *
+   * Everything under **Next tab** is written into the machine as a session
+   * starts, so a save there reaches nothing already running. The heading says
+   * that; this is the button that acts on it, because "open a new tab" was a
+   * sentence somebody had to translate into the `+` in the tab strip, and a
+   * button does not need translating.
+   */
+  onOpenTab: () => void;
 }
 
 export function Setup(props: SetupProps) {
@@ -135,7 +145,12 @@ export function Setup(props: SetupProps) {
       <section>
         <SectionHead
           {...TIER.session}
-          note="Fountain writes these into the machine as a tab opens. Tabs already running kept what they started with, so a save reaches the next tab and not this one."
+          note="Fountain writes these into the machine as a tab opens — the + in the tab strip opens one. Tabs already running kept what they started with, so a save reaches the next tab and not this one."
+          action={
+            <button className="ghost" onClick={props.onOpenTab}>
+              Open a tab
+            </button>
+          }
         />
         <Secrets
           envKeys={props.envSecretKeys}
@@ -277,6 +292,7 @@ function Repositories({
   return (
     <Editor
       title="Repositories"
+      summary={repos.length ? repos.map((r) => shortRepo(r.url)).join(", ") : "none"}
       info={
         <>
           Fountain clones over <code>https://</code> only. A private one needs a token: tick <em>private repository</em> and
@@ -415,7 +431,10 @@ function Packages({
   }
 
   return (
-    <Editor title="Packages">
+    <Editor
+      title="Packages"
+      summary={entries.length ? entries.map(([mgr, names]) => `${mgr} ${names.join(", ")}`).join(" · ") : "none"}
+    >
       {entries.length === 0 && <p className="fine">none</p>}
       {entries.map(([mgr, names]) => (
         <div className="editor-row" key={mgr}>
@@ -457,34 +476,29 @@ function Packages({
   );
 }
 
+/**
+ * The setup script. It used to carry its own edit/hide toggle over a line
+ * counting what was saved — which is what every editor does now, so the
+ * toggle went and the count became the summary.
+ */
 function SetupScript({ environment, onSave }: { environment: Environment; onSave: SetupProps["onSaveEnvironment"] }) {
   const saved = environment.setup_script ?? "";
   const [text, setText] = useState(saved);
-  const [open, setOpen] = useState(false);
   const dirty = text !== saved;
+  const lines = saved.trim() ? saved.trim().split("\n").length : 0;
 
   return (
     <Editor
       title="Setup script"
+      summary={lines ? `${lines} line${lines === 1 ? "" : "s"}` : "none"}
       info="Saving changes what a new box is built from. Applying runs it on this one."
-      right={
-        <button className="ghost" onClick={() => setOpen(!open)}>
-          {open ? "hide" : "edit"}
-        </button>
-      }
     >
-      {!open ? (
-        <p className="fine">{saved.trim() ? `${saved.trim().split("\n").length} lines` : "none"}</p>
-      ) : (
-        <>
-          <textarea className="script" value={text} onChange={(e) => setText(e.target.value)} rows={8} spellCheck={false} />
-          <div className="editor-row">
-            <button onClick={() => void onSave({ setup_script: text })} disabled={!dirty}>
-              Save
-            </button>
-          </div>
-        </>
-      )}
+      <textarea className="script" value={text} onChange={(e) => setText(e.target.value)} rows={8} spellCheck={false} />
+      <div className="editor-row">
+        <button onClick={() => void onSave({ setup_script: text })} disabled={!dirty}>
+          Save
+        </button>
+      </div>
     </Editor>
   );
 }
@@ -513,9 +527,12 @@ function Secrets({
     setValue("");
   }
 
+  const all = [...envKeys, ...vaultKeys];
+
   return (
     <Editor
       title="Secrets"
+      summary={all.length ? all.join(", ") : "none"}
       info={
         <>
           Two different things. An <strong>environment</strong> secret is put into the machine as an environment variable — the
@@ -633,9 +650,12 @@ function McpServers({
     void onSave({ mcp_servers: next });
   }
 
+  const names = Object.keys(servers);
+
   return (
     <Editor
       title="MCP servers"
+      summary={names.length ? names.join(", ") : "none"}
       info={
         <>
           The list is Fountain&apos;s catalog. <em>Verified{entries[0]?.verified_on ? ` ${entries[0].verified_on}` : ""}</em>{" "}
@@ -842,6 +862,7 @@ function Replace({
   return (
     <Editor
       title="Replace"
+      defaultOpen
       info={
         <>
           <strong>Build a new machine</strong> keeps everything declared above and starts you on a fresh disk — useful when

@@ -32,6 +32,7 @@
  * read-only sandbox routes; when the receipt cannot be read the panel says the
  * box has not reported rather than guessing.
  */
+import { useState } from "react";
 import type { Agent, Sandbox } from "../api/types";
 import type { Role } from "../api/paddock";
 import type { BoxDrift, DesiredItem, ItemStatus } from "../lib/machine";
@@ -81,9 +82,9 @@ export function Details(props: DetailsProps) {
           <p className="dim">
             {sandbox ? (
               <>
-                <code>{sandbox.id}</code> · {sandbox.status}
+                {sandbox.status}
                 {sandbox.mode ? ` · ${sandbox.mode}` : ""}
-                {sandbox.provider ? ` · ${sandbox.provider}` : ""}
+                {sandbox.provider ? ` · ${sandbox.provider}` : ""} <CopyId id={sandbox.id} />
               </>
             ) : (
               "no machine yet"
@@ -174,6 +175,44 @@ export function Details(props: DetailsProps) {
         <Change to="this machine — rebuild it, or start over" onSetup={props.onSetup} />
       </section>
     </div>
+  );
+}
+
+/**
+ * The sandbox id, out of the way.
+ *
+ * It led this line for a year — a twenty-odd character identifier, first, in
+ * front of the two words somebody actually opens this panel to read. Nobody
+ * types a sandbox id; they paste it into a support message or a Fountain URL,
+ * and about once a month. So the status leads and the id is a chip at the end
+ * that hands over the whole thing on a click.
+ *
+ * Truncated in the middle rather than the end: the tail is the part that
+ * distinguishes two ids from the same account, and a `sb-…-1` that could be
+ * any of four machines is worse than no id at all.
+ */
+function CopyId({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+  const short = id.length > 14 ? `${id.slice(0, 7)}…${id.slice(-4)}` : id;
+
+  async function copy() {
+    // No clipboard on an insecure origin, and no error worth showing for it —
+    // the full id is in the title, which is where somebody who cannot copy
+    // will read it from anyway.
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return (
+    <button className="copy-id" onClick={() => void copy()} title={`Copy ${id}`} aria-label={`Copy machine id ${id}`}>
+      <code>{copied ? "copied" : short}</code>
+      <span aria-hidden="true">⧉</span>
+    </button>
   );
 }
 
