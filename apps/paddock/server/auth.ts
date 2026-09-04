@@ -7,6 +7,13 @@
  *                            encrypted so their machine's tabs can run on it,
  *                            and issues a session cookie.
  *
+ *   POST /api/start          no key and no account either, but a different
+ *                            thing entirely: a computer of the visitor's own,
+ *                            on a claimable Fountain principal, which signing
+ *                            in later *claims* rather than replaces. Lives in
+ *                            `starter.ts`; the claim happens on the way
+ *                            through the first door above.
+ *
  *   POST /api/join/:token    no key, no account, no sign-in. The invite token
  *                            names a paddock; the server mints a guest row and
  *                            a session for it. This is the "let a user in
@@ -17,53 +24,18 @@
  * does: a guest's turn on a machine you own must not fail because you closed
  * a tab. The key is replaced on every sign-in and revocable in Fountain.
  */
-import { actorLabel, authenticate, type AppContext, type Identity } from "./context";
+import { authenticate, meDto, type AppContext, type Identity } from "./context";
 import { guestHandle, randomToken, sha256 } from "./crypto";
 import { FountainClient, FountainHttpError } from "./fountain";
 import type { PaddockRow, Role } from "./db";
+import { ClaimRefused, claim } from "./starter";
 import { clearedSessionCookie, cookieValue, HttpError, json, readJson, SESSION_COOKIE, sessionCookie, str } from "./http";
 
 export function config(ctx: AppContext): Response {
-  return json({ fountainUrl: ctx.config.fountainUrl });
-}
-
-/** What the browser is told about itself. Never a key, never anyone else's. */
-export function meDto(
-  ctx: AppContext,
-  id: Identity,
-  role: Role | null,
-  paddockId: string | null,
-  extra: Record<string, unknown> = {},
-): Record<string, unknown> {
-  return {
-    label: actorLabel(id),
-    kind: id.kind,
-    email: id.kind === "user" ? id.user.email : null,
-    role,
-    paddockId,
-    // Everywhere this person can go: the computers they own, oldest first,
-    // then anything shared with them. A guest has exactly one and is told
-    // nothing about it — not even its name, which is the owner's word for
-    // their own machine.
-    paddocks: id.kind === "user" ? ctx.db.paddocksFor(id.user.email) : [guestReachable(ctx, id.guest.paddock_id)],
-    ...extra,
-  };
-}
-
-/**
- * The one computer a guest can reach, told as little as possible about it.
- *
- * No name and no owner: they were lent one terminal, not shown around
- * somebody's account. `original` is the exception, and it is not a courtesy —
- * it decides whether a tab whose channel names no computer is on this machine
- * (`tabs.belongsTo`), so a guest of a paddock that predates computers renders
- * an empty strip without it. What it discloses is that this is the oldest row
- * on that account, which is not something anybody can act on.
- */
-function guestReachable(ctx: AppContext, paddockId: string) {
-  const paddock = ctx.db.getPaddock(paddockId);
-  const original = !!paddock && ctx.db.paddocksOf(paddock.owner_email)[0]?.id === paddock.id;
-  return { id: paddockId, name: "", ownerEmail: "", role: "guest" as Role, original };
+  // `anonymousStart` is what tells the SPA whether to start a computer or show
+  // the sign-in screen. It is a capability of the deployment, not of the
+  // caller, which is why it sits on the unauthenticated config route.
+  return json({ fountainUrl: ctx.config.fountainUrl, anonymousStart: ctx.config.anonymousStart });
 }
 
 /**
@@ -87,6 +59,9 @@ export function ownPaddock(ctx: AppContext, email: string): PaddockRow {
 export async function me(ctx: AppContext, req: Request): Promise<Response> {
   const id = await authenticate(ctx, req);
   if (id.kind === "guest") return json(meDto(ctx, id, "guest", id.guest.paddock_id));
+  // A starter already has their computer and is not entitled to a second one:
+  // `ownPaddock` is for accounts, and there is no account here yet.
+  if (id.kind === "starter") return json(meDto(ctx, id, "owner", id.paddock.id));
   const own = ownPaddock(ctx, id.user.email);
   return json(meDto(ctx, id, "owner", own.id));
 }
@@ -108,10 +83,40 @@ export async function signIn(ctx: AppContext, req: Request): Promise<Response> {
   const email = who.email.trim().toLowerCase();
   if (!email) throw new HttpError(502, "no_email", "Fountain did not say who the key belongs to.");
 
-  // Who is signing in *from* — a guest upgrading keeps their seat.
-  const previous = await currentGuest(ctx, req);
+  // Who is signing in *from*. A guest upgrading keeps their seat; a starter
+  // keeps their whole computer.
+  const from = await currentIdentity(ctx, req);
+  const previous = from?.kind === "guest" ? from.guest : null;
+  const starting = from?.kind === "starter" ? from.paddock : null;
 
   ctx.db.upsertUser(email, who.id ?? null, await ctx.cipher.encrypt(apiKey));
+
+  /**
+   * The claim. This is the moment an unclaimed computer becomes somebody's,
+   * and it runs *before* the session is issued because the two have to move
+   * together: a session that said "signed in" while the machine was still
+   * unclaimed would drop the only record of which computer was being claimed.
+   *
+   * `ownPaddock` is deliberately not called on this path. The claimed computer
+   * *is* this account's first, so making them another one would hand a
+   * first-time visitor two machines and land them on the empty one.
+   */
+  let claimed: string | null = null;
+  let claimFailed: string | null = null;
+  if (starting) {
+    try {
+      await claim(ctx, starting, apiKey, email);
+      claimed = starting.id;
+    } catch (err) {
+      // Retryable: refuse the sign-in and keep the starter session, so trying
+      // again replays the same claim rather than abandoning the machine.
+      if (!(err instanceof ClaimRefused)) throw err;
+      // Terminal: the computer is not going to become theirs. Sign them in
+      // anyway — being unable to sign in at all is strictly worse — and say
+      // what happened rather than losing it silently.
+      claimFailed = err.message;
+    }
+  }
 
   /**
    * The upgrade. A guest is anonymous, tied to one terminal, and evicted the
@@ -130,27 +135,41 @@ export async function signIn(ctx: AppContext, req: Request): Promise<Response> {
   }
   if (previous) ctx.db.deleteGuest(previous.id);
 
+  // The old session goes with the new one. A starter session outliving the
+  // claim would be a second way into a computer that now has an owner.
+  const before = cookieValue(req, SESSION_COOKIE);
+  if (before) ctx.db.deleteSession(await sha256(before));
+
   const token = randomToken();
   ctx.db.createUserSession(await sha256(token), email);
   ctx.db.expireSessions(ctx.config.sessionMaxAgeMs);
 
-  const own = ownPaddock(ctx, email);
+  const own = claimed ? ctx.db.getPaddock(claimed)! : ownPaddock(ctx, email);
   const id: Identity = { kind: "user", user: ctx.db.getUser(email)! };
   // Land where they were, if they were somewhere. Signing in to keep a seat
   // and then being dropped somewhere else is not keeping it.
   const landing = upgraded?.paddockId ?? own.id;
   const role: Role = own.id === landing ? "owner" : "member";
-  return json(meDto(ctx, id, role, landing, upgraded ? { upgradedFrom: upgraded.from } : {}), 200, {
-    "set-cookie": sessionCookie(token, req, ctx.config.sessionMaxAgeMs / 1000),
-  });
+  return json(
+    meDto(ctx, id, role, landing, {
+      ...(upgraded ? { upgradedFrom: upgraded.from } : {}),
+      // The client reloads on this, remembering the paddock id — the same
+      // machine, the same tabs, the same history, now under an account.
+      ...(claimed ? { claimedFrom: claimed } : {}),
+      ...(claimFailed ? { claimFailed } : {}),
+    }),
+    200,
+    { "set-cookie": sessionCookie(token, req, ctx.config.sessionMaxAgeMs / 1000) },
+  );
 }
 
-/** The guest this request is currently, if it is one. */
-async function currentGuest(ctx: AppContext, req: Request) {
-  const token = cookieValue(req, SESSION_COOKIE);
-  if (!token) return null;
-  const session = ctx.db.session(await sha256(token));
-  return session?.guest_id ? ctx.db.getGuest(session.guest_id) : null;
+/** Who this request already is, if it is anybody. Never throws — this is a sign-in. */
+async function currentIdentity(ctx: AppContext, req: Request): Promise<Identity | null> {
+  try {
+    return await authenticate(ctx, req);
+  } catch {
+    return null;
+  }
 }
 
 /**

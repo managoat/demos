@@ -3,6 +3,11 @@
 **paddock.demo.managoat.com** — a computer in the cloud that stays yours, on
 the [Fountain](https://github.com/BinaryBourbon/fountain) API.
 
+Open it and a computer starts — no form, no key, no account. Terminal 1 is
+usable straight away, and signing in later **claims that exact machine** rather
+than building a second one. Same disk, same history, same ids. See
+[Starting before you sign in](#starting-before-you-sign-in).
+
 Sign in and you have a machine. Terminal tabs are threads on it. Everything you
 change about it afterwards — repositories, packages, a setup script, secrets,
 MCP servers, skills — is changed **on** the machine rather than by replacing
@@ -48,6 +53,11 @@ OAUTH_CLIENTS='[{"id":"paddock","name":"Paddock","redirect_uris":["http://localh
 The server takes `FOUNTAIN_URL`, `DATA_DIR`, `PADDOCK_SECRET` (encrypts stored
 keys; generated into `DATA_DIR/secret` if unset), `PUBLIC_URL` (where invite
 links point) and `STATIC_DIR`.
+
+To let visitors start a computer without an account, it also takes
+`ANONYMOUS_START=1` and `FOUNTAIN_APP_KEY` — see below. Both are needed: the
+flag on its own does nothing, because the credential *is* the feature. The mock
+answers the claimable-principal routes too, so the whole flow works offline.
 
 It also takes `SKILLS_URL`, which defaults to skills.sh. The mock serves the
 same shape, so pointing it there makes the Skills search work offline like
@@ -307,6 +317,75 @@ the flow even if it wanted to. Salon has an App because each *participant* there
 brings a repository from their own account; in a paddock only the owner adds
 one, so an App would buy a repository picker and a worse credential than the
 one above.
+
+## Starting before you sign in
+
+A first-time visitor gets a real computer before they get a form. It is not a
+demo mode and not a sandbox with the interesting parts removed: it is a
+Fountain tenant of its own, with its own agent, environment, vault, sandbox and
+conversations, and the terminal on it is the terminal.
+
+What makes it work is **claimable principals**
+([fountain#1551](https://github.com/BinaryBourbon/fountain/issues/1551), ADR
+0044). A sandbox's name contains its tenant id, so moving resources between
+accounts does not move a machine — it abandons one and builds another. A claim
+does not move anything. It records that an account is now behind the principal,
+and the principal id, the agent, the disk, the conversations and every id under
+them read the same afterwards. That is the whole reason this is a claim and not
+a transfer, and it is why the app can promise that signing in keeps your work.
+
+The alternative — one shared Fountain service account for every visitor — was
+rejected on purpose. It would make Paddock re-implement the tenant isolation
+Fountain already enforces at the query level, and one leaked visitor credential
+would reach every visitor's machine.
+
+### Configuration
+
+| Variable | Default | What it does |
+|---|---|---|
+| `ANONYMOUS_START` | off | `1` to offer it. Off means the sign-in screen, exactly as before. |
+| `FOUNTAIN_APP_KEY` | — | This application's own Fountain key, **full scope**. It opens, reads and releases claimable principals, and its account pays for them. It never leaves the server and is never put in a browser. |
+| `ANONYMOUS_TTL_SECONDS` | `86400` | How long an unclaimed computer lives. |
+| `ANONYMOUS_BUDGET_USD` | `1` | What one unclaimed computer's introductory grant is worth. |
+
+Put credit on the application's Fountain account: every unclaimed computer
+spends from it until somebody claims it, at which point future usage moves to
+the claiming account's balance. Fountain enforces the lifetime, the budget and
+the one-live-sandbox limit; Paddock presents them and sweeps what expires.
+
+### What an unclaimed computer may do
+
+Terminal 1, the files, and the box's own state — read, prompt, interrupt. It
+may not open or close another terminal, change anything about the machine,
+invite anybody, rebuild or start over. Every one of those is refused by the
+server (`context.requireClaimed`); the client also hides the controls, which is
+a courtesy on top of that rather than instead of it.
+
+The one thing an unclaimed computer *may* write is the machine itself, at first
+run — the agent, environment and vault have to exist for there to be a computer
+at all. The line is "before the machine exists" rather than a list of paths, so
+there is no allowlist to keep in step with `lib/identity.ts`.
+
+### Claiming, expiry and cleanup
+
+Claiming happens inside `POST /api/auth/session`: signing in from an unclaimed
+computer attaches that account to the principal and rotates the compute
+credential to the one the claim hands back. Both calls to Fountain carry an
+`Idempotency-Key` derived from the computer's id, so a dropped response is
+finished by signing in again rather than losing the machine between two
+systems.
+
+An unclaimed computer that nobody claims expires. A sweep every hour reads
+Fountain's own status for each expired grant, releases it, and forgets the local
+row; a grant that comes back `claimed` is left alone, because that is a lost
+claim response and not rubbish. The browser that was using an expired computer
+is told that, rather than "your session ended".
+
+Operationally, the lines to watch are `paddock: start attempted`, `start
+opened`, `start refused`, `start claimed`, `start claim failed`, and `swept
+unclaimed computers`. Unexpected creation volume and a rising `refused` are the
+two shapes worth an alert; `stranded` in a sweep report means a principal is
+claimed upstream and not here, and wants a look.
 
 ## Why there is a server
 

@@ -8,6 +8,14 @@
  *
  * The aside underneath rotates and is only there to make the wait pleasant.
  * It says nothing load-bearing, which is why it is allowed to be silly.
+ *
+ * It is also the first thing a visitor with no account sees, which is what the
+ * `unclaimed` variant is for. The old copy promised a machine that "stays
+ * yours" and that it "is only built once", and neither is true yet for
+ * somebody who has not claimed it: the honest version says the machine is real
+ * and the ownership is the part still outstanding. Overpromising here would
+ * make the claim offer read as an upsell rather than as the thing that makes
+ * the promise true.
  */
 import { useEffect, useState } from "react";
 import type { BootStep } from "../lib/identity";
@@ -16,7 +24,7 @@ const STEPS: { key: BootStep; label: string; note: string }[] = [
   { key: "environment", label: "Fencing the paddock", note: "the environment your disk gets built from" },
   { key: "vault", label: "Hanging the key safe", note: "secrets that never touch the box" },
   { key: "agent", label: "Hiring the goat", note: "the agent that lives here" },
-  { key: "machine", label: "Turning it out", note: "the machine itself, and it stays yours" },
+  { key: "machine", label: "Turning it out", note: "the machine itself" },
   { key: "waking", label: "Waiting for it to settle", note: "the first turn is already running" },
 ];
 
@@ -28,10 +36,20 @@ const ASIDES = [
   "Nothing you add later will take this box away from you.",
 ];
 
+/** The same wait, for somebody who does not own the thing being built yet. */
+const UNCLAIMED_ASIDES = [
+  "Goats are not fussy eaters. They are, however, extremely curious eaters.",
+  "A paddock is fenced so the things inside it stay inside it.",
+  "No form, no key, no account. The box is real and it is starting now.",
+  "Claim it whenever you like and this exact machine stays — same disk, same history.",
+  "Everything you do from here is on the box, not in this browser.",
+];
+
 export function Starting({
   step,
   name,
   another,
+  unclaimed,
   error,
   onRetry,
 }: {
@@ -40,16 +58,19 @@ export function Starting({
   name: string;
   /** Not the account's first. The steps are the same; the sentence is not. */
   another: boolean;
+  /** Nobody owns this one yet. The steps are the same; the promise is not. */
+  unclaimed: boolean;
   error: string | null;
   onRetry: () => void;
 }) {
   const [aside, setAside] = useState(0);
+  const asides = unclaimed ? UNCLAIMED_ASIDES : ASIDES;
 
   useEffect(() => {
     if (error) return;
-    const t = window.setInterval(() => setAside((n) => (n + 1) % ASIDES.length), 4000);
+    const t = window.setInterval(() => setAside((n) => (n + 1) % asides.length), 4000);
     return () => window.clearInterval(t);
-  }, [error]);
+  }, [error, asides.length]);
 
   const at = STEPS.findIndex((s) => s.key === step);
 
@@ -57,12 +78,14 @@ export function Starting({
     <div className="connect">
       <div className="connect-card">
         <h1>
-          <span className="glyph">🐐</span> Building {another && name ? name : "your machine"}
+          <span className="glyph">🐐</span> {unclaimed ? "Starting a computer" : `Building ${another && name ? name : "your machine"}`}
         </h1>
         <p className="lede">
-          {another
-            ? "A machine of its own: its own disk, its own packages, its own secrets. Your other computers are untouched, and this happens once per machine."
-            : "One computer, yours, that stays up between visits. This happens once."}
+          {unclaimed
+            ? "A real machine, starting now, with no account and no key. It is yours to use straight away — and yours to keep, from the moment you claim it."
+            : another
+              ? "A machine of its own: its own disk, its own packages, its own secrets. Your other computers are untouched, and this happens once per machine."
+              : "One computer, yours, that stays up between visits. This happens once."}
         </p>
 
         <ul className="rows steps">
@@ -87,7 +110,7 @@ export function Starting({
             <p className="fine">Nothing was half-made: whatever already exists is found again rather than duplicated.</p>
           </>
         ) : (
-          <p className="fine aside">{ASIDES[aside]}</p>
+          <p className="fine aside">{asides[aside % asides.length]}</p>
         )}
       </div>
     </div>

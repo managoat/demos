@@ -27,9 +27,19 @@ export interface TerminalProps {
   onSend: (text: string) => void;
   onInterrupt: () => void;
   loading: boolean;
+  /**
+   * The machine cannot take another turn at all — an unclaimed computer whose
+   * introductory grant is spent, or whose time is up.
+   *
+   * The scrollback stays exactly where it is and the prompt is replaced by the
+   * one thing that would help. Everything somebody did is still on the box and
+   * still theirs to keep; clearing the transcript to show an error would make
+   * a recoverable moment look like a machine that had already been thrown away.
+   */
+  halted?: { line: string; action: string; onAction: () => void } | null;
 }
 
-export function Terminal({ tab, events, blockedBy, queued, onSend, onInterrupt, loading }: TerminalProps) {
+export function Terminal({ tab, events, blockedBy, queued, onSend, onInterrupt, loading, halted }: TerminalProps) {
   const [draft, setDraft] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
   const stuck = useRef(true);
@@ -88,6 +98,15 @@ export function Terminal({ tab, events, blockedBy, queued, onSend, onInterrupt, 
         )}
       </div>
 
+      {halted ? (
+        <div className="prompt halted">
+          <span className="sigil">⨯</span>
+          <span className="halted-line">{halted.line}</span>
+          <button className="primary" onClick={halted.onAction}>
+            {halted.action}
+          </button>
+        </div>
+      ) : (
       <div className="prompt">
         <span className={`sigil ${running ? "working" : ""}`}>{running ? "◐" : "›"}</span>
         <textarea
@@ -115,8 +134,9 @@ export function Terminal({ tab, events, blockedBy, queued, onSend, onInterrupt, 
           </button>
         )}
       </div>
+      )}
 
-      {blockedBy && (
+      {!halted && blockedBy && (
         <div className="prompt-note">
           One turn at a time on a box. <strong>{blockedBy}</strong> is working; anything you send waits for it.
         </div>

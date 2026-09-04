@@ -24,6 +24,19 @@
  *      the machine through, so a guest who could prompt it would route around
  *      every permission below by simply asking.
  *
+ *   4. **An unclaimed computer may be built and used, not changed.** A visitor
+ *      who has not registered yet is the owner of a real machine on a real
+ *      tenant (issue #14), and gets Terminal 1, the files and the box's own
+ *      state. A second terminal, terminating one, and every write to the
+ *      config surface wait for the claim — because until then the machine runs
+ *      on this application's money under no account anybody can be held to.
+ *
+ *      The line is drawn at *build versus change* rather than at a list of
+ *      paths, because first run has to write the same records the Setup panel
+ *      does: the agent, the environment and the vault are all created before
+ *      the machine exists. So the gate asks whether there is a machine yet,
+ *      which is a question with one answer and no list to keep in step.
+ *
  *   3. **Everything is an allowlist.** Unlisted method/path pairs are 404.
  *      Reading the machine's config is open to the paddock; changing it is the
  *      owner's alone. Even for the owner it is a list of shapes rather than
@@ -34,7 +47,7 @@
 import { belongsTo, opsTab, parseChannel, tabsOf, type Tab } from "../shared/tabs";
 import { WORK_ROOT } from "../shared/spec";
 import { withAuthor } from "../shared/author";
-import { actorLabel, ownerClient, paddockAccess, type AppContext, type Identity } from "./context";
+import { actorLabel, ownerClient, paddockAccess, requireClaimed, type AppContext, type Identity } from "./context";
 import type { PaddockRow, Role } from "./db";
 import { asHttpError, type ConversationSummary, type FountainClient } from "./fountain";
 import { HttpError, readJson, str } from "./http";
@@ -42,14 +55,16 @@ import { withPromptLock } from "./prompt-lock";
 import { hub } from "./hub";
 
 /** What a role may do to one tab. Anything absent is a 404. */
-function tabAllowed(method: string, sub: string, role: Role): boolean {
+function tabAllowed(method: string, sub: string, role: Role, claimed: boolean): boolean {
   if (method === "GET") {
     return sub === "" || sub === "/turns" || sub === "/events" || sub === "/stream" || /^\/turns\/[^/]+\/images\/[^/]+$/.test(sub);
   }
   if (method !== "POST") return false;
   if (sub === "/prompts" || sub === "/interrupt" || sub === "/read") return true;
-  // Ending a tab ends it for everybody on the machine. The owner's call.
-  if (sub === "/terminate") return role === "owner";
+  // Ending a tab ends it for everybody on the machine. The owner's call — and
+  // on an unclaimed computer there is exactly one tab, so ending it would be
+  // ending the only thing the visitor came for.
+  if (sub === "/terminate") return role === "owner" && claimed;
   return false;
 }
 
@@ -109,7 +124,7 @@ const OWNER_PATHS: { method: string; re: RegExp }[] = [
 ];
 
 export async function handleProxy(ctx: AppContext, req: Request, paddockId: string, path: string, id: Identity): Promise<Response> {
-  const { paddock, role, original, tabs: allowed } = paddockAccess(ctx, id, paddockId);
+  const { paddock, role, original, tabs: allowed, claimed } = paddockAccess(ctx, id, paddockId);
   const client = await ownerClient(ctx, paddock);
   const method = req.method.toUpperCase();
   const url = new URL(req.url);
@@ -129,7 +144,7 @@ export async function handleProxy(ctx: AppContext, req: Request, paddockId: stri
     // creating a second — and a guest making tabs on a stranger's box is
     // exactly the thing an anonymous link should not buy.
     if (role !== "owner") throw new HttpError(403, "owner_only", "Only the owner of this machine can open a tab on it.");
-    return newConversation(ctx, req, paddock, here, client, id);
+    return newConversation(ctx, req, paddock, here, client, id, claimed);
   }
 
   // ── one tab ─────────────────────────────────────────────────────────────
@@ -140,7 +155,7 @@ export async function handleProxy(ctx: AppContext, req: Request, paddockId: stri
     const tabs = await visibleTabs(client, here, allowed);
     const tab = tabs.find((t) => t.conversation.id === conversationId);
     if (!tab) throw new HttpError(404, "not_found", "No such tab on this machine.");
-    if (!tabAllowed(method, sub, role)) throw new HttpError(404, "not_found");
+    if (!tabAllowed(method, sub, role, claimed)) throw new HttpError(404, "not_found");
     if (method === "POST" && sub === "/prompts") return prompt(ctx, req, paddock, client, tab, id);
     return forward(client, req, method, `/api/conversations/${encodeURIComponent(conversationId)}${sub}${url.search}`, method === "POST" ? "{}" : null);
   }
@@ -162,11 +177,37 @@ export async function handleProxy(ctx: AppContext, req: Request, paddockId: stri
   }
   if (OWNER_PATHS.some((p) => p.method === method && p.re.test(path))) {
     if (role !== "owner") throw new HttpError(404, "not_found");
+    // Reading is never gated — the Details panel is honest about a machine
+    // whoever is looking at it cannot yet change. Writing is, and only until
+    // the machine exists: see `requireBuildable`.
+    if (method !== "GET") await requireBuildable(client, here, claimed);
     const body = method === "GET" || method === "DELETE" ? null : await req.text();
     return forward(client, req, method, `${path}${url.search}`, body);
   }
 
   throw new HttpError(404, "not_found");
+}
+
+/**
+ * Building an unclaimed computer is allowed. Changing one is not.
+ *
+ * First run creates the agent, the environment and the vault — the same three
+ * records the Setup panel later mutates — so a gate written as a list of paths
+ * would either block the machine from ever existing or leave the config
+ * surface open. The question that separates them is whether there is a machine
+ * yet, and `machineOf` already answers it from the conversation list, with no
+ * state of its own to go stale.
+ *
+ * The consequence worth naming: a claimed computer never reaches this at all,
+ * and an unclaimed one whose machine has ended may build another. That second
+ * case is the same one the client's own restart path takes, and it has to
+ * stay open or a box that stopped would strand the visitor.
+ */
+async function requireBuildable(client: FountainClient, here: Here, claimed: boolean): Promise<void> {
+  if (claimed) return;
+  if (await machineOf(client, here)) {
+    throw new HttpError(403, "claim_required", "Claim this computer to change what it is made of.");
+  }
 }
 
 // ── the machine, and the tabs on it ───────────────────────────────────────
@@ -270,7 +311,15 @@ async function prompt(ctx: AppContext, req: Request, paddock: PaddockRow, client
  * guest attaching a tab to a box that is not this paddock's. Only the owner
  * may take the other branch, because it spends money.
  */
-async function newConversation(ctx: AppContext, req: Request, paddock: PaddockRow, here: Here, client: FountainClient, id: Identity): Promise<Response> {
+async function newConversation(
+  ctx: AppContext,
+  req: Request,
+  paddock: PaddockRow,
+  here: Here,
+  client: FountainClient,
+  id: Identity,
+  claimed: boolean,
+): Promise<Response> {
   const body = await readJson(req);
   const channel = str(body.channel_id, 200);
   // The channel is how every later request decides which computer this tab is
@@ -286,6 +335,11 @@ async function newConversation(ctx: AppContext, req: Request, paddock: PaddockRo
     // environment/vault choices stay in one place (shared/spec + identity).
     return forward(client, req, "POST", "/api/conversations", JSON.stringify(body));
   }
+
+  // Past first run this is a *second* terminal, which is the other side of the
+  // same line: one machine is what an unclaimed computer is for, and every tab
+  // after it is another thing running on somebody else's grant.
+  requireClaimed({ claimed }, "open another terminal");
 
   const res = await forward(
     client,

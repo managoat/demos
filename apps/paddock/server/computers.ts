@@ -21,7 +21,7 @@
  * row, and it reuses `lifecycle.retire` rather than repeating it — one
  * sequence for taking a machine apart, however it was asked for.
  */
-import { authenticate, paddockAccess, requireOwner, type AppContext } from "./context";
+import { authenticate, paddockAccess, requireClaimed, requireOwner, type AppContext } from "./context";
 import { randomToken } from "./crypto";
 import type { PaddockRow } from "./db";
 import { hub } from "./hub";
@@ -71,7 +71,10 @@ function cleanName(raw: unknown): string {
 export async function create(ctx: AppContext, req: Request): Promise<Response> {
   const id = await authenticate(ctx, req);
   // A guest has no account to hang a second machine off, and telling them to
-  // sign in is what the Sign in panel is already for.
+  // sign in is what the Sign in panel is already for. Somebody on an unclaimed
+  // computer has the same problem and a better answer: claiming the one they
+  // are standing on is what gives them an account to hang a second off.
+  if (id.kind === "starter") throw new HttpError(403, "claim_required", "Claim this computer to add another.");
   if (id.kind !== "user") throw new HttpError(403, "account_required", "Sign in to add a computer of your own.");
 
   const owned = ctx.db.paddocksOf(id.user.email);
@@ -118,8 +121,9 @@ export async function remove(ctx: AppContext, req: Request, paddockId: string): 
   const id = await authenticate(ctx, req);
   const access = paddockAccess(ctx, id, paddockId);
   requireOwner(access.role);
+  requireClaimed(access, "remove it");
 
-  const owned = ctx.db.paddocksOf(access.paddock.owner_email);
+  const owned = ctx.db.paddocksOf(access.paddock.owner_email!);
   if (owned.length <= 1) {
     throw new HttpError(409, "last_computer", "This is your only computer. Start over instead, which empties it without removing it.");
   }
@@ -131,5 +135,5 @@ export async function remove(ctx: AppContext, req: Request, paddockId: string): 
 }
 
 function dto(row: PaddockRow, original: boolean): ComputerDto {
-  return { id: row.id, name: row.name, ownerEmail: row.owner_email, role: "owner", original };
+  return { id: row.id, name: row.name, ownerEmail: row.owner_email ?? "", role: "owner", original };
 }

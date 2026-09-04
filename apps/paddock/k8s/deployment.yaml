@@ -35,10 +35,28 @@ spec:
             # Where invite links point.
             - name: PUBLIC_URL
               value: https://paddock.demo.managoat.com
+            # Let a visitor start a computer before signing in (issue #14).
+            # Inert without FOUNTAIN_APP_KEY in the secret below, which is the
+            # feature flag: no application credential, no claimable principals,
+            # and the sign-in screen exactly as it was.
+            - name: ANONYMOUS_START
+              value: "1"
+            # How long an unclaimed computer lives, and what its introductory
+            # grant is worth. Both are also ceilinged in Fountain, which is
+            # where the enforcement is; these are what this app asks for.
+            - name: ANONYMOUS_TTL_SECONDS
+              value: "86400"
+            - name: ANONYMOUS_BUDGET_USD
+              value: "1"
           envFrom:
             # PADDOCK_SECRET, if provided: encrypts the stored Fountain keys.
             # Without it the server generates one into /data/secret — it works,
             # but the secret then lives beside the data it protects.
+            #
+            # FOUNTAIN_APP_KEY, if provided: this application's own full-scope
+            # Fountain key. It opens claimable principals and its account pays
+            # for every unclaimed computer, so the account behind it needs
+            # credit on it and the key needs treating as one.
             - secretRef:
                 name: paddock-secrets
                 optional: true

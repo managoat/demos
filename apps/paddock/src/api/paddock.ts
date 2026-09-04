@@ -25,9 +25,28 @@ export interface Reachable {
   original: boolean;
 }
 
+/**
+ * An unclaimed computer's terms, as the server states them.
+ *
+ * Present only on a `starter` — somebody using a computer they started before
+ * signing in. Everything the client does with it is an offer rather than a
+ * gate: the *server* refuses what an unclaimed computer may not do, and hiding
+ * a button is a courtesy on top of that, never instead of it.
+ */
+export interface ClaimState {
+  status: "unclaimed";
+  /** When Fountain expires the introductory grant. ISO 8601, or null. */
+  expiresAt: string | null;
+}
+
 export interface Me {
   label: string;
-  kind: "user" | "guest";
+  /**
+   * `starter` is the anonymous *owner* of an unclaimed computer, and is not a
+   * guest with fewer rights: a guest borrows one terminal in a machine
+   * somebody else owns, a starter possesses a whole machine nobody owns yet.
+   */
+  kind: "user" | "guest" | "starter";
   email: string | null;
   role: Role | null;
   /** Where to land. */
@@ -36,6 +55,16 @@ export interface Me {
   paddocks: Reachable[];
   /** Set once, on the sign-in that turned a guest into a member. */
   upgradedFrom?: string;
+  /** Set on a starter, and on nobody else. */
+  claim?: ClaimState | null;
+  /** Set once, on the sign-in that claimed an unclaimed computer. Its id. */
+  claimedFrom?: string;
+  /**
+   * Set when the sign-in worked and the claim did not — the computer expired,
+   * or somebody else got there first. They are signed in; that machine is not
+   * theirs, and saying so is better than a machine quietly disappearing.
+   */
+  claimFailed?: string;
 }
 
 export interface Present {
@@ -79,8 +108,26 @@ export class PaddockError extends Error {
 }
 
 export const paddock = {
-  config: () => call<{ fountainUrl: string }>("GET", "/api/config"),
+  config: () => call<{ fountainUrl: string; anonymousStart: boolean }>("GET", "/api/config"),
   me: () => call<Me>("GET", "/api/me"),
+
+  /**
+   * A computer, for somebody who has nothing.
+   *
+   * `startKey` is this browser's, kept in `localStorage`, and it is what makes
+   * a retry a retry: the server derives the computer's id from it, so a
+   * dropped response, a refresh mid-flight or React double-invoking an effect
+   * all find the machine that was already started rather than starting a
+   * second one on the demo's money.
+   */
+  start: (startKey: string) => call<Me>("POST", "/api/start", { startKey }),
+
+  /**
+   * Sign in — and, from an unclaimed computer, claim it. One call, because it
+   * is one decision: the server sees the anonymous session on the way through
+   * and attaches this account to the principal the machine already runs on.
+   * The answer carries `claimedFrom` when that happened.
+   */
   signIn: (apiKey: string) => call<Me>("POST", "/api/auth/session", { apiKey }),
   signOut: () => call<{ ok: true }>("DELETE", "/api/auth/session"),
   join: (token: string) => call<Me>("POST", `/api/join/${encodeURIComponent(token)}`),
@@ -171,6 +218,25 @@ export function describePaddockError(err: unknown): string {
         return "This is your only computer. Start over instead, which empties it without removing it.";
       case "account_required":
         return "Sign in to add a computer of your own.";
+      case "claim_required":
+        // The server's message names the thing that was refused, which is more
+        // use than a generic sentence about claiming.
+        return err.message;
+      case "start_unavailable":
+        return "This Paddock does not start computers for visitors. Sign in with a Fountain account.";
+      case "start_busy":
+        return "A lot of people are starting computers right now. Try again in a moment.";
+      case "start_budget":
+      case "start_at_capacity":
+        return `${err.message}`;
+      case "start_expired":
+        return "That computer's free time is up. Sign in to start a new one.";
+      case "already_claimed":
+        return "That computer has been claimed. Sign in to open it.";
+      case "claimed_by_other":
+        return "Somebody else claimed that computer first.";
+      case "claim_expired":
+        return "That computer's free time ran out before it was claimed.";
       case "bad_key":
         return "Fountain rejected that key.";
       case "unauthenticated":

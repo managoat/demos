@@ -55,6 +55,20 @@ const state = {
   /** Each box's disk, keyed by sandbox id. */
   files: new Map<string, Map<string, string>>(),
   events: new Map<string, unknown[]>(),
+  /**
+   * Claimable principals (fountain#1551), keyed by grant id, plus the
+   * `Idempotency-Key` each was opened under so a replay is a replay.
+   *
+   * Honestly incomplete, and worth saying where: the real thing is a *tenant*,
+   * so a principal's agents and sandboxes are invisible to every other
+   * principal. This mock has one global set of everything, so an unclaimed
+   * computer and a signed-in account here share a world they would not share
+   * against a real Fountain. What it does model faithfully is the part paddock
+   * has logic for — the four routes, the once-only secrets, idempotent create
+   * and claim, and a `principal_id` that does not move when somebody claims it.
+   */
+  claimables: new Map<string, { id: string; principal_id: string; api_key: string; claim_token: string; status: string; expires_at: string | null }>(),
+  claimableByKey: new Map<string, string>(),
 };
 
 /** The identity a disk is built for, as one comparable string. */
@@ -373,6 +387,54 @@ Bun.serve({
       const email = !key || key === "ftn_owner" ? "you@example.com" : `${key.replace(/^ftn_/, "")}@example.com`;
       return json({ id: `u-${key || "anon"}`, email });
     }
+    // ── claimable principals ──────────────────────────────────────────────
+    if (p === "/api/claimable-users" && method === "POST") {
+      const idem = req.headers.get("idempotency-key") ?? "";
+      const known = idem ? state.claimableByKey.get(idem) : undefined;
+      // A replay answers with the same principal and a *new* pair of secrets:
+      // Fountain keeps only their hashes, so it has nothing to hand back twice.
+      const grant = known
+        ? state.claimables.get(known)!
+        : {
+            id: `cl-${state.seq++}`,
+            principal_id: `pr-${state.seq++}`,
+            api_key: "",
+            claim_token: "",
+            status: "unclaimed",
+            expires_at: new Date(Date.now() + (Number(body.expires_in) || 86_400) * 1000).toISOString(),
+          };
+      grant.api_key = `ftn_principal_${state.seq++}`;
+      grant.claim_token = `clt_${state.seq++}`;
+      state.claimables.set(grant.id, grant);
+      if (idem) state.claimableByKey.set(idem, grant.id);
+      return json({ data: grant });
+    }
+    const claimable = /^\/api\/claimable-users\/([^/]+)(\/claim)?$/.exec(p);
+    if (claimable) {
+      const grant = state.claimables.get(claimable[1]!);
+      if (!grant) return json({ error: "not_found" }, 404);
+      if (claimable[2]) {
+        if (method !== "POST") return json({ error: "not_found" }, 404);
+        if (grant.status === "claimed") {
+          // Idempotent, so the same key finishes a claim whose response was
+          // lost. A *different* claimer would be a 409 against the real thing;
+          // the mock has one person, so this is the case that matters.
+          return json({ data: { user: { id: "u-claimer", email: "you@example.com" }, principal_id: grant.principal_id, status: "claimed", api_key: grant.api_key } });
+        }
+        if (body.claim_token !== grant.claim_token) return json({ error: "forbidden" }, 403);
+        grant.status = "claimed";
+        grant.api_key = `ftn_claimed_${state.seq++}`;
+        return json({ data: { user: { id: "u-claimer", email: "you@example.com" }, principal_id: grant.principal_id, status: "claimed", api_key: grant.api_key } });
+      }
+      if (method === "DELETE") {
+        if (grant.status === "claimed") return json({ error: "conflict" }, 409);
+        grant.status = "released";
+        return new Response(null, { status: 204 });
+      }
+      const { api_key: _k, claim_token: _t, ...rest } = grant;
+      return json({ data: rest });
+    }
+
     // Not Fountain's — skills.sh's shape, so `SKILLS_URL` can point the paddock
     // server here and the Skills search works with no network at all. The real
     // index is slow and not reliably up (see `server/skills.ts`), which makes
