@@ -8,7 +8,7 @@
  *
  * **New computer** makes a row and nothing else — no agent, no box, no bill —
  * until you open it, which selecting it immediately does. Renaming is here
- * rather than in the Machine panel because the name is not a property of the
+ * rather than in the Setup panel because the name is not a property of the
  * machine: it is what *you* call it, it never reaches Fountain, and somebody
  * you invited never sees it.
  */

@@ -209,7 +209,7 @@ async function runTurn(conv: Conv, prompt: string) {
         kind: "output",
         stream: "acp",
         data: text(
-          "\n(mock) This machine is yours and it stays up between visits. A new tab is another session on this same box with its own directory, and only one tab takes a turn at a time. The Machine panel is where repositories, packages and secrets go — nothing there reaches the box until you apply it, and you watch that happen here. People is how you let somebody else in.\n\nTry: ask me what is installed.",
+          "\n(mock) This machine is yours and it stays up between visits. A new tab is another session on this same box with its own directory, and only one tab takes a turn at a time. Setup is where repositories, packages and secrets go and Details is what the box actually has — nothing you declare reaches the box until you apply it, and you watch that happen here. People is how you let somebody else in.\n\nTry: ask me what is installed.",
         ),
       });
     }
@@ -279,7 +279,7 @@ function badEnvironment(body: Record<string, unknown>): { error: string; errors:
  * `Agent.validate_skills/1`, because its absence here hid a real bug.
  *
  * `skills` is an array of *objects* — `{name, content}` or `{source, ref?,
- * name?}` — and paddock's Machine panel appended a bare string for a year. It
+ * name?}` — and paddock's Skills editor appended a bare string for a year. It
  * worked perfectly against this mock, which stored whatever it was handed, and
  * failed against every real Fountain. A mock that accepts what Fountain rejects
  * is not a convenience, it is a place for that class of bug to live.
@@ -400,7 +400,7 @@ Bun.serve({
           runtimes: ["claude", "codex"],
           models: { claude: ["claude-opus-5", "claude-sonnet-5"], codex: ["gpt-5"] },
           package_managers: ["apt", "npm"],
-          // Three of the real ten, chosen so the Machine panel's three chip
+          // Three of the real ten, chosen so the Setup panel’s three chip
           // states are all reachable offline: linear is connected below, sentry
           // has a provider waiting to be authorized, and github has no provider
           // at all (and `dcr: false`, so connecting it needs a client id).

@@ -121,7 +121,7 @@ export interface Catalog {
   models: Record<string, string[]>;
   /**
    * What Fountain installs from an environment's `packages` — `apt` and `npm`.
-   * It stores another key and ignores it, which is why the Machine panel offers
+   * It stores another key and ignores it, which is why the Setup panel offers
    * these rather than a text box: a package under a manager Fountain does not
    * know reads as configured and installs nothing.
    */

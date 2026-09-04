@@ -234,11 +234,18 @@ h4 { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spaci
 /* ── panels ───────────────────────────────────────────────────────────── */
 .panel { padding: 14px; }
 .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+/* Apply is a count and a destination — "Apply 3 to the box" broken over two
+   lines reads as two things. The sandbox line beside it wraps instead; it is
+   already a list of words that wrap. */
+.panel-head button.primary { white-space: nowrap; }
 .panel section { margin-bottom: 22px; }
 .section-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
 .note { margin: 8px 0; padding: 6px 8px; border-radius: 5px; background: var(--surface); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .note.warn { border-left: 2px solid var(--warn); }
 .row-actions { display: flex; gap: 4px; }
+/* The way out of a tier on Details and into the form that fills it. Set apart
+   from the rows above it so it reads as a door, not another row. */
+.change-link { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line); }
 
 .rows { list-style: none; margin: 8px 0; padding: 0; }
 .row { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; }
@@ -260,8 +267,8 @@ h4 { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spaci
 .editor-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 
 /* Explanation, one click away. The (i) sits next to the heading it explains
-   and unfolds the paragraph that used to live under it — the Machine panel
-   has more to explain than it has room to say at once. */
+   and unfolds the paragraph that used to live under it — Details and Setup
+   have more to explain than they have room to say at once. */
 button.info { flex: none; width: 15px; height: 15px; padding: 0; display: grid; place-items: center; border-radius: 999px; background: none; color: var(--dim); font-size: 10px; font-style: italic; line-height: 1; }
 button.info:hover:not(:disabled) { color: var(--ink); border-color: var(--line-strong); background: var(--surface-hover); }
 button.info.on { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
