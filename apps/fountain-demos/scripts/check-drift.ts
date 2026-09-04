@@ -36,8 +36,11 @@ const BUILT_WITH = "https://managoat.com/built-with";
  * salon: live at salon.demo.managoat.com since it shipped, never added to
  * built_apps/0. Remove this entry, and add salon to src/roster.ts, once the
  * fountain-side list has it.
+ *
+ * paddock: new, and not on built_apps/0 yet. Same deal — remove this entry and
+ * add it to src/roster.ts together, once the fountain-side list has it.
  */
-const UNLISTED_UPSTREAM = new Set(["salon"]);
+const UNLISTED_UPSTREAM = new Set(["salon", "paddock"]);
 
 const REPO_APPS = new Set(
   readdirSync(new URL("../../", import.meta.url).pathname, { withFileTypes: true })

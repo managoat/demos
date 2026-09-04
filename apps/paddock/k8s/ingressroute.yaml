@@ -1,0 +1,38 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: paddock
+  namespace: paddock
+  labels:
+    app: paddock
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`paddock.demo.managoat.com`)"
+      kind: Rule
+      services:
+        - name: paddock
+          port: 80
+  tls:
+    secretName: paddock-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: paddock-http
+  namespace: paddock
+  labels:
+    app: paddock
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: "Host(`paddock.demo.managoat.com`)"
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: paddock
+          port: 80
