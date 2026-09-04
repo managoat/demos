@@ -20,6 +20,7 @@ import { People } from "./components/People";
 import { Upgrade } from "./components/Upgrade";
 import { Tabs } from "./components/Tabs";
 import { Terminal } from "./components/Terminal";
+import { Workspaces } from "./components/Workspaces";
 import { defaultChoice, ensureIdentity, type BootStep, type Identity } from "./lib/identity";
 import { boxDrift, applyKeep, applyTodo, configRev, desiredItems, primaryRepoPath, withRev } from "./lib/machine";
 import { parseReceipt, decodeFile, type Receipt } from "./lib/protocol";
@@ -36,6 +37,7 @@ type Side = "machine" | "files" | "people" | "account";
 
 export function App() {
   const [me, setMe] = useState<Me | null>(null);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -126,7 +128,25 @@ export function App() {
 
   if (!checked) return <Splash line="…" />;
   if (!me) return <Connect onConnect={connect} error={authError} />;
-  return <Paddock key={me.label} me={me} onMe={setMe} onSignOut={() => void signOut()} />;
+
+  const selectedId = workspaceId && me.paddocks.some((workspace) => workspace.id === workspaceId) ? workspaceId : me.paddockId;
+  const selected = me.paddocks.find((workspace) => workspace.id === selectedId);
+  const selectedMe: Me = selectedId === me.paddockId
+    ? me
+    : { ...me, paddockId: selectedId, role: selected?.role ?? null };
+
+  return (
+    <Paddock
+      key={`${me.label}:${selectedId ?? "new"}`}
+      me={selectedMe}
+      onMe={(next) => {
+        setMe(next);
+        setWorkspaceId(next.paddockId);
+      }}
+      onSelectWorkspace={setWorkspaceId}
+      onSignOut={() => void signOut()}
+    />
+  );
 }
 
 /** `#/join/<token>` — the anonymous way in. */
@@ -135,7 +155,17 @@ function joinTokenFromHash(): string | null {
   return m ? decodeURIComponent(m[1]!) : null;
 }
 
-function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSignOut: () => void }) {
+function Paddock({
+  me,
+  onMe,
+  onSelectWorkspace,
+  onSignOut,
+}: {
+  me: Me;
+  onMe: (m: Me) => void;
+  onSelectWorkspace: (id: string) => void;
+  onSignOut: () => void;
+}) {
   // Every Fountain call goes through this machine's own proxy, on the owner's
   // key. A guest's browser makes exactly the same calls and holds nothing.
   const [paddockId, setPaddockId] = useState<string | null>(me.paddockId);
@@ -220,7 +250,14 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
           const claimed = await paddock.claim();
           id = claimed.id;
           setPaddockId(id);
-          onMe({ ...me, role: "owner", paddockId: id });
+          onMe({
+            ...me,
+            role: "owner",
+            paddockId: id,
+            paddocks: me.paddocks.some((workspace) => workspace.id === id)
+              ? me.paddocks
+              : [...me.paddocks, { id, ownerEmail: me.email ?? me.label, role: "owner" }],
+          });
           return; // the effect reruns with a real paddock id
         }
         if (!id) return;
@@ -809,152 +846,136 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
 
   return (
     <div className="app">
-      <header className="bar">
-        <span className="brand">
-          <span className="glyph">🐐</span> Paddock
-        </span>
-        <span className="dim">
-          <code>{sandbox?.id ?? boxId}</code> · {sandbox?.status ?? "…"} · rev {rev}
-        </span>
-        {me.paddocks.length > 1 ? (
-          <select
-            className="switcher"
-            value={paddockId ?? ""}
-            onChange={(e) => {
-              setPaddockId(e.target.value);
-              // Everything below is keyed to a machine: tabs, receipt, people.
-              // Reloading is how they all change at once and stay consistent.
-              window.setTimeout(() => window.location.reload(), 0);
-            }}
-          >
-            {me.paddocks.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.role === "owner" ? "Your machine" : `${p.ownerEmail}'s machine`}
-              </option>
-            ))}
-          </select>
-        ) : (
-          !isOwner && <span className="badge">{people ? `${people.ownerEmail}'s machine` : "shared with you"}</span>
+      <Workspaces
+        workspaces={me.paddocks}
+        activeId={paddockId}
+        activeStatus={sandbox?.status ?? null}
+        me={me.label}
+        guest={me.kind === "guest"}
+        onSelect={onSelectWorkspace}
+        onSignOut={onSignOut}
+      />
+
+      <div className="workspace-stage">
+        {notice && (
+          <div className="notice" onClick={() => setNotice(null)}>
+            <span>{notice}</span>
+            <span className="notice-dismiss">×</span>
+          </div>
         )}
-        <span className="spacer" />
-        <button className="ghost" onClick={onSignOut}>
-          {me.kind === "guest" ? "Leave" : "Sign out"}
-        </button>
-      </header>
 
-      {notice && (
-        <div className="notice" onClick={() => setNotice(null)}>
-          {notice}
-        </div>
-      )}
-
-      <div className="split">
-        <main>
-          <Tabs
-            tabs={strip}
-            active={active?.slug ?? null}
-            onSelect={setActiveSlug}
-            onOpen={() => void openTab()}
-            onClose={(slug) => void closeTab(slug)}
-            opening={opening}
-            canClose={isOwner}
-            canOpen={isOwner}
-          />
-          {active && (
-            <Terminal
-              tab={active}
-              events={events[active.conversation.id] ?? []}
-              blockedBy={machineHolder && machineHolder.slug !== active.slug ? machineHolder.title : null}
-              queued={queued[active.slug] ?? null}
-              onSend={(text) => void send(active.slug, text)}
-              onInterrupt={() => void client.interrupt(active.conversation.id).catch(() => undefined)}
-              loading={!loadedTabs[active.conversation.id]}
+        <div className="split">
+          <main className="conversation-panel">
+            <Tabs
+              tabs={strip}
+              active={active?.slug ?? null}
+              onSelect={setActiveSlug}
+              onOpen={() => void openTab()}
+              onClose={(slug) => void closeTab(slug)}
+              opening={opening}
+              canClose={isOwner}
+              canOpen={isOwner}
             />
-          )}
-        </main>
-
-        <aside>
-          {/*
-            These three switch the panel, so they belong to the panel. In the
-            top bar they read as application-wide navigation, which is what
-            they looked like and never were.
-          */}
-          <nav className="panel-tabs">
-            {(["machine", "files", "people"] as const).map((which) => (
-              <button key={which} className={side === which ? "on" : ""} onClick={() => setSide(which)}>
-                {which === "machine" ? "Machine" : which === "files" ? "Files" : `People${people && people.here.length > 1 ? ` (${people.here.length})` : ""}`}
-              </button>
-            ))}
-            {me.kind === "guest" && (
-              <button className={`upgrade-tab ${side === "account" ? "on" : ""}`} onClick={() => setSide("account")}>
-                Sign in
-              </button>
-            )}
-          </nav>
-          {side === "account" ? (
-            <Upgrade handle={me.label} onKey={(key) => void onUpgrade(key)} error={upgradeError} />
-          ) : side === "people" ? (
-            people && active ? (
-              <People
-                tab={tabPeople}
-                tabTitle={active.title}
-                role={role ?? "guest"}
-                meLabel={me.label}
-                ownerEmail={people.ownerEmail}
-                here={people.here}
-                onInvite={async (email) => setTabPeople(await paddock.addMember(people.id, active.conversation.id, email))}
-                onRemove={async (email) => setTabPeople(await paddock.removeMember(people.id, active.conversation.id, email))}
-                onMintLink={async () => {
-                  const r = await paddock.mintInvite(people.id, active.conversation.id);
-                  setTabPeople(r.data);
-                  if (r.evicted) setNotice(`New link for ${active.title}. ${r.evicted} guest${r.evicted === 1 ? "" : "s"} removed.`);
-                }}
-                onCloseLink={async () => {
-                  const r = await paddock.closeInvite(people.id, active.conversation.id);
-                  setTabPeople(r.data);
-                  setNotice(r.evicted ? `Link closed. ${r.evicted} guest${r.evicted === 1 ? "" : "s"} removed.` : "Link closed.");
-                }}
+            {active && (
+              <Terminal
+                tab={active}
+                events={events[active.conversation.id] ?? []}
+                blockedBy={machineHolder && machineHolder.slug !== active.slug ? machineHolder.title : null}
+                queued={queued[active.slug] ?? null}
+                onSend={(text) => void send(active.slug, text)}
+                onInterrupt={() => void client.interrupt(active.conversation.id).catch(() => undefined)}
+                loading={!loadedTabs[active.conversation.id]}
               />
+            )}
+          </main>
+
+          <aside className="inspector-panel">
+            {/*
+              These three switch the panel, so they belong to the panel. In the
+              top bar they read as application-wide navigation, which is what
+              they looked like and never were.
+            */}
+            <nav className="panel-tabs">
+              {(["machine", "files", "people"] as const).map((which) => (
+                <button key={which} className={side === which ? "on" : ""} onClick={() => setSide(which)}>
+                  {which === "machine"
+                    ? "Machine"
+                    : which === "files"
+                      ? "Files"
+                      : `People${people && people.here.length > 1 ? ` (${people.here.length})` : ""}`}
+                </button>
+              ))}
+              {me.kind === "guest" && (
+                <button className={`upgrade-tab ${side === "account" ? "on" : ""}`} onClick={() => setSide("account")}>
+                  Sign in
+                </button>
+              )}
+            </nav>
+            {side === "account" ? (
+              <Upgrade handle={me.label} onKey={(key) => void onUpgrade(key)} error={upgradeError} />
+            ) : side === "people" ? (
+              people && active ? (
+                <People
+                  tab={tabPeople}
+                  tabTitle={active.title}
+                  role={role ?? "guest"}
+                  meLabel={me.label}
+                  ownerEmail={people.ownerEmail}
+                  here={people.here}
+                  onInvite={async (email) => setTabPeople(await paddock.addMember(people.id, active.conversation.id, email))}
+                  onRemove={async (email) => setTabPeople(await paddock.removeMember(people.id, active.conversation.id, email))}
+                  onMintLink={async () => {
+                    const r = await paddock.mintInvite(people.id, active.conversation.id);
+                    setTabPeople(r.data);
+                    if (r.evicted) setNotice(`New link for ${active.title}. ${r.evicted} guest${r.evicted === 1 ? "" : "s"} removed.`);
+                  }}
+                  onCloseLink={async () => {
+                    const r = await paddock.closeInvite(people.id, active.conversation.id);
+                    setTabPeople(r.data);
+                    setNotice(r.evicted ? `Link closed. ${r.evicted} guest${r.evicted === 1 ? "" : "s"} removed.` : "Link closed.");
+                  }}
+                />
+              ) : (
+                <div className="panel">
+                  <p className="fine">Nobody is sharing this machine.</p>
+                </div>
+              )
+            ) : side === "machine" ? (
+              !identity ? (
+                <div className="panel">
+                  <p className="fine">Nothing to show about this machine.</p>
+                </div>
+              ) : (
+                <Machine
+                  sandbox={sandbox}
+                  agent={identity.agent}
+                  environment={identity.environment}
+                  vault={identity.vault}
+                  rev={rev}
+                  desired={desired}
+                  drift={drift}
+                  envSecretKeys={envSecretKeys}
+                  vaultSecretKeys={vaultSecretKeys}
+                  stale={staleTabs(tabs)}
+                  applying={applying}
+                  busy={machineHolder?.title ?? null}
+                  onApply={() => void apply()}
+                  onReconcile={() => void reconcile()}
+                  onOpenTab={() => void openTab()}
+                  onSaveEnvironment={saveEnvironment}
+                  onAddSecret={addSecret}
+                  onRemoveSecret={removeSecret}
+                  onSaveAgent={saveAgent}
+                  onRebuild={() => replaceMachine("rebuild")}
+                  onReset={() => replaceMachine("reset")}
+                  role={role ?? "guest"}
+                />
+              )
             ) : (
-              <div className="panel">
-                <p className="fine">Nobody is sharing this machine.</p>
-              </div>
-            )
-          ) : side === "machine" ? (
-            !identity ? (
-              <div className="panel">
-                <p className="fine">Nothing to show about this machine.</p>
-              </div>
-            ) : (
-            <Machine
-              sandbox={sandbox}
-              agent={identity.agent}
-              environment={identity.environment}
-              vault={identity.vault}
-              rev={rev}
-              desired={desired}
-              drift={drift}
-              envSecretKeys={envSecretKeys}
-              vaultSecretKeys={vaultSecretKeys}
-              stale={staleTabs(tabs)}
-              applying={applying}
-              busy={machineHolder?.title ?? null}
-              onApply={() => void apply()}
-              onReconcile={() => void reconcile()}
-              onOpenTab={() => void openTab()}
-              onSaveEnvironment={saveEnvironment}
-              onAddSecret={addSecret}
-              onRemoveSecret={removeSecret}
-              onSaveAgent={saveAgent}
-              onRebuild={() => replaceMachine("rebuild")}
-              onReset={() => replaceMachine("reset")}
-              role={role ?? "guest"}
-            />
-            )
-          ) : (
-            <Files client={client} sandboxId={boxId} root={active?.cwd ?? WORK_ROOT} />
-          )}
-        </aside>
+              <Files client={client} sandboxId={boxId} root={active?.cwd ?? WORK_ROOT} />
+            )}
+          </aside>
+        </div>
       </div>
     </div>
   );
