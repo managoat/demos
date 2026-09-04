@@ -186,12 +186,14 @@ hunting for an edit button that does not exist.
 The terminal is a Claude Code prompt rendered as scrollback, not a PTY, for the
 same reason. It does not pretend otherwise anywhere in the UI.
 
-## Not built yet
+## The browser is the only way in
 
-**`paddock attach`** — a single-file script the app serves that opens the same
-conversation as a tab and streams it into your terminal. It authenticates
-against paddock rather than Fountain, so it will work for guests too and no key
-ever reaches the terminal. Designed, not stubbed: there is no dead button.
+An earlier sketch had `paddock attach`, a script the app served so you could
+drive a tab from your own terminal. It is not being built, and the reason is
+the same fact that shapes everything else here: Fountain has no exec. A CLI
+could only ever have opened the same conversation and rendered the same ACP
+stream somewhere else — the same session with a different front end, not a
+shell, however much the name suggested one.
 
-It is the same session with a different front end. It is not a shell and will
-not be sold as one; Fountain has no exec, so nothing honest can be.
+That is a fair amount of surface for a second way to do the thing this app
+already does, so there is one way in and it is honest about what it is.
