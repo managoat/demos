@@ -221,7 +221,7 @@ h4 { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spaci
 .panel { padding: 14px; }
 .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
 .panel section { margin-bottom: 22px; }
-.section-head { margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.section-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
 .note { margin: 8px 0; padding: 6px 8px; border-radius: 5px; background: var(--surface); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .note.warn { border-left: 2px solid var(--warn); }
 .row-actions { display: flex; gap: 4px; }
@@ -243,7 +243,15 @@ h4 { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spaci
 .badge.warn { color: var(--warn); border-color: var(--warn-line); }
 
 .editor { margin: 12px 0; padding-top: 8px; border-top: 1px dashed var(--line); }
-.editor-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.editor-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+
+/* Explanation, one click away. The (i) sits next to the heading it explains
+   and unfolds the paragraph that used to live under it — the Machine panel
+   has more to explain than it has room to say at once. */
+button.info { flex: none; width: 15px; height: 15px; padding: 0; display: grid; place-items: center; border-radius: 999px; background: none; color: var(--dim); font-size: 10px; font-style: italic; line-height: 1; }
+button.info:hover:not(:disabled) { color: var(--ink); border-color: var(--line-strong); background: var(--surface-hover); }
+button.info.on { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+.info-note { margin: -2px 0 8px; max-width: 62ch; }
 .editor-row { display: flex; gap: 6px; align-items: center; margin: 4px 0; flex-wrap: wrap; }
 .editor-row .narrow, .narrow { flex: none; width: 170px; }
 .editor-row input { flex: 1; min-width: 120px; }

@@ -9,9 +9,13 @@
  *
  * The panel is two doors and a guest list, so it is laid out as two doors and
  * a guest list. Each door is a card that names itself in two words, puts its
- * control on the next line, and only then explains itself; the tab's title is
- * said once, in the header, instead of inside three headings that a generated
- * title then wraps to three lines.
+ * control on the next line, and only then explains itself.
+ *
+ * The header does not repeat the tab's title. A title is written by the agent
+ * on the tab's first turn, so it is as likely to read "Terminal setup and
+ * working directory initialization" as anything useful — and the tab strip is
+ * already showing it. What a visitor does need to know is whose machine they
+ * are on, so that is the only thing under the heading, and only for them.
  *
  * The warning is still the important part of the link card, because the
  * reduction is real but partial: a tab is a shell on the machine, so anyone
@@ -25,8 +29,6 @@ import type { Role, TabPeopleDto } from "../api/paddock";
 export interface PeopleProps {
   /** Null while the tab's people are still loading. */
   tab: TabPeopleDto | null;
-  /** What this terminal is called, for a panel that talks about one of them. */
-  tabTitle: string;
   role: Role;
   meLabel: string;
   ownerEmail: string;
@@ -47,7 +49,7 @@ function absolute(url: string): string {
   return /^https?:\/\//.test(url) ? url : `${window.location.origin}${url}`;
 }
 
-export function People({ tab, tabTitle, role, meLabel, ownerEmail, here, onInvite, onRemove, onMintLink, onCloseLink }: PeopleProps) {
+export function People({ tab, role, meLabel, ownerEmail, here, onInvite, onRemove, onMintLink, onCloseLink }: PeopleProps) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -67,9 +69,11 @@ export function People({ tab, tabTitle, role, meLabel, ownerEmail, here, onInvit
       <header className="panel-head">
         <div className="head-copy">
           <h2>People</h2>
-          <p className="dim clip" title={tabTitle}>
-            {isOwner ? <>in {tabTitle}</> : <>in {tabTitle}, on {ownerEmail}'s machine</>}
-          </p>
+          {!isOwner && (
+            <p className="dim clip" title={ownerEmail}>
+              on {ownerEmail}'s machine
+            </p>
+          )}
         </div>
       </header>
 
