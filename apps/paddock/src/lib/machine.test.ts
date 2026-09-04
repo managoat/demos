@@ -13,16 +13,15 @@ import {
   repoId,
   setupId,
   shortRepo,
-  skillNames,
   withRev,
   type Declared,
 } from "./machine";
 import type { Receipt } from "./protocol";
 
 const declared = (over: Partial<Declared> = {}): Declared => ({
-  agent: { runtime: "claude", skills: ["pdf"], mcp_servers: { linear: {} }, metadata: null },
+  agent: { runtime: "claude", skills: [{ source: "anthropics/skills", name: "pdf" }], mcp_servers: { linear: {} }, metadata: null },
   environment: {
-    repositories: [{ url: "https://github.com/you/api.git", mount_path: "/home/sprite/api", ref: "main" }],
+    repositories: [{ url: "https://github.com/you/api.git", mount_path: "/workspace/api", ref: "main" }],
     packages: { apt: ["ripgrep", "jq"] },
     setup_script: "bun install\n",
   },
@@ -46,11 +45,11 @@ describe("desiredItems", () => {
     const tier = (id: string) => items.find((i) => i.id === id)?.tier;
 
     // The environment builds the disk.
-    expect(tier(repoId({ url: "https://github.com/you/api.git", mount_path: "/home/sprite/api", ref: "main" }))).toBe("box");
+    expect(tier(repoId({ url: "https://github.com/you/api.git", mount_path: "/workspace/api", ref: "main" }))).toBe("box");
     expect(tier(packageId("apt", "ripgrep"))).toBe("box");
     expect(tier(setupId("bun install"))).toBe("box");
     // The agent is injected per session.
-    expect(tier("skill:pdf")).toBe("session");
+    expect(tier("skill:anthropics/skills@default#pdf")).toBe("session");
     expect(tier("mcp:linear")).toBe("session");
     expect(tier("secret:env:GITHUB_TOKEN")).toBe("session");
     expect(tier("secret:vault:STRIPE_SECRET_KEY")).toBe("session");
@@ -75,7 +74,7 @@ describe("desiredItems", () => {
   });
 
   test("a repo's ref is part of its identity, so switching branch is a new item", () => {
-    const base = { url: "https://github.com/you/api.git", mount_path: "/home/sprite/api" };
+    const base = { url: "https://github.com/you/api.git", mount_path: "/workspace/api" };
     expect(repoId({ ...base, ref: "main" })).not.toBe(repoId({ ...base, ref: "next" }));
     expect(repoId({ ...base, ref: null })).toBe(repoId({ ...base, ref: "  " }));
   });
@@ -208,13 +207,8 @@ describe("odds and ends", () => {
     expect(shortRepo("api")).toBe("api");
   });
 
-  test("skillNames accepts both shapes Fountain serves, sorted and de-duplicated", () => {
-    expect(skillNames(["pdf", { name: "xlsx" }, { slug: "docx" }, "pdf", 42, null])).toEqual(["docx", "pdf", "xlsx"]);
-    expect(skillNames(null)).toEqual([]);
-  });
-
   test("primaryRepoPath is where a tab's worktree comes from", () => {
-    expect(primaryRepoPath({ repositories: [{ url: "u", mount_path: "/home/sprite/api" }] })).toBe("/home/sprite/api");
+    expect(primaryRepoPath({ repositories: [{ url: "u", mount_path: "/workspace/api" }] })).toBe("/workspace/api");
     expect(primaryRepoPath({ repositories: [] })).toBeNull();
     expect(primaryRepoPath({ repositories: null })).toBeNull();
   });

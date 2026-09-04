@@ -8,6 +8,8 @@
  *   DELETE /api/auth/session                  sign out
  *   POST   /api/join/:token                   follow an invite link (no account needed)
  *
+ *   GET    /api/skills/search                 the skills.sh index, for the Machine panel
+ *
  *   GET    /api/paddock                       the caller's machine and its people
  *   GET    /api/paddock/:id/tabs/:c/people    who is in one tab
  *   POST   /api/paddock/:id/tabs/:c/members   owner: invite by email, to that tab
@@ -31,6 +33,7 @@ import { authenticate, type AppContext } from "./context";
 import * as auth from "./auth";
 import * as lifecycle from "./lifecycle";
 import * as people from "./people";
+import * as skills from "./skills";
 import { handleProxy } from "./proxy";
 import { errorResponse, HttpError, json } from "./http";
 
@@ -54,6 +57,14 @@ export function buildRouter(ctx: AppContext): (req: Request) => Promise<Response
   on("POST", "/api/auth/session", (req) => auth.signIn(ctx, req));
   on("DELETE", "/api/auth/session", (req) => auth.signOut(ctx, req));
   on("POST", "/api/join/:token", (req, p) => auth.join(ctx, req, p.token!));
+
+  // A public index, behind a session. It says nothing about any paddock — the
+  // session is not a permission check, it is what stops paddock being an open
+  // proxy in front of somebody else's search endpoint.
+  on("GET", "/api/skills/search", async (req) => {
+    await authenticate(ctx, req);
+    return skills.search(req);
+  });
 
   on("GET", "/api/paddock", (req) => people.show(ctx, req));
   on("GET", "/api/paddock/:id", (req, p) => people.showOne(ctx, req, p.id!));

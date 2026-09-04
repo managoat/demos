@@ -86,6 +86,20 @@ const OWNER_PATHS: { method: string; re: RegExp }[] = [
   { method: "POST", re: /^\/api\/vaults$/ },
   { method: "PUT", re: /^\/api\/(environments|vaults)\/[^/]+\/secrets\/[^/]+$/ },
   { method: "DELETE", re: /^\/api\/(environments|vaults)\/[^/]+\/secrets\/[^/]+$/ },
+  // Which remote MCP servers the owner has already authorized, and where they
+  // would go to authorize another. Owner-only rather than in READ_PATHS: a
+  // connection carries `account_email`, which is the owner's identity at a
+  // third party and nobody else's business. Nothing is lost — a guest's Machine
+  // panel renders no editors at all.
+  //
+  // Read, and only read. Paddock does not POST /api/connection-providers, even
+  // though creating one from a `dcr: true` catalog entry would turn "connect
+  // Sentry" into two clicks: that call makes account-level state, and the rule
+  // this file is built on is that the owner's authority *here* stops at their
+  // own machine. Widening it for convenience would make the paragraph at the
+  // top of this file untrue, and the paragraph is load-bearing.
+  { method: "GET", re: /^\/api\/connections$/ },
+  { method: "GET", re: /^\/api\/connections\/providers$/ },
 ];
 
 export async function handleProxy(ctx: AppContext, req: Request, paddockId: string, path: string, id: Identity): Promise<Response> {

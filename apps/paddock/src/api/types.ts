@@ -92,10 +92,74 @@ export interface Agent {
   metadata?: Record<string, unknown> | null;
 }
 
+/**
+ * One entry of the catalog's `mcp_servers`: a remote MCP server whose
+ * authorization chain Fountain has watched complete.
+ *
+ * The claim is narrow and worth keeping narrow in the UI: RFC 9728 → 8414 →
+ * 7591 completed against `url` on `verified_on`, by a script rather than a
+ * person. It is not an endorsement, it says nothing about the tools the server
+ * offers, and the list is a menu rather than a gate — any URL Fountain can
+ * discover still works.
+ *
+ * `dcr` is whether the server registers a client automatically. False means
+ * connecting it needs a client id from an app registration of your own, which
+ * is a different amount of work and the panel should not pretend otherwise.
+ */
+export interface CatalogMcpServer {
+  slug: string;
+  name: string;
+  url: string;
+  dcr: boolean;
+  /** `YYYY-MM-DD`. */
+  verified_on: string;
+}
+
 /** `GET /api/catalog`: what this Fountain can run. */
 export interface Catalog {
   runtimes: string[];
   models: Record<string, string[]>;
+  /**
+   * What Fountain installs from an environment's `packages` — `apt` and `npm`.
+   * It stores another key and ignores it, which is why the Machine panel offers
+   * these rather than a text box: a package under a manager Fountain does not
+   * know reads as configured and installs nothing.
+   */
+  package_managers?: string[];
+  mcp_servers?: CatalogMcpServer[];
+}
+
+/**
+ * A provider account the owner signed in to once, whose tokens Fountain holds.
+ *
+ * Paddock only ever reads these. Connecting one "needs a browser and a session,
+ * so it is not an API operation" — it happens at Fountain's console, and the
+ * most paddock can do is say whether it has happened and link to where it does.
+ */
+export interface Connection {
+  id: string;
+  /** The provider's slug. */
+  provider: string;
+  /** The tenant provider row behind it; null for a platform provider. */
+  provider_id: string | null;
+  account_email: string | null;
+  /** The env var the token is brokered under, e.g. `GITHUB_ACCESS_TOKEN`. */
+  env_key: string;
+  status: "active" | "revoked" | "expired" | string;
+}
+
+/** Where a connection's tokens come from, and where the owner goes to make one. */
+export interface ConnectionProvider {
+  id: string;
+  slug: string;
+  name: string;
+  /** `oauth2` (your own app registration) or `mcp` (discovered from a URL). */
+  kind: string;
+  /** Set on `kind: "mcp"` — the remote server this provider was discovered from. */
+  mcp_url: string | null;
+  /** Absolute, at Fountain. A browser signed in as the owner completes the flow. */
+  connect_url: string;
+  env_key: string | null;
 }
 
 /**

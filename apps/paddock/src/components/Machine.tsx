@@ -18,10 +18,12 @@
  * box has not reported rather than guessing.
  */
 import { useState } from "react";
-import type { Agent, Environment, Repository, Sandbox, Vault } from "../api/types";
-import type { Role } from "../api/paddock";
+import type { Agent, Catalog, Connection, ConnectionProvider, Environment, Repository, Sandbox, Vault } from "../api/types";
+import { paddock, type Role } from "../api/paddock";
 import type { BoxDrift, DesiredItem, ItemStatus } from "../lib/machine";
-import { needsApply, packageEntries } from "../lib/machine";
+import { needsApply, packageEntries, shortRepo } from "../lib/machine";
+import type { SkillEntry, SkillHit } from "../lib/skills";
+import { githubSkill, hitToSkill, inlineSkill, parseSource, readSkills, skillKey, skillLabel } from "../lib/skills";
 import type { Tab } from "../../shared/tabs";
 
 export interface MachineProps {
@@ -36,6 +38,19 @@ export interface MachineProps {
   agent: Agent;
   environment: Environment;
   vault: Vault | null;
+  /** What this Fountain offers: package managers, and the verified MCP servers. */
+  catalog: Catalog | null;
+  /**
+   * The owner's connections and where to make one. `null` — not `[]` — where
+   * the egress broker is not on for this person, which a self-hosted Fountain
+   * or an unenrolled account still answers. That null is the panel's only
+   * evidence about whether anything is brokered at all, and two sections depend
+   * on it. See `client.listConnections`.
+   */
+  connections: Connection[] | null;
+  providers: ConnectionProvider[] | null;
+  /** Where to send somebody to connect one. Null before `/api/config` answers. */
+  fountainUrl: string | null;
   rev: number;
   desired: DesiredItem[];
   drift: BoxDrift;
@@ -116,8 +131,16 @@ export function Machine(props: MachineProps) {
 
         {isOwner && (
           <>
-            <Repositories environment={props.environment} onSave={props.onSaveEnvironment} />
-            <Packages environment={props.environment} onSave={props.onSaveEnvironment} />
+            <Repositories
+              environment={props.environment}
+              envSecretKeys={props.envSecretKeys}
+              vaultSecretKeys={props.vaultSecretKeys}
+              hasVault={!!props.vault}
+              brokered={props.providers !== null}
+              onSave={props.onSaveEnvironment}
+              onAddSecret={props.onAddSecret}
+            />
+            <Packages environment={props.environment} catalog={props.catalog} onSave={props.onSaveEnvironment} />
             <SetupScript environment={props.environment} onSave={props.onSaveEnvironment} />
           </>
         )}
@@ -166,7 +189,14 @@ export function Machine(props: MachineProps) {
               onAdd={props.onAddSecret}
               onRemove={props.onRemoveSecret}
             />
-            <McpServers agent={props.agent} onSave={props.onSaveAgent} />
+            <McpServers
+              agent={props.agent}
+              catalog={props.catalog}
+              connections={props.connections}
+              providers={props.providers}
+              fountainUrl={props.fountainUrl}
+              onSave={props.onSaveAgent}
+            />
             <Skills agent={props.agent} onSave={props.onSaveAgent} />
           </>
         )}
@@ -217,44 +247,199 @@ function Rows({ statuses, known }: { statuses: ItemStatus[]; known: boolean }) {
 
 // ── the editors ────────────────────────────────────────────────────────────
 
-function Repositories({ environment, onSave }: { environment: Environment; onSave: MachineProps["onSaveEnvironment"] }) {
+/**
+ * Where repositories are cloned, and how a private one authenticates.
+ *
+ * `/workspace/<name>`, not `/home/sprite/<name>`. Fountain's bundled `fountain`
+ * skill is mounted into *every* sandbox and tells the agent "Cloned repos are
+ * under /workspace/… Always look in /workspace/ first when you need to find
+ * source code." Paddock spent a year putting them somewhere else, so the agent
+ * on the box was being told to look in the wrong place by the one skill it
+ * always has.
+ *
+ * `MOUNT_ROOT` is part of `repoId`, so changing it puts existing rows back to
+ * `pending` and they re-clone on the next apply. That is the content-addressed
+ * id doing its job rather than a migration to write.
+ */
+const MOUNT_ROOT = "/workspace";
+
+/**
+ * The one secret name that clones.
+ *
+ * Fountain's broker keeps a two-entry catalog — `GITHUB_TOKEN` and `GH_TOKEN`
+ * — and a key under one of those names is brokered with no binding and no
+ * configuration at all. What it buys is specific: the sandbox holds
+ * `__github_token__`, the clone URL is written with that placeholder, and the
+ * broker attaches git's real `x-access-token` basic auth on the way out. So a
+ * private repository clones **with the token never on the machine**.
+ *
+ * A GitHub *connection* does not do this. Its `GITHUB_ACCESS_TOKEN` gets a
+ * bearer rule, and git over HTTPS does not use bearer auth. It gives the agent
+ * the GitHub API; it does not give it a checkout. The name is load-bearing, so
+ * paddock writes it rather than asking somebody to know that.
+ */
+const CLONE_SECRET = "GITHUB_TOKEN";
+
+function Repositories({
+  environment,
+  envSecretKeys,
+  vaultSecretKeys,
+  hasVault,
+  brokered,
+  onSave,
+  onAddSecret,
+}: {
+  environment: Environment;
+  envSecretKeys: string[];
+  vaultSecretKeys: string[];
+  hasVault: boolean;
+  /** Whether this account has the egress broker — which is what protects the token. */
+  brokered: boolean;
+  onSave: MachineProps["onSaveEnvironment"];
+  onAddSecret: MachineProps["onAddSecret"];
+}) {
   const [url, setUrl] = useState("");
   const [ref, setRef] = useState("");
+  const [priv, setPriv] = useState(false);
+  const [token, setToken] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const repos = environment.repositories ?? [];
+
+  const stored = vaultSecretKeys.includes(CLONE_SECRET) ? "vault" : envSecretKeys.includes(CLONE_SECRET) ? "env" : null;
+  const needsToken = priv && !stored && !token;
 
   async function add() {
     const trimmed = url.trim();
     if (!trimmed) return;
-    const name = trimmed.replace(/\.git$/, "").split("/").filter(Boolean).pop() ?? "repo";
+    setError(null);
+
+    // Fountain accepts https and nothing else. The SSH path existed here fully
+    // implemented and was deleted rather than enabled, so this is not a
+    // temporary gap — and catching it in the editor turns a failed provision on
+    // somebody's machine into a sentence.
+    if (!/^https:\/\//i.test(trimmed)) {
+      setError("Fountain clones over https:// only — an ssh or git URL is refused when the machine is built.");
+      return;
+    }
+
+    const name = trimmed.replace(/\.git$/, "").replace(/\/+$/, "").split("/").filter(Boolean).pop() ?? "repo";
+
+    if (priv && !stored) {
+      if (!token) return;
+      // The vault where there is one: a vault secret is the only kind the
+      // broker can keep off the box entirely, and this is the value people are
+      // most likely to regret handing to everyone they invite.
+      await onAddSecret(hasVault ? "vault" : "env", CLONE_SECRET, token);
+    }
+
     await onSave({
-      repositories: [...repos, { url: trimmed, mount_path: `/home/sprite/${name}`, ref: ref.trim() || null }],
+      repositories: [
+        ...repos,
+        {
+          url: trimmed,
+          mount_path: `${MOUNT_ROOT}/${name}`,
+          ref: ref.trim() || null,
+          ...(priv ? { secret_key: CLONE_SECRET } : {}),
+        },
+      ],
     });
     setUrl("");
     setRef("");
+    setPriv(false);
+    setToken("");
   }
 
   return (
     <Editor title="Repositories">
       {repos.map((r, i) => (
         <div className="editor-row" key={`${r.url}-${i}`}>
-          <code>{r.url}</code>
+          <code>{shortRepo(r.url)}</code>
           <span className="dim">{r.mount_path}</span>
+          {r.secret_key && <span className="fine">{r.secret_key}</span>}
           <button className="ghost" onClick={() => onSave({ repositories: repos.filter((_, j) => j !== i) })}>
             remove
           </button>
         </div>
       ))}
+
+      {/* Two rows rather than one. Four controls do not fit the panel at this
+          width, and the private toggle belongs beside the token field it
+          reveals rather than beside the URL. */}
       <div className="editor-row">
         <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/you/thing" spellCheck={false} />
         <input className="narrow" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="ref (optional)" spellCheck={false} />
-        <button onClick={add} disabled={!url.trim()}>
+      </div>
+      <div className="editor-row">
+        <label className="check" title={`Clone with ${CLONE_SECRET}`}>
+          <input type="checkbox" checked={priv} onChange={(e) => setPriv(e.target.checked)} /> private repository
+        </label>
+        {priv && !stored && (
+          <input
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            type="password"
+            placeholder={`${CLONE_SECRET} — a token that can read it`}
+            spellCheck={false}
+            autoComplete="off"
+          />
+        )}
+        <button onClick={() => void add()} disabled={!url.trim() || needsToken}>
           add
         </button>
       </div>
-      <p className="fine">A private repository clones with an environment secret named in its entry — add the secret below first.</p>
+
+      {priv && (
+        <>
+          <p className="fine">
+            {stored ? (
+              <>
+                Cloning with the <code>{CLONE_SECRET}</code> already in your {stored === "vault" ? "vault" : "environment"}.
+              </>
+            ) : hasVault ? (
+              <>
+                It goes in your <strong>vault</strong>.
+              </>
+            ) : (
+              <>
+                It goes in your <strong>environment</strong>, because this Fountain has no vault for you.
+              </>
+            )}{" "}
+            {/* The protection here comes from the broker, not from the vault.
+                `GITHUB_TOKEN` is one of two names in Fountain's broker catalog,
+                and `Broker.split` works on the environment and vault secrets
+                merged together — so where the broker is on, either store gets
+                the placeholder, and where it is off, neither does. An earlier
+                draft of this line credited the vault for it, which read well
+                and was not true. */}
+            {brokered ? (
+              <>
+                Fountain&apos;s broker knows this key by name, so the machine only ever holds <code>__github_token__</code> — the
+                real token is attached to the request on its way out, and nobody with a terminal here can print it.
+              </>
+            ) : (
+              <>
+                This Fountain brokers nothing for you, so it is an ordinary variable inside the machine and anyone you invite can
+                read it.
+              </>
+            )}
+          </p>
+        </>
+      )}
+
+      {error && <p className="fine error">{error}</p>}
+
+      {repos.length > 1 && (
+        <p className="fine">
+          A new tab branches from <code>{shortRepo(repos[0]!.url)}</code>, the first one here. The rest are cloned and left
+          alone.
+        </p>
+      )}
     </Editor>
   );
 }
+
+/** What Fountain installs from, when the catalog has not been read. */
+const PACKAGE_MANAGERS = ["apt", "npm"];
 
 /**
  * Packages, keyed by the manager that installs them.
@@ -262,10 +447,24 @@ function Repositories({ environment, onSave }: { environment: Environment; onSav
  * `apt` is the default because that is what the box is, but the manager is a
  * field rather than an assumption: Fountain stores `{"apt": [...], "npm": [...]}`
  * and a UI that hid the key would quietly put npm packages under apt.
+ *
+ * It is a list rather than a text box because Fountain "stores another key and
+ * ignores it". Typing `brew` here produced a row that read as configured, sat
+ * at `pending` forever, and installed nothing — the catalog knows the two
+ * managers that actually exist, so it says so.
  */
-function Packages({ environment, onSave }: { environment: Environment; onSave: MachineProps["onSaveEnvironment"] }) {
+function Packages({
+  environment,
+  catalog,
+  onSave,
+}: {
+  environment: Environment;
+  catalog: Catalog | null;
+  onSave: MachineProps["onSaveEnvironment"];
+}) {
+  const managers = catalog?.package_managers?.length ? catalog.package_managers : PACKAGE_MANAGERS;
   const [name, setName] = useState("");
-  const [manager, setManager] = useState("apt");
+  const [manager, setManager] = useState(managers[0] ?? "apt");
   const entries = packageEntries(environment.packages);
   const current = environment.packages ?? {};
   const already = (current[manager] ?? []).includes(name.trim());
@@ -306,7 +505,13 @@ function Packages({ environment, onSave }: { environment: Environment; onSave: M
         </div>
       ))}
       <div className="editor-row">
-        <input className="narrow" value={manager} onChange={(e) => setManager(e.target.value.trim())} placeholder="apt" spellCheck={false} />
+        <select className="narrow" value={manager} onChange={(e) => setManager(e.target.value)}>
+          {managers.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -423,14 +628,61 @@ function KeyList({ label, keys, onRemove }: { label: string; keys: string[]; onR
   );
 }
 
-function McpServers({ agent, onSave }: { agent: Agent; onSave: MachineProps["onSaveAgent"] }) {
+/**
+ * MCP servers, from Fountain's own catalog.
+ *
+ * `GET /api/catalog` carries `mcp_servers`: the remote servers whose
+ * authorization chain Fountain watched complete, dated. Paddock read two keys
+ * of that catalog for a year and asked people to type these URLs from memory.
+ *
+ * The chips are three states, and the difference between them is the whole
+ * point — a remote MCP server without a connection is a URL the agent cannot
+ * authenticate to, and rendering it identically to one that works would be the
+ * panel lying in the way this app tries hardest not to:
+ *
+ *   connected     there is an active connection; adding it names that connection
+ *                 and the broker attaches the token in flight
+ *   connect ↗     go to Fountain and authorize it. Not something paddock can do
+ *                 here: connecting needs a browser session at Fountain, and this
+ *                 app is not it
+ *
+ * The typed name + URL row stays underneath. The catalog is "a menu, not a
+ * gate" and any URL Fountain can discover still works.
+ */
+function McpServers({
+  agent,
+  catalog,
+  connections,
+  providers,
+  fountainUrl,
+  onSave,
+}: {
+  agent: Agent;
+  catalog: Catalog | null;
+  connections: Connection[] | null;
+  providers: ConnectionProvider[] | null;
+  fountainUrl: string | null;
+  onSave: MachineProps["onSaveAgent"];
+}) {
   const servers = agent.mcp_servers ?? {};
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
 
-  async function add() {
+  const entries = catalog?.mcp_servers ?? [];
+  // `null` is the 404 — connections do not exist on this account — as opposed
+  // to an empty list, which is "they exist and you have made none". Only the
+  // first of those means a remote server here can carry no credential.
+  const brokered = providers !== null;
+  const live = connections ?? [];
+  const provs = providers ?? [];
+
+  async function add(key: string, cfg: Record<string, unknown>) {
+    await onSave({ mcp_servers: { ...servers, [key]: cfg } });
+  }
+
+  async function addTyped() {
     if (!name.trim() || !url.trim()) return;
-    await onSave({ mcp_servers: { ...servers, [name.trim()]: { url: url.trim() } } });
+    await add(name.trim(), { url: url.trim() });
     setName("");
     setUrl("");
   }
@@ -444,19 +696,92 @@ function McpServers({ agent, onSave }: { agent: Agent; onSave: MachineProps["onS
   return (
     <Editor title="MCP servers">
       {Object.keys(servers).length === 0 && <p className="fine">none</p>}
-      {Object.entries(servers).map(([key, cfg]) => (
-        <div className="editor-row" key={key}>
-          <span className="row-label">{key}</span>
-          <code className="dim">{urlOf(cfg)}</code>
-          <button className="ghost" onClick={() => remove(key)}>
-            remove
-          </button>
-        </div>
-      ))}
+      {Object.entries(servers).map(([key, cfg]) => {
+        const connection = connectionOf(cfg);
+        const held = live.find((c) => c.id === connection);
+        return (
+          <div className="editor-row" key={key}>
+            <span className="row-label">{key}</span>
+            <code className="dim">{urlOf(cfg)}</code>
+            {connection &&
+              (held?.status === "active" ? (
+                <span className="fine ok">connected</span>
+              ) : (
+                // A connection that was revoked or lapsed leaves the entry
+                // pointing at nothing. The next tool call fails with
+                // "connection revoked", and that is a bad place to find out.
+                <span className="fine warn-text">{held ? held.status : "connection is gone"} — reconnect at Fountain</span>
+              ))}
+            <button className="ghost" onClick={() => remove(key)}>
+              remove
+            </button>
+          </div>
+        );
+      })}
+
+      {entries.length > 0 && (
+        <>
+          <div className="chips catalog">
+            {entries.map((entry) => {
+              const provider = provs.find((p) => p.mcp_url === entry.url);
+              const connection = provider
+                ? live.find((c) => c.provider_id === provider.id && c.status === "active")
+                : undefined;
+              const added = Object.entries(servers).some(([, cfg]) => urlOf(cfg) === entry.url);
+
+              if (added) {
+                return (
+                  <span className="chip added" key={entry.slug} title={`${entry.url} — already added`}>
+                    {entry.name} ✓
+                  </span>
+                );
+              }
+              if (connection) {
+                return (
+                  <button
+                    className="chip act"
+                    key={entry.slug}
+                    title={`${entry.url} — connected as ${connection.account_email ?? "you"}`}
+                    onClick={() => void add(entry.slug, { type: "http", url: entry.url, connection: connection.id })}
+                  >
+                    {entry.name} <span className="ok">connected</span>
+                  </button>
+                );
+              }
+              // Nowhere in paddock to send them but Fountain: `connect_url` when
+              // the provider already exists, the Connections page when it does
+              // not, because creating one is account-level and not this app's.
+              const href = provider?.connect_url ?? (fountainUrl ? `${fountainUrl}/connections` : null);
+              return (
+                <a
+                  className={`chip act ${brokered ? "" : "inert"}`}
+                  key={entry.slug}
+                  href={href ?? undefined}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={`${entry.url} — verified ${entry.verified_on}${entry.dcr ? "" : "; needs a client id from an app registration of your own"}`}
+                >
+                  {entry.name} <span className="dim">connect ↗</span>
+                </a>
+              );
+            })}
+          </div>
+          <p className="fine">
+            Verified {entries[0]?.verified_on ?? ""} — the authorization chain completed against each URL on that date, by a
+            script. Not an endorsement, and nothing was checked about the tools they offer.
+          </p>
+          <p className="fine">
+            {brokered
+              ? "A connection is made at Fountain, in a browser signed in as you. Paddock cannot do it here: connecting is not an API operation."
+              : "This Fountain has no credential broker for you, so a remote server added here carries no credential of its own."}
+          </p>
+        </>
+      )}
+
       <div className="editor-row">
         <input className="narrow" value={name} onChange={(e) => setName(e.target.value)} placeholder="linear" spellCheck={false} />
         <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://mcp.example.com/sse" spellCheck={false} />
-        <button onClick={add} disabled={!name.trim() || !url.trim()}>
+        <button onClick={() => void addTyped()} disabled={!name.trim() || !url.trim()}>
           add
         </button>
       </div>
@@ -464,31 +789,215 @@ function McpServers({ agent, onSave }: { agent: Agent; onSave: MachineProps["onS
   );
 }
 
+/**
+ * Skills: the skills.sh index, then the two shapes by hand.
+ *
+ * This editor used to append a bare string, which Fountain refuses outright —
+ * `skills` is an array of objects and always has been. See `lib/skills.ts` for
+ * the shapes and for why the bug survived as long as it did.
+ *
+ * The index is skills.sh and the panel says so, because the MCP section two
+ * blocks up looks similar and is not the same kind of list: those entries are
+ * dated claims Fountain checked, and these are whatever the ecosystem uploaded.
+ * A github skill is `npx skills add owner/repo` run on the machine, from a
+ * repository nobody here vouches for, and the person clicking `+` is the only
+ * one in a position to judge that.
+ */
 function Skills({ agent, onSave }: { agent: Agent; onSave: MachineProps["onSaveAgent"] }) {
-  const skills = Array.isArray(agent.skills) ? agent.skills : [];
-  const [name, setName] = useState("");
+  const entries = readSkills(agent.skills);
+  const [error, setError] = useState<string | null>(null);
+
+  function save(next: SkillEntry[]) {
+    setError(null);
+    return onSave({ skills: next });
+  }
+
+  const have = new Set(entries.map(skillKey));
+
+  async function add(entry: SkillEntry) {
+    if (have.has(skillKey(entry))) return;
+    await save([...entries, entry]);
+  }
 
   return (
     <Editor title="Skills">
       <div className="chips">
-        {skills.map((s, i) => (
-          <span className="chip" key={`${label(s)}-${i}`}>
-            {label(s)}
-            <button className="x" onClick={() => void onSave({ skills: skills.filter((_, j) => j !== i) })} title="remove">
+        {entries.map((entry, i) => (
+          <span className="chip" key={`${skillKey(entry)}-${i}`}>
+            {skillLabel(entry)}
+            <button className="x" onClick={() => void save(entries.filter((_, j) => j !== i))} title="remove">
               ×
             </button>
           </span>
         ))}
-        {skills.length === 0 && <span className="fine">none</span>}
+        {entries.length === 0 && <span className="fine">none</span>}
       </div>
+
+      <SkillSearch have={have} onAdd={add} />
+      <SkillByHand onAdd={add} onError={setError} />
+
+      {error && <p className="fine error">{error}</p>}
+      <p className="fine">
+        Search is skills.sh, not Fountain — Fountain curates no list of skills, so nothing here is verified by anyone. Adding one
+        runs its installer on your machine.
+      </p>
+    </Editor>
+  );
+}
+
+/**
+ * The index, through paddock's own server.
+ *
+ * It has to be: skills.sh sends no CORS header, so this browser cannot read it
+ * directly. `server/skills.ts` carries the rest of that note.
+ *
+ * Search being unavailable is a normal state, not an error — the form below
+ * still works and somebody who knows the `owner/repo` should not be stopped by
+ * a search box.
+ */
+function SkillSearch({ have, onAdd }: { have: Set<string>; onAdd: (entry: SkillEntry) => Promise<void> }) {
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState<SkillHit[] | null>(null);
+  const [state, setState] = useState<"idle" | "searching" | "unavailable">("idle");
+
+  async function run() {
+    const query = q.trim();
+    if (query.length < 2) return;
+    setState("searching");
+    try {
+      const res = await paddock.searchSkills(query);
+      setHits(res.data);
+      setState(res.unavailable ? "unavailable" : "idle");
+    } catch {
+      setHits([]);
+      setState("unavailable");
+    }
+  }
+
+  return (
+    <>
       <div className="editor-row">
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="pdf" spellCheck={false} />
-        <button onClick={() => void onSave({ skills: [...skills, name.trim()] }).then(() => setName(""))} disabled={!name.trim()}>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="search skills.sh — pdf, postgres, code review"
+          spellCheck={false}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void run();
+          }}
+        />
+        <button onClick={() => void run()} disabled={q.trim().length < 2 || state === "searching"}>
+          {state === "searching" ? "…" : "search"}
+        </button>
+      </div>
+
+      {/* skills.sh answers in two to eight seconds when it answers at all, so
+          the wait is said out loud rather than left as a spinner somebody
+          assumes is broken. `server/skills.ts` has the measurements. */}
+      {state === "searching" && <p className="fine">Asking skills.sh — it can take a few seconds.</p>}
+      {state === "unavailable" && <p className="fine">skills.sh did not answer. Add an owner/repo below instead.</p>}
+      {state === "idle" && hits?.length === 0 && <p className="fine">Nothing found.</p>}
+
+      {hits && hits.length > 0 && (
+        <ul className="rows hits">
+          {hits.map((hit) => {
+            const entry = hitToSkill(hit);
+            const already = have.has(skillKey(entry));
+            return (
+              <li className="row" key={`${hit.source}#${hit.skill}`}>
+                <span className="row-label">{hit.label}</span>
+                <code className="dim">{hit.source}</code>
+                <span className="fine">{installs(hit.installs)}</span>
+                <button className="ghost" onClick={() => void onAdd(entry)} disabled={already} title={already ? "already added" : `add ${hit.skill}`}>
+                  {already ? "added" : "add"}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </>
+  );
+}
+
+/** Both shapes, typed out. Everything the index can offer, and everything it cannot. */
+function SkillByHand({ onAdd, onError }: { onAdd: (entry: SkillEntry) => Promise<void>; onError: (why: string | null) => void }) {
+  const [kind, setKind] = useState<"github" | "inline">("github");
+  const [source, setSource] = useState("");
+  const [ref, setRef] = useState("");
+  const [pick, setPick] = useState("");
+  const [name, setName] = useState("");
+  const [content, setContent] = useState("");
+
+  async function submit() {
+    onError(null);
+    if (kind === "inline") {
+      const made = inlineSkill({ name, content });
+      if ("error" in made) return onError(made.error);
+      await onAdd(made.entry);
+      setName("");
+      setContent("");
+      return;
+    }
+    // A pasted GitHub URL or an `owner/repo@ref` is obviously the same intent
+    // as the two fields, so it is read rather than refused.
+    const parsed = parseSource(source);
+    const made = githubSkill({ source: parsed.source, ref: ref.trim() || parsed.ref, name: pick });
+    if ("error" in made) return onError(made.error);
+    await onAdd(made.entry);
+    setSource("");
+    setRef("");
+    setPick("");
+  }
+
+  return (
+    <>
+      <div className="editor-row">
+        <select className="narrow" value={kind} onChange={(e) => setKind(e.target.value as "github" | "inline")}>
+          <option value="github">from GitHub</option>
+          <option value="inline">write it here</option>
+        </select>
+        {kind === "github" ? (
+          <>
+            <input value={source} onChange={(e) => setSource(e.target.value)} placeholder="anthropics/skills" spellCheck={false} />
+            <input className="narrow" value={pick} onChange={(e) => setPick(e.target.value)} placeholder="skill (optional)" spellCheck={false} />
+            <input className="narrow" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="ref (optional)" spellCheck={false} />
+          </>
+        ) : (
+          <input className="narrow" value={name} onChange={(e) => setName(e.target.value)} placeholder="house-style" spellCheck={false} />
+        )}
+        <button onClick={() => void submit()} disabled={kind === "github" ? !source.trim() : !name.trim() || !content.trim()}>
           add
         </button>
       </div>
-    </Editor>
+
+      {kind === "inline" ? (
+        <>
+          <textarea
+            className="script"
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            rows={6}
+            spellCheck={false}
+            placeholder={"---\nname: house-style\ndescription: Our commit and PR conventions.\n---\n\n# House style"}
+          />
+          <p className="fine">Fountain writes this to the machine as SKILL.md. No installer runs.</p>
+        </>
+      ) : (
+        <p className="fine">
+          A repository can hold many skills; naming one installs only that one. Without a ref, Fountain resolves the default
+          branch <em>when a tab opens</em>, so two tabs a week apart can get different code — pin anything you depend on.
+        </p>
+      )}
+    </>
   );
+}
+
+/** `190279` → `190k`. A rough sense of scale is the whole value of the number. */
+function installs(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M ↓`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k ↓`;
+  return `${n} ↓`;
 }
 
 /**
@@ -598,11 +1107,11 @@ function urlOf(cfg: unknown): string {
   return "";
 }
 
-function label(skill: unknown): string {
-  if (typeof skill === "string") return skill;
-  if (skill && typeof skill === "object") {
-    const name = (skill as { name?: unknown }).name;
-    if (typeof name === "string") return name;
+/** The connection id an `mcp_servers` entry names, when it names one. */
+function connectionOf(cfg: unknown): string | null {
+  if (cfg && typeof cfg === "object" && !Array.isArray(cfg)) {
+    const id = (cfg as { connection?: unknown }).connection;
+    if (typeof id === "string" && id) return id;
   }
-  return "skill";
+  return null;
 }
