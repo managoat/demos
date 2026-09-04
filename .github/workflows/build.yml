@@ -117,6 +117,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: main
+      # Matches `latest` as well as an existing pin: a new app's deployment.yaml
+      # is authored with `:latest` (there is no sha to name before the first
+      # build), and a pin that only recognised `sha-…` left it on a floating tag
+      # forever, silently. paddock shipped that way and nobody noticed until it
+      # was looked for.
       - name: Pin the image sha for every app that built
         env:
           APPS: ${{ needs.pick.outputs.apps }}
@@ -126,7 +131,7 @@ jobs:
           for app in $(echo "$APPS" | tr -d '[]"' | tr ',' ' '); do
             f="apps/$app/k8s/deployment.yaml"
             [ -f "$f" ] || { echo "$app: no $f, skipping"; continue; }
-            sed -i -E "s#(image: ghcr\.io/${OWNER}/${app}:)sha-[0-9a-f]+#\1sha-${GITHUB_SHA}#" "$f"
+            sed -i -E "s#(image: ghcr\.io/${OWNER}/${app}:)(sha-[0-9a-f]+|latest)#\1sha-${GITHUB_SHA}#" "$f"
             git add "$f"
           done
           git diff --cached --quiet && { echo "already pinned"; exit 0; }
