@@ -18,7 +18,7 @@
  * a prompt behind the turn already running.
  */
 import { randomUUID } from "node:crypto";
-import type { Track, TrackHeader, TrackOriginInfo } from "../shared/api";
+import type { Track, TrackHeader, TrackOriginInfo, TranscriptPage } from "../shared/api";
 import { branchFor, mountPathFor, slugify, trackChannel, workdirFor } from "../shared/ids";
 import { closeTrackPrompt, openTrackPrompt, starters, type TrackOrigin } from "../shared/spec";
 import type { AppContext } from "./context";
@@ -102,6 +102,13 @@ export async function open(ctx: AppContext, req: Request, projectId: string): Pr
   const machine = await machineOf(fountain, project);
   const channel = trackChannel(project.id, slug, project.rev);
 
+  const opening = openTrackPrompt({
+    slug,
+    branch,
+    repoPath: project.repoFullName ? mountPathFor(project.repoFullName) : null,
+    origin,
+  });
+
   let conversationId: string;
   try {
     const conversation = await fountain.createConversation({
@@ -111,6 +118,11 @@ export async function open(ctx: AppContext, req: Request, projectId: string): Pr
       sandbox_id: machine?.sandboxId ?? null,
       title,
       channel_id: channel,
+      // On the launch that *provisions* the machine the opening turn rides
+      // along, because a fresh conversation with no prompt is what made
+      // provisioning start answering 422. On an attach it is sent separately
+      // below, where a machine at capacity can be reported and retried.
+      ...(machine ? {} : { prompt: opening }),
     });
     conversationId = conversation.id;
   } catch (err) {
@@ -134,11 +146,17 @@ export async function open(ctx: AppContext, req: Request, projectId: string): Pr
     createdByLogin: user.login,
   });
 
-  // The opening turn, not awaited. It is a turn on a machine that may still be
-  // booting, so it can take a minute — and the browser is already watching the
-  // transcript it will appear in. Awaiting it here would hold the POST open
-  // for the whole of the thing the person came to watch.
-  void sendOpeningTurn(ctx, fountain, row, project, origin);
+  if (machine) {
+    // The opening turn, not awaited. It is a turn on a machine that may still
+    // be booting, so it can take a minute — and the browser is already watching
+    // the transcript it will appear in. Awaiting it here would hold the POST
+    // open for the whole of the thing the person came to watch.
+    void sendOpeningTurn(ctx, fountain, row, project, origin);
+  } else {
+    // It went with the launch. The track is open as far as Fountain is
+    // concerned; the worktree lands when that turn does.
+    ctx.db.markOpened(row.id);
+  }
 
   publish(project.id, { event: "tracks", data: { projectId: project.id } });
   return json({ data: toTrack(row, project, null) }, 201);
@@ -223,14 +241,36 @@ export async function interrupt(ctx: AppContext, req: Request, trackId: string):
   return json({ data: { ok: true } });
 }
 
-/** `GET /api/tracks/:id/events` — the transcript so far. */
+/**
+ * `GET /api/tracks/:id/events` — the transcript so far, both halves of it.
+ *
+ * The prompts and the output live in two different places on Fountain and are
+ * joined on `turn_id`. Joining them here rather than in the browser is not
+ * tidiness: it is one round trip instead of two on the call that gates the
+ * first paint of a track.
+ */
 export async function events(ctx: AppContext, req: Request, trackId: string): Promise<Response> {
   const user = await authenticate(ctx, req);
   const { track } = trackOf(ctx, user, trackId);
   const fountain = requireFountain(ctx);
-  if (!track.conversationId) return json({ data: [] });
+  if (!track.conversationId) return json({ data: { turns: [], events: [] } });
   try {
-    return json({ data: await fountain.events(track.conversationId) });
+    const [turns, log] = await Promise.all([
+      // A conversation too new to have turns is ordinary, not an error.
+      fountain.turns(track.conversationId).catch(() => []),
+      fountain.events(track.conversationId),
+    ]);
+    const page: TranscriptPage = {
+      turns: turns.map((t) => ({
+        id: t.id,
+        prompt: typeof t.prompt === "string" ? t.prompt : null,
+        origin: typeof t.origin === "string" ? t.origin : null,
+        status: typeof t.status === "string" ? t.status : null,
+        insertedAt: typeof t.inserted_at === "string" ? t.inserted_at : null,
+      })),
+      events: log,
+    };
+    return json({ data: page });
   } catch (err) {
     throw asHttpError(err, "read this track");
   }

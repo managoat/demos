@@ -14,7 +14,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LogEvent } from "../../shared/fountain-types";
-import type { Capabilities, Project, Track, TrackHeader } from "../../shared/api";
+import type { Capabilities, Project, Track, TrackHeader, TurnRecord } from "../../shared/api";
 import { api, ApiError, subscribe } from "../lib/api";
 import { Branch, Clock, External, Folder, Info, Issue, Pull, Wrench } from "../lib/icons";
 import { Composer } from "./Composer";
@@ -35,22 +35,26 @@ export interface TrackViewProps {
 export function TrackView(props: TrackViewProps) {
   const { project, track, header, starters } = props;
   const [events, setEvents] = useState<LogEvent[]>([]);
+  const [turns, setTurns] = useState<TurnRecord[]>([]);
   const [running, setRunning] = useState(track.status === "running" || track.status === "opening");
   const seen = useRef(new Set<number>());
 
-  // The transcript so far, then the live stream. Two sources into one list,
-  // de-duplicated by event id — the stream can replay an event the fetch
-  // already returned, and a duplicated tool chip is very visible.
+  // The transcript so far, then the live stream. Both feed one list,
+  // de-duplicated by event id — the stream replays what the fetch already
+  // returned when a connection is resumed, and a duplicated tool chip is very
+  // visible.
   useEffect(() => {
     let alive = true;
     seen.current = new Set();
     setEvents([]);
+    setTurns([]);
     void api
       .events(track.id)
-      .then((list) => {
+      .then((page) => {
         if (!alive) return;
-        for (const e of list) seen.current.add(e.id);
-        setEvents(list);
+        for (const e of page.events as LogEvent[]) seen.current.add(e.id);
+        setEvents(page.events as LogEvent[]);
+        setTurns(page.turns);
       })
       .catch((err: unknown) => {
         if (alive && err instanceof ApiError) props.onError(err.message);
@@ -62,30 +66,40 @@ export function TrackView(props: TrackViewProps) {
   }, [track.id]);
 
   useEffect(() => {
+    // Fountain names each frame after the event's `kind`, so the two names
+    // here are the whole vocabulary: `output` is a byte the machine produced,
+    // `stage` is a change of state. `message` is kept as a fallback for a
+    // Fountain that emits an unnamed frame — it costs one line and its absence
+    // would be a transcript that silently never updates.
     const stop = subscribe(`/api/tracks/${track.id}/stream`, {
-      // Fountain names its frames by kind; `message` is the fallback for a
-      // stream that does not.
+      output: (data) => absorb(data),
+      stage: (data) => absorb(data),
       message: (data) => absorb(data),
-      event: (data) => absorb(data),
-      log: (data) => absorb(data),
-      turn: () => props.onActivity(),
     });
     function absorb(data: unknown): void {
-      const ev = data as LogEvent | { events?: LogEvent[] } | null;
-      if (!ev) return;
-      const list = Array.isArray((ev as { events?: LogEvent[] }).events)
-        ? (ev as { events: LogEvent[] }).events
-        : [ev as LogEvent];
-      const fresh = list.filter((e) => typeof e?.id === "number" && !seen.current.has(e.id));
-      if (!fresh.length) return;
-      for (const e of fresh) seen.current.add(e.id);
-      setEvents((current) => [...current, ...fresh]);
-      // A `state` on a stage event is how Fountain says a turn began or ended.
-      for (const e of fresh) {
-        if (e.kind === "stage" && e.state === "started") setRunning(true);
-        if (e.kind === "stage" && (e.state === "completed" || e.state === "failed")) {
+      const ev = data as LogEvent | null;
+      if (!ev || typeof ev !== "object") return;
+      if (typeof ev.id === "number") {
+        if (seen.current.has(ev.id)) return;
+        seen.current.add(ev.id);
+      }
+      setEvents((current) => [...current, ev]);
+
+      // `stage: "turn"` is how Fountain says a turn began or ended. Anything
+      // else with a stage — `server`, a runtime's own phases — is not a turn
+      // boundary and must not move the indicator.
+      if (ev.kind === "stage" && ev.stage === "turn") {
+        if (ev.state === "started") {
+          setRunning(true);
+        } else {
           setRunning(false);
+          // The turn is over, so its prompt is now recorded and the track's
+          // status has moved. Re-read both rather than guessing at them.
           props.onActivity();
+          void api
+            .events(track.id)
+            .then((page) => setTurns(page.turns))
+            .catch(() => undefined);
         }
       }
     }
@@ -121,6 +135,7 @@ export function TrackView(props: TrackViewProps) {
   return (
     <div className="centre">
       <Transcript
+        turns={turns}
         events={events}
         runtime={project.runtime}
         running={running}
@@ -204,13 +219,27 @@ function Ribbon({
         <div className={`ribbon-line${opening ? " pending" : ""}`}>
           <span className="ico">{originIcon}</span>
           <span>
-            {opening ? "Branching" : "Branched"} <code>{header.branchedFrom.branch}</code>
-            {header.branchedFrom.base ? (
+            {/* A pull request track checks out the branch the PR is already
+                for, so there is no "from" — saying "branched X from origin/X"
+                is both redundant and wrong about what happened. An issue track
+                does cut a branch, and says which issue it is for. */}
+            {track.origin.kind === "pr" && track.origin.number ? (
               <>
-                {" "}
-                from <code>origin/{header.branchedFrom.base}</code>
+                {opening ? "Checking out" : "On"} <code>{header.branchedFrom.branch}</code>, the head of pull request #
+                {track.origin.number}
               </>
-            ) : null}
+            ) : (
+              <>
+                {opening ? "Branching" : "Branched"} <code>{header.branchedFrom.branch}</code>
+                {header.branchedFrom.base && header.branchedFrom.base !== header.branchedFrom.branch ? (
+                  <>
+                    {" "}
+                    from <code>origin/{header.branchedFrom.base}</code>
+                  </>
+                ) : null}
+                {track.origin.kind === "issue" && track.origin.number ? <> for issue #{track.origin.number}</> : null}
+              </>
+            )}
           </span>
           {track.origin.url ? (
             <a href={track.origin.url} target="_blank" rel="noreferrer" title="Open on GitHub" aria-label="Open on GitHub">

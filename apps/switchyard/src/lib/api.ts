@@ -24,8 +24,8 @@ import type {
   Track,
   TrackHeader,
   TrackOriginInfo,
+  TranscriptPage,
 } from "../../shared/api";
-import type { LogEvent } from "../../shared/fountain-types";
 
 export class ApiError extends Error {
   constructor(
@@ -99,7 +99,7 @@ export const api = {
   prompt: (id: string, text: string) => post<{ ok: true }>(`/api/tracks/${id}/prompt`, { prompt: text }),
   interrupt: (id: string) => post<{ ok: true }>(`/api/tracks/${id}/interrupt`),
   retry: (id: string) => post<{ ok: true }>(`/api/tracks/${id}/retry`),
-  events: (id: string) => call<LogEvent[]>(`/api/tracks/${id}/events`),
+  events: (id: string) => call<TranscriptPage>(`/api/tracks/${id}/events`),
 
   // ── the machine, through a track ───────────────────────────────────
   files: (id: string, path?: string) =>

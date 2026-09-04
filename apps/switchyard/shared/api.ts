@@ -285,6 +285,31 @@ export interface ExecResult {
   durationMs: number;
 }
 
+// ── the transcript ─────────────────────────────────────────────────────
+
+/**
+ * One turn, as Fountain records it.
+ *
+ * The *prompt* lives here and the *output* lives in the event log, joined on
+ * `turn_id`. Two calls rather than one because they are genuinely two things:
+ * a turn is what somebody asked for, and an event is a byte the machine
+ * produced on the way to answering. A transcript that read only the events
+ * would render an agent talking to itself.
+ */
+export interface TurnRecord {
+  id: string;
+  prompt: string | null;
+  /** `user` for a person's prompt; `autonomous` marks a background cycle. */
+  origin: string | null;
+  status: string | null;
+  insertedAt: string | null;
+}
+
+export interface TranscriptPage {
+  turns: TurnRecord[];
+  events: unknown[];
+}
+
 // ── streams ────────────────────────────────────────────────────────────
 
 /** What `GET /api/projects/:id/stream` pushes, beside Fountain's own log events. */

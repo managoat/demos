@@ -1,11 +1,16 @@
 /**
  * The scrollback.
  *
- * Fountain stores a conversation as log events; `blocksForTurn` — shared with
- * the rest of this suite and ported from the server's own ACP parser — turns
- * one turn's events into text, thinking and tool chips. What this file adds is
- * everything about *reading* them, and one editorial decision that is
- * switchyard's own.
+ * Two sources, joined on `turn_id`, and the join is the whole of this file's
+ * structure. Fountain keeps *turns* — what somebody asked for — separately
+ * from the *event log*, which is the bytes the machine produced answering. A
+ * transcript built from the events alone renders an agent talking to itself;
+ * one built from the turns alone renders questions with no answers.
+ *
+ * `blocksForTurn` — shared with the rest of this suite, and a port of the
+ * server's own ACP parser — turns one turn's events into text, thinking and
+ * tool chips. What this file adds is everything about *reading* them, and one
+ * editorial decision that is switchyard's own.
  *
  * The decision: turns switchyard sent itself are rendered differently from
  * turns a person sent. Opening a track, closing one, surveying the machine —
@@ -19,10 +24,12 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { blocksForTurn, type Block } from "@managoat/fountain-app/acp";
+import type { TurnRecord } from "../../shared/api";
 import type { LogEvent } from "../../shared/fountain-types";
 import { Chevron } from "../lib/icons";
 
 export interface TranscriptProps {
+  turns: TurnRecord[];
   events: LogEvent[];
   runtime: string;
   /** True while a turn is in flight, so the trailing indicator is honest. */
@@ -31,11 +38,11 @@ export interface TranscriptProps {
   head?: React.ReactNode;
 }
 
-export function Transcript({ events, runtime, running, head }: TranscriptProps) {
+export function Transcript({ turns, events, runtime, running, head }: TranscriptProps) {
   const scroller = useRef<HTMLDivElement | null>(null);
   const pinned = useRef(true);
 
-  const turns = useMemo(() => groupTurns(events), [events]);
+  const grouped = useMemo(() => group(turns, events), [turns, events]);
 
   // Follow the bottom, but only while the reader is already there. Yanking
   // somebody back down mid-scroll is the single most irritating thing a live
@@ -43,7 +50,7 @@ export function Transcript({ events, runtime, running, head }: TranscriptProps) 
   useEffect(() => {
     const el = scroller.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
-  }, [turns, running]);
+  }, [grouped, running]);
 
   return (
     <div
@@ -56,7 +63,7 @@ export function Transcript({ events, runtime, running, head }: TranscriptProps) 
     >
       {head}
       <div className="transcript">
-        {turns.map((turn) => (
+        {grouped.map((turn) => (
           <Turn key={turn.id} turn={turn} runtime={runtime} />
         ))}
         {running ? (
@@ -81,28 +88,33 @@ interface GroupedTurn {
 }
 
 /**
- * Events into turns.
+ * Turns and events into one ordered list.
  *
- * `turn_id` is the grouping, and the prompt arrives as a `stage` event rather
- * than as output — which is why the user's own words are pulled out here
- * instead of falling through `blocksForTurn` and appearing as part of the
- * agent's reply.
+ * Turn order comes from the turns list, because that is the order they were
+ * asked in and it survives an event log that arrives out of order or with a
+ * gap in it. Events whose `turn_id` matches no turn — which happens for the
+ * first few frames of a turn Fountain has not finished recording — are kept in
+ * a trailing group rather than dropped, so the very first thing a new track
+ * shows is not an empty panel.
  */
-function groupTurns(events: LogEvent[]): GroupedTurn[] {
-  const order: string[] = [];
+function group(turns: TurnRecord[], events: LogEvent[]): GroupedTurn[] {
   const byTurn = new Map<string, GroupedTurn>();
+  const order: string[] = [];
+  for (const t of turns) {
+    byTurn.set(t.id, { id: t.id, prompt: t.prompt, events: [] });
+    order.push(t.id);
+  }
   for (const ev of events) {
-    const id = ev.turn_id ?? "loose";
+    const id = ev.turn_id ?? "";
     let turn = byTurn.get(id);
     if (!turn) {
-      turn = { id, prompt: null, events: [] };
-      byTurn.set(id, turn);
-      order.push(id);
+      turn = { id: id || "pending", prompt: null, events: [] };
+      byTurn.set(turn.id, turn);
+      order.push(turn.id);
     }
-    if (ev.kind === "stage" && ev.stage === "prompt" && typeof ev.data === "string") turn.prompt = ev.data;
-    else turn.events.push(ev);
+    turn.events.push(ev);
   }
-  return order.map((id) => byTurn.get(id)!);
+  return order.map((id) => byTurn.get(id)!).filter((t) => t.prompt !== null || t.events.length > 0);
 }
 
 function Turn({ turn, runtime }: { turn: GroupedTurn; runtime: string }) {

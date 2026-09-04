@@ -13,7 +13,7 @@
  * events.
  */
 import { HttpError } from "./http";
-import type { Agent, Catalog, Conversation, Environment, Repository, SandboxDiff, SandboxFile, SandboxListing, Vault } from "../shared/fountain-types";
+import type { Agent, Catalog, Conversation, Environment, LogEvent, Repository, SandboxDiff, SandboxFile, SandboxListing, Vault } from "../shared/fountain-types";
 
 export class FountainHttpError extends Error {
   constructor(
@@ -23,6 +23,16 @@ export class FountainHttpError extends Error {
   ) {
     super(message);
   }
+}
+
+/** One entry of `GET /api/conversations/:id/turns`. */
+export interface RawTurn {
+  id: string;
+  prompt?: string | null;
+  origin?: string | null;
+  status?: string | null;
+  inserted_at?: string | null;
+  [k: string]: unknown;
 }
 
 export interface ConversationSummary {
@@ -115,7 +125,11 @@ export class Fountain {
    * goes in the vault for exactly that reason.
    */
   putSecret(store: "environments" | "vaults", id: string, key: string, value: string): Promise<void> {
-    return this.data("PUT", `/api/${store}/${encodeURIComponent(id)}/secrets/${encodeURIComponent(key)}`, { value });
+    // `POST /secrets` with both fields, not `PUT /secrets/:key`. Fountain's
+    // secret request requires `key` and `value` together, and a write to an
+    // existing key overwrites it — so there is one call rather than a create
+    // and an update, and no 404 to handle on the first write of a rotation.
+    return this.data("POST", `/api/${store}/${encodeURIComponent(id)}/secrets`, { key, value });
   }
 
   deleteSecret(store: "environments" | "vaults", id: string, key: string): Promise<void> {
@@ -154,14 +168,34 @@ export class Fountain {
     sandbox_id?: string | null;
     title?: string;
     channel_id: string;
+    /**
+     * The first turn, sent in the same call.
+     *
+     * Not an optimisation. Every app in this suite that starts a *fresh*
+     * conversation sends its prompt here, and paddock sending it separately is
+     * the one difference that made provisioning a machine start answering 422.
+     * So a track's opening turn rides along with the launch that provisions
+     * the box; only an attach to a box that already exists prompts separately.
+     */
+    prompt?: string;
   }): Promise<Conversation> {
     return this.data("POST", "/api/conversations", {
       agent_id: body.agent_id,
       ...(body.environment_id ? { environment_id: body.environment_id } : {}),
       ...(body.vault_id ? { vault_id: body.vault_id } : {}),
-      ...(body.sandbox_id ? { sandbox_id: body.sandbox_id } : {}),
+      // Attaching ignores `sandbox_mode`; provisioning needs it, and
+      // `persistent` is what makes the disk the identity's home rather than
+      // this one conversation's.
+      ...(body.sandbox_id ? { sandbox_id: body.sandbox_id } : { sandbox_mode: "persistent" }),
       ...(body.title ? { title: body.title } : {}),
+      ...(body.prompt ? { prompt: body.prompt } : {}),
       channel_id: body.channel_id,
+      // Never resume. A `channel_id` on create makes Fountain hand back the
+      // latest live conversation for the same (agent, vault, channel) and
+      // answer 200 instead of opening one — right for a chat harness, wrong
+      // here, where a slug is already unique per live track and a resume would
+      // quietly give two tracks one conversation.
+      fresh: true,
     });
   }
 
@@ -177,12 +211,19 @@ export class Fountain {
     return this.data("POST", `/api/conversations/${encodeURIComponent(conversationId)}/terminate`, {});
   }
 
-  turns(conversationId: string): Promise<unknown> {
+  turns(conversationId: string): Promise<RawTurn[]> {
     return this.data("GET", `/api/conversations/${encodeURIComponent(conversationId)}/turns`);
   }
 
-  events(conversationId: string): Promise<unknown> {
-    return this.data("GET", `/api/conversations/${encodeURIComponent(conversationId)}/events`);
+  /**
+   * The stored log, oldest first.
+   *
+   * `limit` caps at a thousand and defaults to a hundred, which is not enough
+   * for a track somebody has been working in — a partial scrollback that looks
+   * complete is worse than a slow one.
+   */
+  events(conversationId: string): Promise<LogEvent[]> {
+    return this.data("GET", `/api/conversations/${encodeURIComponent(conversationId)}/events?limit=1000`);
   }
 
   /**
