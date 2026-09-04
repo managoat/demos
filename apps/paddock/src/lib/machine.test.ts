@@ -7,6 +7,7 @@ import {
   desiredItems,
   fingerprint,
   needsApply,
+  packageEntries,
   packageId,
   primaryRepoPath,
   repoId,
@@ -22,7 +23,7 @@ const declared = (over: Partial<Declared> = {}): Declared => ({
   agent: { runtime: "claude", skills: ["pdf"], mcp_servers: { linear: {} }, metadata: null },
   environment: {
     repositories: [{ url: "https://github.com/you/api.git", mount_path: "/home/sprite/api", ref: "main" }],
-    packages: ["ripgrep", "jq"],
+    packages: { apt: ["ripgrep", "jq"] },
     setup_script: "bun install\n",
   },
   envSecretKeys: ["GITHUB_TOKEN"],
@@ -46,7 +47,7 @@ describe("desiredItems", () => {
 
     // The environment builds the disk.
     expect(tier(repoId({ url: "https://github.com/you/api.git", mount_path: "/home/sprite/api", ref: "main" }))).toBe("box");
-    expect(tier(packageId("ripgrep"))).toBe("box");
+    expect(tier(packageId("apt", "ripgrep"))).toBe("box");
     expect(tier(setupId("bun install"))).toBe("box");
     // The agent is injected per session.
     expect(tier("skill:pdf")).toBe("session");
@@ -60,7 +61,7 @@ describe("desiredItems", () => {
   test("an absent setup script is not an item", () => {
     // Otherwise an empty box is permanently one item short of applied.
     for (const setup_script of [undefined, null, "", "   \n  "]) {
-      const items = desiredItems(declared({ environment: { repositories: [], packages: [], setup_script } }));
+      const items = desiredItems(declared({ environment: { repositories: [], packages: {}, setup_script } }));
       expect(items.some((i) => i.kind === "setup")).toBe(false);
     }
   });
@@ -90,6 +91,30 @@ describe("desiredItems", () => {
   });
 });
 
+describe("packages", () => {
+  test("are keyed by manager, and the manager is part of the id", () => {
+    // The same name under two managers is two different installs.
+    expect(packageId("apt", "ripgrep")).not.toBe(packageId("npm", "ripgrep"));
+    const items = desiredItems(declared({ environment: { packages: { npm: ["typescript"], apt: ["jq"] } } }));
+    expect(items.filter((i) => i.kind === "package").map((i) => i.id)).toEqual(["pkg:apt:jq", "pkg:npm:typescript"]);
+  });
+
+  test("a shape Fountain would never store is no packages, not a crash", () => {
+    // Fountain rejects an array outright ("Invalid object. Got: array"), which
+    // is how the wrong shape was found. Anything unusable reads as none.
+    for (const packages of [["ripgrep"], null, undefined, "ripgrep", { apt: "ripgrep" }, { apt: [] }]) {
+      expect(packageEntries(packages)).toEqual([]);
+    }
+  });
+
+  test("names are trimmed, de-duplicated and sorted, and so are the managers", () => {
+    expect(packageEntries({ npm: ["b"], apt: ["  jq  ", "jq", "curl", 7] })).toEqual([
+      ["apt", ["curl", "jq"]],
+      ["npm", ["b"]],
+    ]);
+  });
+});
+
 describe("boxDrift", () => {
   const items = desiredItems(declared());
   const boxIds = items.filter((i) => i.tier === "box").map((i) => i.id);
@@ -110,21 +135,21 @@ describe("boxDrift", () => {
   });
 
   test("a declared item the box has not got is pending", () => {
-    const d = boxDrift(items, receipt({ items: boxIds.filter((id) => id !== packageId("jq")) }));
-    expect(d.statuses.find((s) => s.item.id === packageId("jq"))!.state).toBe("pending");
+    const d = boxDrift(items, receipt({ items: boxIds.filter((id) => id !== packageId("apt", "jq")) }));
+    expect(d.statuses.find((s) => s.item.id === packageId("apt", "jq"))!.state).toBe("pending");
     expect(needsApply(d)).toBe(true);
-    expect(applyTodo(d).map((t) => t.id)).toEqual([packageId("jq")]);
+    expect(applyTodo(d).map((t) => t.id)).toEqual([packageId("apt", "jq")]);
     // A partial apply must not undo the rest.
-    expect(applyKeep(d)).toContain(packageId("ripgrep"));
+    expect(applyKeep(d)).toContain(packageId("apt", "ripgrep"));
   });
 
   test("a reported failure is its own state, and carries the reason", () => {
-    const d = boxDrift(items, receipt({ items: boxIds.filter((id) => id !== packageId("jq")), failed: [{ id: packageId("jq"), why: "no such package" }] }));
-    const jq = d.statuses.find((s) => s.item.id === packageId("jq"))!;
+    const d = boxDrift(items, receipt({ items: boxIds.filter((id) => id !== packageId("apt", "jq")), failed: [{ id: packageId("apt", "jq"), why: "no such package" }] }));
+    const jq = d.statuses.find((s) => s.item.id === packageId("apt", "jq"))!;
     expect(jq.state).toBe("failed");
     expect(jq.why).toBe("no such package");
     // A failure is still something to retry.
-    expect(applyTodo(d).map((t) => t.id)).toEqual([packageId("jq")]);
+    expect(applyTodo(d).map((t) => t.id)).toEqual([packageId("apt", "jq")]);
   });
 
   test("an item on the box that nothing declares any more is 'extra', not an error", () => {
@@ -142,8 +167,8 @@ describe("boxDrift", () => {
   test("a failure the box also reports as installed counts as installed", () => {
     // Contradictory receipts happen; 'present' is the safer reading, because
     // the alternative is reinstalling something that is already there.
-    const d = boxDrift(items, receipt({ items: boxIds, failed: [{ id: packageId("jq"), why: "stale line" }] }));
-    expect(d.statuses.find((s) => s.item.id === packageId("jq"))!.state).toBe("applied");
+    const d = boxDrift(items, receipt({ items: boxIds, failed: [{ id: packageId("apt", "jq"), why: "stale line" }] }));
+    expect(d.statuses.find((s) => s.item.id === packageId("apt", "jq"))!.state).toBe("applied");
   });
 });
 

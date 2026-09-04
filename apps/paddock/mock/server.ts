@@ -46,7 +46,17 @@ const state = {
   events: new Map<string, unknown[]>(),
 };
 
-const subs = new Set<(chunk: string) => void>();
+/**
+ * A subscriber is scoped: `conversationId: null` is the account-wide stream,
+ * anything else is one conversation's own tail. Paddock uses the second —
+ * the account-wide one carries every conversation the key can see, which is
+ * not shareable with a guest.
+ */
+interface Sub {
+  conversationId: string | null;
+  send: (chunk: string) => void;
+}
+const subs = new Set<Sub>();
 
 function push(conversationId: string, ev: Record<string, unknown>) {
   const id = state.seq++;
@@ -55,11 +65,15 @@ function push(conversationId: string, ev: Record<string, unknown>) {
   list.push(full);
   state.events.set(conversationId, list);
   const frame = `id: ${id}\nevent: message\ndata: ${JSON.stringify(full)}\n\n`;
-  for (const send of subs) send(frame);
+  for (const sub of subs) {
+    if (sub.conversationId === null || sub.conversationId === conversationId) sub.send(frame);
+  }
 }
 
 function bump() {
-  for (const send of subs) send(`event: conversations\ndata: {}\n\n`);
+  for (const sub of subs) {
+    if (sub.conversationId === null) sub.send(`event: conversations\ndata: {}\n\n`);
+  }
 }
 
 const acp = (update: Record<string, unknown>) =>
@@ -127,6 +141,64 @@ async function runTurn(conv: Conv, prompt: string) {
   bump();
 }
 
+/**
+ * The validation Fountain actually applies, as far as paddock has met it.
+ *
+ * A mock that accepts anything is a mock that lets a wrong shape reach
+ * production, which is exactly what happened: `packages` is keyed by package
+ * manager (`{"apt": ["ripgrep"]}`) and paddock sent an array for a week,
+ * because nothing here objected. Every rule below is one Fountain enforced on
+ * us; add to it whenever it teaches us another.
+ */
+function badEnvironment(body: Record<string, unknown>): { error: string; errors: Record<string, string[]> } | null {
+  const errors: Record<string, string[]> = {};
+  const packages = body.packages;
+  if (packages !== undefined && packages !== null) {
+    if (typeof packages !== "object" || Array.isArray(packages)) {
+      errors.packages = [`Invalid object. Got: ${Array.isArray(packages) ? "array" : typeof packages}`];
+    } else {
+      for (const [manager, names] of Object.entries(packages as Record<string, unknown>)) {
+        if (!Array.isArray(names) || names.some((n) => typeof n !== "string")) {
+          errors.packages = [`${manager}: expected a list of strings`];
+        }
+      }
+    }
+  }
+  const repos = body.repositories;
+  if (repos !== undefined && repos !== null && !Array.isArray(repos)) errors.repositories = ["Invalid array."];
+  const setup = body.setup_script;
+  if (setup !== undefined && setup !== null && typeof setup !== "string") errors.setup_script = ["Invalid string."];
+  return Object.keys(errors).length ? { error: "validation_failed", errors } : null;
+}
+
+/** One server-sent stream, either for a conversation or for the account. */
+function sse(conversationId: string | null): Response {
+  const enc = new TextEncoder();
+  let sub: Sub;
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(enc.encode(": connected\n\n"));
+        sub = {
+          conversationId,
+          send: (chunk: string) => {
+            try {
+              controller.enqueue(enc.encode(chunk));
+            } catch {
+              /* closed */
+            }
+          },
+        };
+        subs.add(sub);
+      },
+      cancel() {
+        subs.delete(sub);
+      },
+    }),
+    { headers: { "content-type": "text/event-stream", "access-control-allow-origin": "*", "cache-control": "no-cache" } },
+  );
+}
+
 function secretsFor(parent: string, id: string): Map<string, string> {
   const key = `${parent}:${id}`;
   if (!state.secrets.has(key)) state.secrets.set(key, new Map());
@@ -175,7 +247,9 @@ Bun.serve({
 
     if (p === "/api/environments" && method === "GET") return json({ data: state.environments });
     if (p === "/api/environments" && method === "POST") {
-      const env = { id: `e${state.environments.length + 1}`, repositories: [], packages: [], setup_script: "", ...body };
+      const bad = badEnvironment(body);
+      if (bad) return json(bad, 422);
+      const env = { id: `e${state.environments.length + 1}`, repositories: [], packages: {}, setup_script: "", ...body };
       state.environments.push(env);
       return json({ data: env });
     }
@@ -183,7 +257,11 @@ Bun.serve({
     if (envId) {
       const env = state.environments.find((e) => e.id === envId);
       if (!env) return json({ error: "not_found" }, 404);
-      if (method === "PUT") Object.assign(env, body);
+      if (method === "PUT") {
+        const bad = badEnvironment(body);
+        if (bad) return json(bad, 422);
+        Object.assign(env, body);
+      }
       return json({ data: env });
     }
 
@@ -236,6 +314,11 @@ Bun.serve({
       };
       state.conversations.push(conv);
       bump();
+      // A prompt sent with the create call is the first turn — that is how
+      // every app in the suite starts a conversation, so the fake has to run
+      // it. Ignoring it made a started machine look like a dead one.
+      const first = typeof b.prompt === "string" ? b.prompt : "";
+      if (first.trim()) void runTurn(conv, first);
       return json({ data: { ...conv, sandbox: state.sandbox } });
     }
 
@@ -250,6 +333,9 @@ Bun.serve({
       void runTurn(conv, String((body as { prompt?: unknown }).prompt ?? ""));
       return json({ status: "accepted" });
     }
+
+    const convStream = /^\/api\/conversations\/([^/]+)\/stream$/.exec(p);
+    if (convStream) return sse(convStream[1]!);
 
     const convEvents = /^\/api\/conversations\/([^/]+)\/events$/.exec(p);
     if (convEvents) return json({ data: state.events.get(convEvents[1]!) ?? [], meta: { has_more: false, next_cursor: null } });
@@ -296,30 +382,12 @@ Bun.serve({
     if (sbOne) return state.sandbox ? json({ data: state.sandbox }) : json({ error: "not_found" }, 404);
 
     // ── stream ────────────────────────────────────────────────────────────
-    if (p === "/api/events/stream") {
-      const enc = new TextEncoder();
-      let send: (chunk: string) => void;
-      return new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.enqueue(enc.encode(": connected\n\n"));
-            send = (chunk: string) => {
-              try {
-                controller.enqueue(enc.encode(chunk));
-              } catch {
-                /* closed */
-              }
-            };
-            subs.add(send);
-          },
-          cancel() {
-            subs.delete(send);
-          },
-        }),
-        { headers: { "content-type": "text/event-stream", "access-control-allow-origin": "*", "cache-control": "no-cache" } },
-      );
-    }
+    if (p === "/api/events/stream") return sse(null);
 
+    // Loud on purpose. Three real bugs hid behind a quiet 404 here — the
+    // client swallowed it and the app just looked empty. A route the app calls
+    // and the fake does not serve is a gap in the fake, and it should say so.
+    console.warn(`mock: no route for ${method} ${p}`);
     return json({ error: "not_found" }, 404);
   },
 });

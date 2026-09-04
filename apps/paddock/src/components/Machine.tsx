@@ -21,7 +21,7 @@ import { useState } from "react";
 import type { Agent, Environment, Repository, Sandbox, Vault } from "../api/types";
 import type { Role } from "../api/paddock";
 import type { BoxDrift, DesiredItem, ItemStatus } from "../lib/machine";
-import { needsApply } from "../lib/machine";
+import { needsApply, packageEntries } from "../lib/machine";
 import type { Tab } from "../../shared/tabs";
 
 export interface MachineProps {
@@ -47,7 +47,7 @@ export interface MachineProps {
   onApply: () => void;
   onReconcile: () => void;
   onOpenTab: () => void;
-  onSaveEnvironment: (patch: { repositories?: Repository[]; packages?: string[]; setup_script?: string }) => Promise<void>;
+  onSaveEnvironment: (patch: { repositories?: Repository[]; packages?: Record<string, string[]>; setup_script?: string }) => Promise<void>;
   onAddSecret: (where: "env" | "vault", key: string, value: string) => Promise<void>;
   onRemoveSecret: (where: "env" | "vault", key: string) => Promise<void>;
   onSaveAgent: (patch: Partial<Agent>) => Promise<void>;
@@ -251,38 +251,67 @@ function Repositories({ environment, onSave }: { environment: Environment; onSav
   );
 }
 
+/**
+ * Packages, keyed by the manager that installs them.
+ *
+ * `apt` is the default because that is what the box is, but the manager is a
+ * field rather than an assumption: Fountain stores `{"apt": [...], "npm": [...]}`
+ * and a UI that hid the key would quietly put npm packages under apt.
+ */
 function Packages({ environment, onSave }: { environment: Environment; onSave: MachineProps["onSaveEnvironment"] }) {
   const [name, setName] = useState("");
-  const packages = environment.packages ?? [];
+  const [manager, setManager] = useState("apt");
+  const entries = packageEntries(environment.packages);
+  const current = environment.packages ?? {};
+  const already = (current[manager] ?? []).includes(name.trim());
+
+  function add() {
+    const trimmed = name.trim();
+    if (!trimmed || already) return;
+    const next = { ...current, [manager]: [...(current[manager] ?? []), trimmed] };
+    void onSave({ packages: next }).then(() => setName(""));
+  }
+
+  function remove(mgr: string, pkg: string) {
+    const kept = (current[mgr] ?? []).filter((q) => q !== pkg);
+    const next = { ...current };
+    // An empty manager is dropped rather than left as an empty list: "apt: []"
+    // reads as a thing that is configured, and it is not.
+    if (kept.length) next[mgr] = kept;
+    else delete next[mgr];
+    void onSave({ packages: next });
+  }
 
   return (
     <Editor title="Packages">
-      <div className="chips">
-        {packages.map((p) => (
-          <span className="chip" key={p}>
-            {p}
-            <button className="x" onClick={() => onSave({ packages: packages.filter((q) => q !== p) })} title={`remove ${p}`}>
-              ×
-            </button>
-          </span>
-        ))}
-        {packages.length === 0 && <span className="fine">none</span>}
-      </div>
+      {entries.length === 0 && <p className="fine">none</p>}
+      {entries.map(([mgr, names]) => (
+        <div className="editor-row" key={mgr}>
+          <span className="dim narrow">{mgr}</span>
+          <div className="chips">
+            {names.map((pkg) => (
+              <span className="chip" key={pkg}>
+                {pkg}
+                <button className="x" onClick={() => remove(mgr, pkg)} title={`remove ${pkg}`}>
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
+      ))}
       <div className="editor-row">
+        <input className="narrow" value={manager} onChange={(e) => setManager(e.target.value.trim())} placeholder="apt" spellCheck={false} />
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="ripgrep"
           spellCheck={false}
           onKeyDown={(e) => {
-            if (e.key !== "Enter" || !name.trim() || packages.includes(name.trim())) return;
-            void onSave({ packages: [...packages, name.trim()] }).then(() => setName(""));
+            if (e.key === "Enter") add();
           }}
         />
-        <button
-          onClick={() => void onSave({ packages: [...packages, name.trim()] }).then(() => setName(""))}
-          disabled={!name.trim() || packages.includes(name.trim())}
-        >
+        <button onClick={add} disabled={!name.trim() || !manager || already}>
           add
         </button>
       </div>

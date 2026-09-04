@@ -115,12 +115,12 @@ export class FountainClient {
     return this.json<{ data: Environment }>("GET", `/api/environments/${id}`).then((r) => r.data);
   }
 
-  createEnvironment(input: { name: string; repositories?: Repository[]; packages?: string[]; setup_script?: string }): Promise<Environment> {
+  createEnvironment(input: { name: string; repositories?: Repository[]; packages?: Record<string, string[]>; setup_script?: string }): Promise<Environment> {
     return this.json<{ data: Environment }>("POST", "/api/environments", input).then((r) => r.data);
   }
 
   /** Same id, new contents. The machine built from the old contents keeps running. */
-  updateEnvironment(id: string, input: { repositories?: Repository[]; packages?: string[]; setup_script?: string }): Promise<Environment> {
+  updateEnvironment(id: string, input: { repositories?: Repository[]; packages?: Record<string, string[]>; setup_script?: string }): Promise<Environment> {
     return this.json<{ data: Environment }>("PUT", `/api/environments/${id}`, input).then((r) => r.data);
   }
 

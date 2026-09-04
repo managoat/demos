@@ -267,7 +267,7 @@ async function forward(client: FountainClient, req: Request, method: string, tar
   // which made a 422 on "start my machine" a guessing game. Log it: the status,
   // the call, and whatever Fountain said. Never the body we sent — it can carry
   // a secret value on its way to /secrets/:key.
-  if (res.status >= 400 && type?.includes("application/json")) {
+  if (res.status >= 400 && type?.includes("application/json") && !expected(res.status, target)) {
     void res
       .clone()
       .text()
@@ -275,6 +275,17 @@ async function forward(client: FountainClient, req: Request, method: string, tar
       .catch(() => undefined);
   }
   return new Response(res.body, { status: res.status, headers });
+}
+
+/**
+ * Failures that are not failures, and would only teach a reader to skim.
+ *
+ * A machine with no receipt yet is the ordinary first state — `readReceipt`
+ * treats that 404 as "the box has not said" and the panel renders it as such.
+ * Logging it as a refusal would put a line in the log on every poll.
+ */
+function expected(status: number, target: string): boolean {
+  return status === 404 && /^\/api\/sandboxes\/[^/]+\/file\?/.test(target);
 }
 
 function jsonRes(body: unknown): Response {

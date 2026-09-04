@@ -67,8 +67,13 @@ export function repoId(r: { url: string; mount_path: string; ref?: string | null
   return `repo:${r.url}@${r.ref?.trim() || "default"}->${r.mount_path}`;
 }
 
-export function packageId(name: string): string {
-  return `pkg:${name}`;
+/**
+ * `pkg:apt:ripgrep`. The manager is part of the id because it is part of the
+ * thing: the same name under a different manager is a different install, and
+ * an id that dropped it would call them equal.
+ */
+export function packageId(manager: string, name: string): string {
+  return `pkg:${manager}:${name}`;
 }
 
 export function setupId(script: string): string {
@@ -134,15 +139,17 @@ export function desiredItems(d: Declared): DesiredItem[] {
     });
   }
 
-  for (const p of d.environment.packages ?? []) {
-    out.push({
-      id: packageId(p),
-      tier: "box",
-      kind: "package",
-      label: p,
-      detail: "apt",
-      instruction: `install the apt package \`${p}\` if \`command -v ${p}\` does not already find it`,
-    });
+  for (const [manager, names] of packageEntries(d.environment.packages)) {
+    for (const name of names) {
+      out.push({
+        id: packageId(manager, name),
+        tier: "box",
+        kind: "package",
+        label: name,
+        detail: manager,
+        instruction: `install \`${name}\` with ${manager}, if it is not already installed`,
+      });
+    }
   }
 
   const setup = d.environment.setup_script?.trim();
@@ -339,6 +346,25 @@ function nameOf(o: Record<string, unknown>): string | null {
     if (typeof v === "string" && v.trim()) return v;
   }
   return null;
+}
+
+/**
+ * `{"apt": ["ripgrep"]}` as sorted `[manager, names]` pairs.
+ *
+ * Sorted so the panel does not reorder itself between reads, and defensive
+ * about the shape because this is the field that was wrong for a week: an
+ * array, a null, a value that is not a list of strings — none of them are an
+ * error worth failing the whole panel over, they are just no packages.
+ */
+export function packageEntries(packages: unknown): [string, string[]][] {
+  if (!packages || typeof packages !== "object" || Array.isArray(packages)) return [];
+  const out: [string, string[]][] = [];
+  for (const [manager, names] of Object.entries(packages as Record<string, unknown>)) {
+    if (!Array.isArray(names)) continue;
+    const clean = [...new Set(names.filter((n): n is string => typeof n === "string" && !!n.trim()).map((n) => n.trim()))].sort();
+    if (clean.length) out.push([manager, clean]);
+  }
+  return out.sort(([a], [b]) => a.localeCompare(b));
 }
 
 function indent(s: string): string {

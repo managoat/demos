@@ -81,7 +81,7 @@ async function ensureEnvironment(client: FountainClient): Promise<Environment> {
   if (found) return found;
   // Deliberately empty: a first box is a bare machine, and everything on it
   // afterwards arrives through the Machine panel where it can be seen.
-  return client.createEnvironment({ name: IDENTITY_NAME, repositories: [], packages: [], setup_script: "" });
+  return client.createEnvironment({ name: IDENTITY_NAME, repositories: [], packages: {}, setup_script: "" });
 }
 
 async function ensureVault(client: FountainClient): Promise<Vault | null> {

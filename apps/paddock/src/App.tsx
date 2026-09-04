@@ -304,7 +304,7 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
         const agent = await client.getAgent(source.agent_id!);
         const environment = source.environment_id
           ? await client.getEnvironment(source.environment_id)
-          : { id: "", name: "", repositories: [], packages: [], setup_script: "" };
+          : { id: "", name: "", repositories: [], packages: {}, setup_script: "" };
         setIdentity({ agent, environment, vault: source.vault_id ? { id: source.vault_id, name: "" } : null });
       } catch {
         // A machine we can use but not describe: the terminal still works,
@@ -362,15 +362,37 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
   const drift = useMemo(() => boxDrift(desired, receiptRead ? receipt : null), [desired, receipt, receiptRead]);
 
   // ── scrollback ───────────────────────────────────────────────────────────
+
+  /**
+   * One tab's history, merged in rather than assigned over.
+   *
+   * Merging matters because this races the live stream: a turn that started
+   * before the stream attached emits events nobody is listening for, and a
+   * fetch that lands after them would otherwise drop whatever arrived in
+   * between. Union by event id, oldest first, so calling this twice is free.
+   */
+  const loadEvents = useCallback(
+    async (conversationId: string) => {
+      try {
+        const history = await client.listAllEvents(conversationId, STREAMS);
+        setEvents((m) => {
+          const seen = new Set(history.map((e) => e.id));
+          const live = (m[conversationId] ?? []).filter((e) => !seen.has(e.id));
+          return { ...m, [conversationId]: [...history, ...live].sort((a, b) => a.id - b.id) };
+        });
+      } catch {
+        /* the stream is the other half of this; a missed fetch is not fatal */
+      }
+    },
+    [client],
+  );
+
   useEffect(() => {
     if (!active || loadedTabs[active.conversation.id]) return;
     const id = active.conversation.id;
     setLoadedTabs((m) => ({ ...m, [id]: true }));
-    void client
-      .listAllEvents(id, STREAMS)
-      .then((list) => setEvents((m) => ({ ...m, [id]: list })))
-      .catch(() => undefined);
-  }, [active, client, loadedTabs]);
+    void loadEvents(id);
+  }, [active, loadedTabs, loadEvents]);
 
   // The active tab's live tail. Phase 1 used Fountain's account-wide stream,
   // which cannot be shared: it carries every conversation on the owner's key.
@@ -390,6 +412,11 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
         signal: ctrl.signal,
         onOpen: () => {
           backoff = 1000;
+          // Whatever happened before this connection existed. The first turn
+          // of a brand-new machine starts the instant the conversation does,
+          // which is before any of this is listening — that turn was invisible
+          // until a reload, and so would anything missed by a dropped stream.
+          void loadEvents(conversationId);
         },
         onMessage: (msg) => {
           if (msg.id) lastEventId = msg.id;
@@ -421,7 +448,7 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
       stopped = true;
       ctrl.abort();
     };
-  }, [client, active, refreshConversations, readReceipt]);
+  }, [client, active, refreshConversations, readReceipt, loadEvents]);
 
   // The paddock's own channel: who is here, and when somebody else acts.
   useEffect(() => {
@@ -583,7 +610,7 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
     }
   }
 
-  async function saveEnvironment(patch: { repositories?: Repository[]; packages?: string[]; setup_script?: string }) {
+  async function saveEnvironment(patch: { repositories?: Repository[]; packages?: Record<string, string[]>; setup_script?: string }) {
     if (!identity) return;
     try {
       // Same environment id, new contents: the box keeps running, and the

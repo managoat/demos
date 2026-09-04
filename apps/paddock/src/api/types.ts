@@ -56,7 +56,12 @@ export interface Environment {
   id: string;
   name: string;
   repositories?: Repository[] | null;
-  packages?: string[] | null;
+  /**
+   * Keyed by package manager, not a flat list: `{"apt": ["ripgrep", "jq"]}`.
+   * Fountain rejects an array outright — `{"packages":["Invalid object. Got:
+   * array"]}` — which is how this was found. See `apps/salon/server/projects.ts`.
+   */
+  packages?: Record<string, string[]> | null;
   setup_script?: string | null;
 }
 
