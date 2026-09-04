@@ -19,11 +19,19 @@
  */
 import { useState } from "react";
 import type { Agent, Environment, Repository, Sandbox, Vault } from "../api/types";
+import type { Role } from "../api/paddock";
 import type { BoxDrift, DesiredItem, ItemStatus } from "../lib/machine";
 import { needsApply } from "../lib/machine";
 import type { Tab } from "../../shared/tabs";
 
 export interface MachineProps {
+  /**
+   * Everyone in the paddock sees this panel; only the owner can act on it.
+   * Editors and Apply are rendered *absent* for anybody else rather than
+   * disabled — a greyed-out secrets box invites somebody to wonder what they
+   * would have to do to use it, and the answer is "own this machine".
+   */
+  role: Role;
   sandbox: Sandbox | null;
   agent: Agent;
   environment: Environment;
@@ -47,6 +55,7 @@ export interface MachineProps {
 
 export function Machine(props: MachineProps) {
   const { drift, desired, sandbox, stale } = props;
+  const isOwner = props.role === "owner";
   const pending = drift.statuses.filter((s) => s.state !== "applied");
   const session = desired.filter((i) => i.tier === "session");
 
@@ -67,7 +76,7 @@ export function Machine(props: MachineProps) {
             )}
           </p>
         </div>
-        {needsApply(drift) && drift.known && (
+        {isOwner && needsApply(drift) && drift.known && (
           <button className="primary" onClick={props.onApply} disabled={props.applying || !!props.busy}>
             {props.applying ? "applying…" : `Apply ${pending.length} to the box`}
           </button>
@@ -84,7 +93,7 @@ export function Machine(props: MachineProps) {
           note="The environment builds the disk, so changing it here does nothing to the machine you are running until it is applied."
         />
 
-        {!drift.known && (
+        {!drift.known && isOwner && (
           <p className="note warn">
             The box has not reported what is on it — there is no readable receipt at <code>~/.paddock/applied.json</code>.
             <button className="ghost" onClick={props.onReconcile} disabled={props.applying || !!props.busy}>
@@ -101,9 +110,13 @@ export function Machine(props: MachineProps) {
           </p>
         )}
 
-        <Repositories environment={props.environment} onSave={props.onSaveEnvironment} />
-        <Packages environment={props.environment} onSave={props.onSaveEnvironment} />
-        <SetupScript environment={props.environment} onSave={props.onSaveEnvironment} />
+        {isOwner && (
+          <>
+            <Repositories environment={props.environment} onSave={props.onSaveEnvironment} />
+            <Packages environment={props.environment} onSave={props.onSaveEnvironment} />
+            <SetupScript environment={props.environment} onSave={props.onSaveEnvironment} />
+          </>
+        )}
       </section>
 
       {/* ── tier: session ─────────────────────────────────────────────── */}
@@ -114,7 +127,7 @@ export function Machine(props: MachineProps) {
           note="Fountain writes these into the machine as a tab opens. Tabs already running kept what they started with."
         />
 
-        {stale.length > 0 && (
+        {isOwner && stale.length > 0 && (
           <p className="note warn">
             {stale.length === 1 ? `${stale[0]!.title} started` : `${stale.map((t) => t.title).join(", ")} started`} before the
             current settings (revision {props.rev}).
@@ -140,15 +153,19 @@ export function Machine(props: MachineProps) {
           </ul>
         )}
 
-        <Secrets
-          envKeys={props.envSecretKeys}
-          vaultKeys={props.vaultSecretKeys}
-          hasVault={!!props.vault}
-          onAdd={props.onAddSecret}
-          onRemove={props.onRemoveSecret}
-        />
-        <McpServers agent={props.agent} onSave={props.onSaveAgent} />
-        <Skills agent={props.agent} onSave={props.onSaveAgent} />
+        {isOwner && (
+          <>
+            <Secrets
+              envKeys={props.envSecretKeys}
+              vaultKeys={props.vaultSecretKeys}
+              hasVault={!!props.vault}
+              onAdd={props.onAddSecret}
+              onRemove={props.onRemoveSecret}
+            />
+            <McpServers agent={props.agent} onSave={props.onSaveAgent} />
+            <Skills agent={props.agent} onSave={props.onSaveAgent} />
+          </>
+        )}
       </section>
 
       {/* ── tier: machine ─────────────────────────────────────────────── */}

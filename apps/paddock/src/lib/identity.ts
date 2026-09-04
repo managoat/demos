@@ -19,7 +19,7 @@ import type { FountainClient } from "../api/client";
 import { ApiError } from "../api/client";
 import type { Agent, Environment, Vault } from "../api/types";
 import { METADATA_KEY, withRev } from "./machine";
-import { systemPrompt } from "./spec";
+import { systemPrompt } from "../../shared/spec";
 
 /** The name all three records carry, and the marker on the agent. */
 export const IDENTITY_NAME = "Paddock";

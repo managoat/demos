@@ -9,38 +9,41 @@ script, secrets, MCP servers, skills — is changed **on** the machine rather
 than by replacing it, and the app is explicit at every point about whether a
 change has actually landed.
 
-It is a static single-page app with no backend of its own; it talks only to
-Fountain, on your key. Client patterns (OAuth, SSE, API client) follow
-[dns-desk](../dns-desk); the tab model is
-[fountain-team](../fountain-team)'s threads with a different front end.
+Invite people in — by email, or by a link that needs no account at all. They
+use your machine and you pay for it.
+
+A React SPA over a Bun server. The server holds your Fountain key, because it
+has to: see *Why there is a server* below. Client patterns (OAuth, SSE) follow
+[dns-desk](../dns-desk); the tab model is [fountain-team](../fountain-team)'s
+threads with a different front end; the guest proxy and key custody are
+[salon](../salon)'s, adapted from one conversation to a whole machine.
 
 ## Run it
 
+Three processes: a Fountain, the Paddock server, and Vite. The mock is a real
+enough Fountain to run the whole thing offline — it simulates the box, receipt
+included, so the declare → pending → apply → applied loop actually works:
+
 ```bash
 bun install
-bun run dev        # http://localhost:5182
+bun run mock                                       # a fake Fountain on :8792
+FOUNTAIN_URL=http://localhost:8792 bun run server  # the Paddock server on :8080
+bun run dev                                        # the SPA on :5182
 ```
 
-Without a Fountain to point at, run the mock — it simulates the box, including
-writing the receipt, so the whole declare → pending → apply → applied loop
-works offline:
+Then paste any non-empty key. Against a real Fountain, drop `FOUNTAIN_URL` (it
+defaults to `https://managoat.com`) and skip the mock.
 
-```bash
-bun run mock                                   # a fake Fountain on :8792
-FOUNTAIN_PROXY=http://localhost:8792 bun run dev
-```
-
-Then enter `http://localhost:5182` as the Fountain URL and paste any non-empty
-key.
-
-Server-side requirements, same as any external Fountain client:
+Fountain-side, only sign-in needs registering — the browser no longer calls
+Fountain directly, so no CORS origin is required:
 
 ```
-API_CORS_ORIGINS=http://localhost:5182     # or wherever you host the build
-
-# only for "Sign in with Fountain" — JSON, redirect URIs match exactly:
 OAUTH_CLIENTS='[{"id":"paddock","name":"Paddock","redirect_uris":["http://localhost:5182/"]}]'
 ```
+
+The server takes `FOUNTAIN_URL`, `DATA_DIR`, `PADDOCK_SECRET` (encrypts stored
+keys; generated into `DATA_DIR/secret` if unset), `PUBLIC_URL` (where invite
+links point) and `STATIC_DIR`.
 
 ## The problem it exists for
 
@@ -101,6 +104,58 @@ condition, it is the shape of owning one computer, so the prompt line says
 which tab has the machine and queues behind it. The queued line sends itself
 when the box frees up.
 
+## Sharing a machine
+
+**Invite by email** and they sign in with Fountain; **invite by link** and
+anyone who opens it is in, with no account, no sign-in and nothing to install.
+Either way the turns run on your key and you pay for them.
+
+A guest can read and prompt any tab, open their own, browse the files, and see
+the Machine panel. Only you can change what is on the machine — the editors and
+Apply are not rendered for anyone else, and the routes behind them are not
+reachable. Closing a tab ends it for everybody, so that is yours too.
+
+The link is the credential, so **a new link is the revoke**: minting one evicts
+every guest who came in on the old one, mid-session, and closing it leaves no
+anonymous way in at all.
+
+### What sharing actually costs
+
+Anyone who can type into a tab can ask the agent to print your environment
+secrets, your repositories, anything on the disk. No permission model prevents
+that, because the agent is the thing holding the shell — so the invite dialog
+says so where the decision is being made rather than in this file.
+
+The one real mitigation is the distinction the Machine panel already draws: an
+**environment** secret is an env var inside the box and a guest can read it; a
+**vault** secret never touches the box at all, because the egress broker
+substitutes it in flight. Once other people are in your paddock, that is where
+anything sensitive belongs.
+
+## Why there is a server
+
+Phase 1 had none: the browser held your key and talked to Fountain directly,
+and the app had no privileged access to anything.
+
+Sharing ends that, and not by choice. Sandbox identity is
+`(user, agent, environment, vault)` — the **user** is in it — so a guest's own
+Fountain account can never attach to your box. Their turns have to run on your
+key, so something has to hold your key, so paddock now holds it: AES-256-GCM
+under `PADDOCK_SECRET`, sessions stored as hashes, in `server/crypto.ts`.
+
+What guards it instead is `server/proxy.ts`, and it is worth reading before
+trusting any of this. Everything is an allowlist: tabs are derived with the
+same `shared/tabs.ts` the client renders the strip with (one function, both
+sides, so they cannot disagree); the ops tab — the one paddock changes the
+machine through — is excluded explicitly, because a guest who could prompt it
+would route around every other rule by asking; reading the config is open to
+the paddock and changing it is not; and even the owner gets a list of shapes
+rather than "anything under `/api`", so a scripted browser cannot spend their
+whole Fountain account.
+
+`server/app.test.ts` is that boundary written down as fifteen ways in that stay
+shut.
+
 ## How the pieces map
 
 Nothing about your machine lives in this browser — sign in from another laptop
@@ -133,14 +188,10 @@ same reason. It does not pretend otherwise anywhere in the UI.
 
 ## Not built yet
 
-Both are designed and neither is stubbed in the UI — there are no dead buttons.
+**`paddock attach`** — a single-file script the app serves that opens the same
+conversation as a tab and streams it into your terminal. It authenticates
+against paddock rather than Fountain, so it will work for guests too and no key
+ever reaches the terminal. Designed, not stubbed: there is no dead button.
 
-- **Collaboration** — invite by email or an anonymous link, host pays.
-  [salon](../salon) has the whole pattern: guests never hold the host's key,
-  their client points at a proxy admitting exactly one conversation. That is
-  what would introduce a Bun server here; `src/api/client.ts` takes its base
-  URL from settings, so it can be pointed at a proxy without touching call sites.
-- **`paddock attach`** — a single-file script the app serves that opens the same
-  conversation as a tab and streams it into your terminal. The same session
-  with a different front end. It is not a shell, and it should not be sold as
-  one; Fountain has no exec, so nothing honest can be.
+It is the same session with a different front end. It is not a shell and will
+not be sold as one; Fountain has no exec, so nothing honest can be.

@@ -16,54 +16,127 @@ import { Boot } from "./components/Boot";
 import { Connect } from "./components/Connect";
 import { Files } from "./components/Files";
 import { Machine } from "./components/Machine";
+import { People } from "./components/People";
 import { Tabs } from "./components/Tabs";
 import { Terminal } from "./components/Terminal";
 import { ensureIdentity, type Identity } from "./lib/identity";
 import { boxDrift, applyKeep, applyTodo, configRev, desiredItems, primaryRepoPath, withRev } from "./lib/machine";
 import { parseReceipt, decodeFile, type Receipt } from "./lib/protocol";
-import { completeLoginIfCallback, revoke } from "./lib/oauth";
-import { clearSettings, loadSettings, saveSettings, type Settings } from "./lib/settings";
-import { applyPrompt, bootstrapPrompt, reconcilePrompt, RECEIPT_PATH, WORK_ROOT } from "./lib/spec";
+import { completeLoginIfCallback } from "./lib/oauth";
+import { describePaddockError, paddock, type Me, type PaddockDto } from "./api/paddock";
+import { applyPrompt, bootstrapPrompt, reconcilePrompt, RECEIPT_PATH, WORK_ROOT } from "../shared/spec";
 import { canPrompt, channelFor, findBox, holder, nextSlug, opsTab, OPS_SLUG, staleTabs, tabsOf, visibleTabs } from "../shared/tabs";
 
 const STREAMS = ["acp", "stdout", "stderr", "stage"];
 /** The tab list carries status; a short poll keeps "who holds the machine" honest. */
 const POLL_MS = 4000;
 
-type Side = "machine" | "files";
+type Side = "machine" | "files" | "people";
 
 export function App() {
-  const [settings, setSettings] = useState<Settings | null>(() => loadSettings());
+  const [me, setMe] = useState<Me | null>(null);
+  const [checked, setChecked] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // ── sign-in ──────────────────────────────────────────────────────────────
+  const refreshMe = useCallback(async () => {
+    try {
+      setMe(await paddock.me());
+    } catch {
+      setMe(null);
+    } finally {
+      setChecked(true);
+    }
+  }, []);
+
+  // Sign-in, an invite link, or neither — settled once, in that order.
+  //
+  // The OAuth round trip still happens in the browser (the key is minted for
+  // this app), but the key is handed straight to the server and never kept
+  // here. What the browser holds afterwards is a session cookie.
   useEffect(() => {
     void (async () => {
+      const joinToken = joinTokenFromHash();
       try {
         const cb = await completeLoginIfCallback();
-        if (!cb) return;
-        const s: Settings = { baseUrl: cb.baseUrl, apiKey: cb.apiKey, via: "oauth" };
-        saveSettings(s);
-        setSettings(s);
-        if (cb.hash) window.location.hash = cb.hash;
+        if (cb) {
+          setMe(await paddock.signIn(cb.apiKey));
+          setChecked(true);
+          window.location.hash = cb.hash || "";
+          return;
+        }
+        if (joinToken) {
+          setMe(await paddock.join(joinToken));
+          setChecked(true);
+          window.location.hash = "";
+          return;
+        }
       } catch (err) {
-        setAuthError(describeError(err));
+        setAuthError(describePaddockError(err));
+        setChecked(true);
+        return;
       }
+      await refreshMe();
     })();
+  }, [refreshMe]);
+
+  /**
+   * An invite link pasted into a tab that already has the app open.
+   *
+   * Changing only the hash is a same-document navigation, so nothing remounts
+   * and the effect above never runs again. Without this, following a link from
+   * inside the app silently did nothing — which looked exactly like a dead
+   * link, and is the way most people will actually use one.
+   */
+  useEffect(() => {
+    const onHash = () => {
+      const token = joinTokenFromHash();
+      if (!token) return;
+      void paddock
+        .join(token)
+        .then((next) => {
+          setMe(next);
+          setAuthError(null);
+          window.location.hash = "";
+        })
+        .catch((err) => setAuthError(describePaddockError(err)));
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  const connect = useCallback((s: Settings) => {
-    saveSettings(s);
-    setSettings(s);
+  const connect = useCallback(async (apiKey: string) => {
     setAuthError(null);
+    try {
+      setMe(await paddock.signIn(apiKey));
+    } catch (err) {
+      setAuthError(describePaddockError(err));
+    }
   }, []);
 
-  if (!settings) return <Connect onConnect={connect} error={authError} />;
-  return <Paddock key={settings.baseUrl + settings.apiKey} settings={settings} onSignOut={() => { void revoke(settings.baseUrl, settings.apiKey).catch(() => undefined); clearSettings(); setSettings(null); }} />;
+  const signOut = useCallback(async () => {
+    await paddock.signOut().catch(() => undefined);
+    setMe(null);
+  }, []);
+
+  if (!checked) return <Splash line="…" />;
+  if (!me) return <Connect onConnect={connect} error={authError} />;
+  return <Paddock key={me.label} me={me} onMe={setMe} onSignOut={() => void signOut()} />;
 }
 
-function Paddock({ settings, onSignOut }: { settings: Settings; onSignOut: () => void }) {
-  const client = useMemo(() => new FountainClient(settings), [settings]);
+/** `#/join/<token>` — the anonymous way in. */
+function joinTokenFromHash(): string | null {
+  const m = /^#\/join\/([^/?#]+)/.exec(window.location.hash);
+  return m ? decodeURIComponent(m[1]!) : null;
+}
+
+function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSignOut: () => void }) {
+  // Every Fountain call goes through this machine's own proxy, on the owner's
+  // key. A guest's browser makes exactly the same calls and holds nothing.
+  const [paddockId, setPaddockId] = useState<string | null>(me.paddockId);
+  const client = useMemo(() => new FountainClient(`/f/${paddockId ?? "none"}`), [paddockId]);
+  const role = me.role;
+  const isOwner = role === "owner";
+  const [people, setPeople] = useState<PaddockDto | null>(null);
 
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -87,29 +160,57 @@ function Paddock({ settings, onSignOut }: { settings: Settings; onSignOut: () =>
   const [receiptRead, setReceiptRead] = useState(false);
   const [applying, setApplying] = useState(false);
 
-  const boxId = identity ? findBox(conversations, identity.agent.id) : null;
+  /**
+   * The agent behind the machine.
+   *
+   * The owner learns it from their identity; somebody else learns it from the
+   * tabs they can see, because the proxy hands back only this machine's
+   * conversations. Taking it from `identity` alone deadlocked a guest: their
+   * identity is read *from* the conversations, and the conversations were
+   * gated on having an identity.
+   */
+  const agentId = identity?.agent.id ?? conversations.find((c) => c.agent_id)?.agent_id ?? null;
+  const boxId = agentId ? findBox(conversations, agentId) : null;
   const rev = identity ? configRev(identity.agent) : 0;
 
   const tabs = useMemo(
-    () => (identity && boxId ? tabsOf(conversations, { sandboxId: boxId, agentId: identity.agent.id, rev, workRoot: WORK_ROOT }) : []),
-    [conversations, identity, boxId, rev],
+    () => (agentId && boxId ? tabsOf(conversations, { sandboxId: boxId, agentId, rev, workRoot: WORK_ROOT }) : []),
+    [conversations, agentId, boxId, rev],
   );
   const strip = useMemo(() => visibleTabs(tabs), [tabs]);
   const active = strip.find((t) => t.slug === activeSlug) ?? strip[0] ?? null;
   const machineHolder = holder(tabs);
 
-  // ── boot: the identity, then the box ─────────────────────────────────────
+  // ── boot ─────────────────────────────────────────────────────────────────
+  // The owner claims a paddock (idempotent) and then finds or makes the
+  // identity behind the machine. A guest does neither: they were handed a
+  // paddock id by the invite and everything else is derived.
   useEffect(() => {
     void (async () => {
       try {
+        let id = paddockId;
+        if (!id && isOwner === false && me.kind === "user") {
+          // A signed-in user with no machine yet: claiming one is free and
+          // creates nothing on Fountain.
+          const claimed = await paddock.claim();
+          id = claimed.id;
+          setPaddockId(id);
+          onMe({ ...me, role: "owner", paddockId: id });
+          return; // the effect reruns with a real paddock id
+        }
+        if (!id) return;
+
+        setPeople(await paddock.show().catch(() => null));
+        if (!isOwner) return;
+
         const [cat, agents] = await Promise.all([
           client.getCatalog().catch(() => null),
           client.listAgents().catch(() => [] as Agent[]),
         ]);
         setCatalog(cat);
         const mine = agents.find((a) => {
-          const m = (a.metadata ?? {})["paddock"];
-          return !!m && typeof m === "object" && !Array.isArray(m) && (m as { identity?: unknown }).identity === true;
+          const meta = (a.metadata ?? {})["paddock"];
+          return !!meta && typeof meta === "object" && !Array.isArray(meta) && (meta as { identity?: unknown }).identity === true;
         });
         if (!mine) return; // first run — Boot asks for a runtime
         setIdentity(await ensureIdentity(client, { runtime: mine.runtime, model: mine.model }));
@@ -119,23 +220,25 @@ function Paddock({ settings, onSignOut }: { settings: Settings; onSignOut: () =>
         setBooting(false);
       }
     })();
-  }, [client]);
+  }, [client, paddockId, isOwner, me, onMe]);
 
+  // No agent filter and no identity gate: the proxy already returns exactly
+  // this machine's tabs, to everybody in the paddock.
   const refreshConversations = useCallback(async () => {
-    if (!identity) return;
+    if (!paddockId) return;
     try {
-      setConversations(await client.listConversations({ agent_id: identity.agent.id }));
+      setConversations(await client.listConversations());
     } catch {
       /* a poll that misses is not worth a message; the next one will do */
     }
-  }, [client, identity]);
+  }, [client, paddockId]);
 
   useEffect(() => {
-    if (!identity) return;
+    if (!paddockId) return;
     void refreshConversations();
     const t = window.setInterval(() => void refreshConversations(), POLL_MS);
     return () => window.clearInterval(t);
-  }, [identity, refreshConversations]);
+  }, [paddockId, refreshConversations]);
 
   // First run of an identity that exists but has no live box: start one.
   const startedRef = useRef(false);
@@ -179,6 +282,32 @@ function Paddock({ settings, onSignOut }: { settings: Settings; onSignOut: () =>
       setStarting(false);
     }
   }
+
+  /**
+   * A read-only identity for somebody who is not the owner.
+   *
+   * The owner's copy comes from `ensureIdentity`, which may create things; a
+   * guest may not list agents at all. But the conversations they *can* see
+   * name the agent, environment and vault the box was built from, and reading
+   * those three by id is allowed. Same panel, same numbers, no writes.
+   */
+  useEffect(() => {
+    if (isOwner || identity || conversations.length === 0) return;
+    const source = conversations.find((c) => c.agent_id);
+    if (!source?.agent_id) return;
+    void (async () => {
+      try {
+        const agent = await client.getAgent(source.agent_id!);
+        const environment = source.environment_id
+          ? await client.getEnvironment(source.environment_id)
+          : { id: "", name: "", repositories: [], packages: [], setup_script: "" };
+        setIdentity({ agent, environment, vault: source.vault_id ? { id: source.vault_id, name: "" } : null });
+      } catch {
+        // A machine we can use but not describe: the terminal still works,
+        // and the Machine panel says it has nothing to show.
+      }
+    })();
+  }, [isOwner, identity, conversations, client]);
 
   // ── the machine's own state ──────────────────────────────────────────────
   const refreshMachine = useCallback(async () => {
@@ -239,15 +368,19 @@ function Paddock({ settings, onSignOut }: { settings: Settings; onSignOut: () =>
       .catch(() => undefined);
   }, [active, client, loadedTabs]);
 
+  // The active tab's live tail. Phase 1 used Fountain's account-wide stream,
+  // which cannot be shared: it carries every conversation on the owner's key.
   useEffect(() => {
-    if (!identity) return;
+    if (!active) return;
+    const conversationId = active.conversation.id;
     const ctrl = new AbortController();
     let stopped = false;
     let lastEventId: string | null = null;
     let backoff = 1000;
 
     const run = () => {
-      void client.streamAllEvents({
+      void client.streamConversation({
+        conversationId,
         lastEventId,
         streams: STREAMS,
         signal: ctrl.signal,
@@ -256,10 +389,6 @@ function Paddock({ settings, onSignOut }: { settings: Settings; onSignOut: () =>
         },
         onMessage: (msg) => {
           if (msg.id) lastEventId = msg.id;
-          if (msg.event === "conversations") {
-            void refreshConversations();
-            return;
-          }
           let ev: LogEvent;
           try {
             ev = JSON.parse(msg.data) as LogEvent;
@@ -267,11 +396,9 @@ function Paddock({ settings, onSignOut }: { settings: Settings; onSignOut: () =>
             return;
           }
           if (msg.id) ev.id = Number(msg.id);
-          const conv = ev.conversation_id;
-          if (!conv) return;
           setEvents((m) => {
-            const list = m[conv] ?? [];
-            return list.some((e) => e.id === ev.id) ? m : { ...m, [conv]: [...list, ev] };
+            const list = m[conversationId] ?? [];
+            return list.some((e) => e.id === ev.id) ? m : { ...m, [conversationId]: [...list, ev] };
           });
           if (ev.kind === "stage" && ev.stage === "turn" && ev.state !== "started") {
             void refreshConversations();
@@ -290,7 +417,39 @@ function Paddock({ settings, onSignOut }: { settings: Settings; onSignOut: () =>
       stopped = true;
       ctrl.abort();
     };
-  }, [client, identity, refreshConversations, readReceipt]);
+  }, [client, active, refreshConversations, readReceipt]);
+
+  // The paddock's own channel: who is here, and when somebody else acts.
+  useEffect(() => {
+    if (!paddockId) return;
+    const ctrl = new AbortController();
+    const clientId = Math.random().toString(36).slice(2);
+    const beat = () => void paddock.presence(paddockId, clientId).then((here) => setPeople((p) => (p ? { ...p, here } : p))).catch(() => undefined);
+    beat();
+    const timer = window.setInterval(beat, 20000);
+    void paddock.stream(paddockId, {
+      signal: ctrl.signal,
+      onMessage: (msg) => {
+        if (msg.event === "presence") {
+          try {
+            setPeople((p) => (p ? { ...p, here: JSON.parse(msg.data) } : p));
+          } catch {
+            /* a malformed frame is not worth a re-render */
+          }
+          return;
+        }
+        // Somebody opened a tab, took a turn, or was invited: re-read rather
+        // than trying to patch state from another browser's event.
+        void refreshConversations();
+        if (msg.event === "people") void paddock.show().then(setPeople).catch(() => undefined);
+      },
+      onClose: () => undefined,
+    });
+    return () => {
+      window.clearInterval(timer);
+      ctrl.abort();
+    };
+  }, [paddockId, refreshConversations]);
 
   // A tab that was waiting for the box gets its turn the moment it frees up.
   useEffect(() => {
@@ -478,9 +637,12 @@ function Paddock({ settings, onSignOut }: { settings: Settings; onSignOut: () =>
 
   // ── render ───────────────────────────────────────────────────────────────
   if (booting) return <Splash line="finding your machine…" />;
-  if (!identity) return <Boot catalog={catalog} starting={starting} error={fatal} onStart={boot} />;
+  // Only the owner can start a machine, so only the owner is ever asked how.
+  if (isOwner && !identity) return <Boot catalog={catalog} starting={starting} error={fatal} onStart={boot} />;
   if (fatal && !boxId) return <Splash line={fatal} error />;
-  if (!boxId || strip.length === 0) return <Splash line={starting ? "starting your machine…" : "waiting for your machine…"} />;
+  if (!boxId || strip.length === 0) {
+    return <Splash line={isOwner ? (starting ? "starting your machine…" : "waiting for your machine…") : "This machine is not running yet."} />;
+  }
 
   return (
     <div className="app">
@@ -491,6 +653,7 @@ function Paddock({ settings, onSignOut }: { settings: Settings; onSignOut: () =>
         <span className="dim">
           <code>{sandbox?.id ?? boxId}</code> · {sandbox?.status ?? "…"} · rev {rev}
         </span>
+        {!isOwner && <span className="badge">{people ? `${people.ownerEmail}'s machine` : "shared with you"}</span>}
         <span className="spacer" />
         <button className={`ghost ${side === "machine" ? "on" : ""}`} onClick={() => setSide("machine")}>
           Machine
@@ -498,8 +661,11 @@ function Paddock({ settings, onSignOut }: { settings: Settings; onSignOut: () =>
         <button className={`ghost ${side === "files" ? "on" : ""}`} onClick={() => setSide("files")}>
           Files
         </button>
+        <button className={`ghost ${side === "people" ? "on" : ""}`} onClick={() => setSide("people")}>
+          People{people && people.here.length > 1 ? ` (${people.here.length})` : ""}
+        </button>
         <button className="ghost" onClick={onSignOut}>
-          Sign out
+          {me.kind === "guest" ? "Leave" : "Sign out"}
         </button>
       </header>
 
@@ -518,6 +684,7 @@ function Paddock({ settings, onSignOut }: { settings: Settings; onSignOut: () =>
             onOpen={() => void openTab()}
             onClose={(slug) => void closeTab(slug)}
             opening={opening}
+            canClose={isOwner}
           />
           {active && (
             <Terminal
@@ -533,7 +700,36 @@ function Paddock({ settings, onSignOut }: { settings: Settings; onSignOut: () =>
         </main>
 
         <aside>
-          {side === "machine" ? (
+          {side === "people" ? (
+            people ? (
+              <People
+                paddock={people}
+                role={role ?? "guest"}
+                meLabel={me.label}
+                onInvite={async (email) => setPeople(await paddock.addMember(people.id, email))}
+                onRemove={async (email) => setPeople(await paddock.removeMember(people.id, email))}
+                onMintLink={async () => {
+                  const r = await paddock.mintInvite(people.id);
+                  setPeople(r.data);
+                  if (r.evicted) setNotice(`New link. ${r.evicted} guest${r.evicted === 1 ? "" : "s"} on the old one ${r.evicted === 1 ? "was" : "were"} removed.`);
+                }}
+                onCloseLink={async () => {
+                  const r = await paddock.closeInvite(people.id);
+                  setPeople(r.data);
+                  setNotice(r.evicted ? `Link closed. ${r.evicted} guest${r.evicted === 1 ? "" : "s"} removed.` : "Link closed.");
+                }}
+              />
+            ) : (
+              <div className="panel">
+                <p className="fine">Nobody is sharing this machine.</p>
+              </div>
+            )
+          ) : side === "machine" ? (
+            !identity ? (
+              <div className="panel">
+                <p className="fine">Nothing to show about this machine.</p>
+              </div>
+            ) : (
             <Machine
               sandbox={sandbox}
               agent={identity.agent}
@@ -554,7 +750,9 @@ function Paddock({ settings, onSignOut }: { settings: Settings; onSignOut: () =>
               onAddSecret={addSecret}
               onRemoveSecret={removeSecret}
               onSaveAgent={saveAgent}
+              role={role ?? "guest"}
             />
+            )
           ) : (
             <Files client={client} sandboxId={boxId} root={active?.cwd ?? WORK_ROOT} />
           )}

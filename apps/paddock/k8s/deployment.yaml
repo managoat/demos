@@ -6,7 +6,11 @@ metadata:
   labels:
     app: paddock
 spec:
-  replicas: 2
+  # One replica: the state is a SQLite file on a ReadWriteOnce volume, and the
+  # presence/hub map lives in the process. Two would disagree about who is here.
+  replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: paddock
@@ -21,6 +25,26 @@ spec:
           image: ghcr.io/managoat/paddock:sha-5af2ac13a55274592c13c68e6cc2c1e5b4b797ec
           ports:
             - containerPort: 8080
+          env:
+            - name: FOUNTAIN_URL
+              value: https://managoat.com
+            - name: DATA_DIR
+              value: /data
+            - name: STATIC_DIR
+              value: /app/dist
+            # Where invite links point.
+            - name: PUBLIC_URL
+              value: https://paddock.demo.managoat.com
+          envFrom:
+            # PADDOCK_SECRET, if provided: encrypts the stored Fountain keys.
+            # Without it the server generates one into /data/secret — it works,
+            # but the secret then lives beside the data it protects.
+            - secretRef:
+                name: paddock-secrets
+                optional: true
+          volumeMounts:
+            - name: data
+              mountPath: /data
           readinessProbe:
             httpGet: { path: /healthz, port: 8080 }
             initialDelaySeconds: 2
@@ -30,5 +54,9 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 20
           resources:
-            requests: { cpu: 20m, memory: 96Mi }
+            requests: { cpu: 20m, memory: 64Mi }
             limits: { memory: 256Mi }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: paddock-data

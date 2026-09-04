@@ -34,7 +34,6 @@ import type {
   Vault,
 } from "./types";
 import { readSse, type SseMessage } from "../lib/sse";
-import type { Settings } from "../lib/settings";
 
 export class ApiError extends Error {
   constructor(
@@ -51,12 +50,20 @@ export class ApiError extends Error {
 /** Where a secret lives. Two genuinely different things — see `lib/machine.ts`. */
 export type SecretParent = "environments" | "vaults";
 
+/**
+ * Fountain, through paddock.
+ *
+ * `baseUrl` is `/f/<paddock>` on this same origin — never Fountain itself.
+ * The browser has no key: the session cookie says who is asking and the
+ * server puts the machine owner's key on the call. That is what lets a guest
+ * with no Fountain account use somebody else's box.
+ *
+ * The method names and shapes are unchanged from phase 1 on purpose, because
+ * the proxy speaks Fountain's own shapes back. Only the base URL and the
+ * absence of a bearer moved.
+ */
 export class FountainClient {
-  constructor(private settings: Settings) {}
-
-  get baseUrl(): string {
-    return this.settings.baseUrl;
-  }
+  constructor(readonly baseUrl: string) {}
 
   me(): Promise<Me> {
     return this.json<Me>("GET", "/api/auth/me");
@@ -233,11 +240,16 @@ export class FountainClient {
   // ── stream ────────────────────────────────────────────────────────────────
 
   /**
-   * Every live conversation of the caller on one connection — all the tabs at
-   * once, demultiplexed by conversation_id. Server-side block parsing on.
-   * Resolves when the server closes; the caller reconnects with the last id.
+   * One tab's live tail.
+   *
+   * Phase 1 used Fountain's account-wide `/api/events/stream`, which carries
+   * every conversation the key can see. That is not proxyable: a guest would
+   * be handed the owner's other work, and filtering a live stream server-side
+   * means parsing it. One connection per tab, scoped by the proxy to a tab
+   * that is genuinely on this machine, is the honest version.
    */
-  streamAllEvents(opts: {
+  streamConversation(opts: {
+    conversationId: string;
     lastEventId: string | null;
     streams: string[];
     signal: AbortSignal;
@@ -246,8 +258,7 @@ export class FountainClient {
     onClose: (err?: unknown) => void;
   }): Promise<void> {
     const qs = new URLSearchParams({ streams: opts.streams.join(","), blocks: "true" });
-    return readSse(`${this.baseUrl}/api/events/stream?${qs}`, {
-      headers: { authorization: `Bearer ${this.settings.apiKey}` },
+    return readSse(`${this.baseUrl}/api/conversations/${encodeURIComponent(opts.conversationId)}/stream?${qs}`, {
       lastEventId: opts.lastEventId,
       signal: opts.signal,
       onMessage: opts.onMessage,
@@ -259,10 +270,7 @@ export class FountainClient {
   // ── plumbing ──────────────────────────────────────────────────────────────
 
   private async json<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
-    const headers: Record<string, string> = {
-      authorization: `Bearer ${this.settings.apiKey}`,
-      accept: "application/json",
-    };
+    const headers: Record<string, string> = { accept: "application/json" };
     if (body !== undefined) headers["content-type"] = "application/json";
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,

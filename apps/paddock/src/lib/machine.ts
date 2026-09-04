@@ -27,7 +27,7 @@
  */
 import type { Agent, Environment } from "../api/types";
 import type { Receipt } from "./protocol";
-import type { ApplyItem } from "./spec";
+import type { ApplyItem } from "../../shared/spec";
 
 /** Which of the three ways a change reaches the machine. */
 export type Tier = "box" | "session" | "machine";

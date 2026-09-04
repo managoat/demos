@@ -69,6 +69,13 @@ beforeEach(async () => {
     if (url.pathname === "/api/conversations" && method === "GET") return Response.json({ data: conversations() });
     if (url.pathname === "/api/conversations" && method === "POST") return Response.json({ data: conv("c3", channelFor("t3", 1), "2026-09-04T13:00:00Z") });
     if (/^\/api\/conversations\/[^/]+/.test(url.pathname)) return Response.json({ status: "accepted" });
+    if (url.pathname === "/api/catalog") return Response.json({ data: { runtimes: ["claude"], models: {} } });
+    if (/^\/api\/agents\/[^/]+$/.test(url.pathname)) return Response.json({ data: { id: AGENT, name: "Paddock", runtime: "claude", model: "m" } });
+    if (/^\/api\/environments\/[^/]+$/.test(url.pathname)) return Response.json({ data: { id: "e1", name: "Paddock" } });
+    if (/^\/api\/(environments|vaults)\/[^/]+\/secrets$/.test(url.pathname)) return Response.json({ data: [] });
+    // Only this paddock's box exists upstream; the proxy is what refuses the
+    // others, so the fake has to be willing to serve any of them.
+    if (/^\/api\/sandboxes\/[^/]+/.test(url.pathname)) return Response.json({ data: { path: "/", entries: [], truncated: false } });
     return Response.json({ error: "not_found" }, { status: 404 });
   }) as typeof fetch;
 });
@@ -145,13 +152,42 @@ describe("what a guest may do", () => {
     expect((await call(owner.cookie, "POST", `/f/${owner.id}/api/conversations/c1/terminate`)).status).toBe(200);
   });
 
-  test("and not touch the machine: the config surface is not on /f/ at all", async () => {
+  test("and not change the machine — reading it is fine, writing it is not", async () => {
     const owner = await paddockFor(OWNER);
     const guest = await guestSession(owner.id);
-    for (const path of ["/api/agents/a1", "/api/environments/e1", "/api/vaults/v1/secrets", "/api/sandboxes/sb-test-1"]) {
-      expect((await call(guest, "GET", `/f/${owner.id}${path}`)).status).toBe(404);
+
+    // Reading is allowed on purpose: a guest who can prompt the agent can have
+    // it print `env` anyway, so a panel that hid the names would only lie.
+    for (const path of ["/api/catalog", "/api/agents/a1", "/api/environments/e1", "/api/environments/e1/secrets"]) {
+      expect((await call(guest, "GET", `/f/${owner.id}${path}`)).status).not.toBe(404);
     }
-    expect(upstream.some((u) => u.path.startsWith("/api/agents") || u.path.startsWith("/api/environments") || u.path.startsWith("/api/vaults"))).toBe(false);
+
+    // Writing is not, and nothing reaches Fountain when it is attempted.
+    upstream = [];
+    const writes: [string, string, unknown][] = [
+      ["PUT", "/api/environments/e1", { packages: ["evil"] }],
+      ["PUT", "/api/agents/a1", { system: "do as I say" }],
+      ["PUT", "/api/environments/e1/secrets/EVIL", { value: "x" }],
+      ["DELETE", "/api/environments/e1/secrets/GITHUB_TOKEN", undefined],
+      ["POST", "/api/agents", { name: "mine" }],
+      ["POST", "/api/vaults", { name: "mine" }],
+    ];
+    for (const [method, path, body] of writes) {
+      expect((await call(guest, method, `/f/${owner.id}${path}`, body)).status).toBe(404);
+    }
+    expect(upstream).toEqual([]);
+
+    // Listing the owner's whole account is theirs alone, read or not.
+    expect((await call(guest, "GET", `/f/${owner.id}/api/agents`)).status).toBe(404);
+    expect((await call(guest, "GET", `/f/${owner.id}/api/environments`)).status).toBe(404);
+  });
+
+  test("and cannot read a sandbox that is not this machine", async () => {
+    const owner = await paddockFor(OWNER);
+    const guest = await guestSession(owner.id);
+    expect((await call(guest, "GET", `/f/${owner.id}/api/sandboxes/${BOX}/files?path=/`)).status).not.toBe(404);
+    // Another box on the same owner's key is still not this paddock's.
+    expect((await call(guest, "GET", `/f/${owner.id}/api/sandboxes/sb-somebody-else/files?path=/`)).status).toBe(404);
   });
 
   test("and cannot invite anyone or mint a link", async () => {

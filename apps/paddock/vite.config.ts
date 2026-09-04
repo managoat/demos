@@ -1,15 +1,18 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// Static app: it talks to whatever Fountain the user points it at, so there
-// is no proxy in the build. In dev, either add http://localhost:5182 to
-// API_CORS_ORIGINS on the Fountain server, or set FOUNTAIN_PROXY to a
-// Fountain URL and the dev server forwards /api there (then enter
-// http://localhost:5182 as the Fountain URL in the app and paste a key —
-// OAuth redirects go to the real origin). `bun run mock` serves a fake
-// Fountain on :5183 that FOUNTAIN_PROXY can point at.
+// The browser talks only to the Paddock server (server/), same origin: its own
+// API under /api and Fountain-through-a-machine under /f. It never reaches
+// Fountain directly and never holds a key — see server/proxy.ts.
+//
+// In dev, Vite serves the SPA and forwards both to the server:
+//
+//   bun run mock                                   a fake Fountain on :8792
+//   FOUNTAIN_URL=http://localhost:8792 bun run server
+//   bun run dev                                    this, on :5182
+//
 // VITE_BASE is the path the build is served under; unset means the root.
-const proxyTarget = process.env.FOUNTAIN_PROXY?.replace(/\/+$/, "");
+const server = process.env.PADDOCK_SERVER ?? "http://localhost:8080";
 const appCommit = (process.env.GITHUB_SHA ?? "dev").slice(0, 7);
 
 export default defineConfig({
@@ -18,7 +21,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5182,
-    proxy: proxyTarget ? { "/api": { target: proxyTarget, changeOrigin: true, secure: true } } : undefined,
+    proxy: {
+      "/api": { target: server, changeOrigin: false },
+      "/f": { target: server, changeOrigin: false },
+    },
   },
   build: { outDir: "dist", sourcemap: true },
 });

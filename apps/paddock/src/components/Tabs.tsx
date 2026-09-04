@@ -12,6 +12,7 @@ export function Tabs({
   onOpen,
   onClose,
   opening,
+  canClose,
 }: {
   tabs: Tab[];
   active: string | null;
@@ -19,6 +20,12 @@ export function Tabs({
   onOpen: () => void;
   onClose: (slug: string) => void;
   opening: boolean;
+  /**
+   * Closing a tab ends it for everybody on the machine, so it is the owner's
+   * alone. The × is hidden rather than disabled for the others: an affordance
+   * that only ever answers "no" is worse than no affordance.
+   */
+  canClose: boolean;
 }) {
   return (
     <div className="tabs">
@@ -27,7 +34,7 @@ export function Tabs({
           <span className={`dot ${t.busy ? "busy" : ""}`} />
           <span className="tab-title">{t.title}</span>
           {t.stale && <span className="tab-flag" title="Started before the current settings">·</span>}
-          {tabs.length > 1 && (
+          {canClose && tabs.length > 1 && (
             <button
               className="x"
               title={`Close ${t.title}`}

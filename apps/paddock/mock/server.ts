@@ -13,7 +13,7 @@
  * Then open http://localhost:5182, enter http://localhost:5182 as the Fountain
  * URL and paste any non-empty key.
  */
-import { RECEIPT_PATH, WORK_ROOT } from "../src/lib/spec";
+import { RECEIPT_PATH, WORK_ROOT } from "../shared/spec";
 
 const PORT = 8792;
 const now = () => new Date().toISOString();
