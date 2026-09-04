@@ -15,7 +15,9 @@
  */
 import { RECEIPT_PATH, WORK_ROOT } from "../shared/spec";
 
-const PORT = 8792;
+// 8792 by default, overridable so two checkouts can run their own fake
+// Fountain at once — the second one otherwise dies on EADDRINUSE.
+const PORT = Number(process.env.PORT ?? 8792);
 /** Where a `connect_url` points. On a real Fountain this is its console. */
 const FOUNTAIN_BASE = `http://localhost:${PORT}`;
 const now = () => new Date().toISOString();
@@ -77,6 +79,67 @@ function bump() {
     if (sub.conversationId === null) sub.send(`event: conversations\ndata: {}\n\n`);
   }
 }
+
+/**
+ * A diff with one of each kind of change in it, because the Changes list is
+ * only worth anything against output git really produces. This is literal
+ * `git diff` output, not a sketch: a modification, a new file, a delete, a
+ * rename with no hunks, and a binary with no hunks either. An empty string
+ * here — which is what the mock returned for a long time — makes a panel that
+ * shows nothing look correct and untested at once.
+ *
+ * `repo_root` is the tab's checkout, and every path below is relative to it,
+ * the way Fountain reports them.
+ */
+const MOCK_DIFF = `diff --git a/README.md b/README.md
+index 9a6f86a..0f943ed 100644
+--- a/README.md
++++ b/README.md
+@@ -1,3 +1,5 @@
+ # Your machine
+
+-This is a mock checkout.
++This is a mock checkout, and it has changes in it.
++
++Ask for something in the tab and this is where it shows up.
+diff --git a/notes.bin b/notes.bin
+index 9591b17..6459c29 100644
+Binary files a/notes.bin and b/notes.bin differ
+diff --git a/src/index.ts b/src/index.ts
+index 64a32fd..c8b50d4 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -1,3 +1,7 @@
+ export function hello(): string {
+-  return "hello";
++  return greeting("world");
+ }
++
++export function greeting(who: string): string {
++  return \`hello, \${who}\`;
++}
+diff --git a/src/lib/util.ts b/src/lib/helpers.ts
+similarity index 100%
+rename from src/lib/util.ts
+rename to src/lib/helpers.ts
+diff --git a/src/parse.ts b/src/parse.ts
+new file mode 100644
+index 0000000..747f7ec
+--- /dev/null
++++ b/src/parse.ts
+@@ -0,0 +1,3 @@
++export function parse(input: string): string[] {
++  return input.split(",");
++}
+diff --git a/test/old.test.ts b/test/old.test.ts
+deleted file mode 100644
+index 286c5f5..0000000
+--- a/test/old.test.ts
++++ /dev/null
+@@ -1,2 +0,0 @@
+-import { hello } from "../src/index";
+-hello();
+`;
 
 const acp = (update: Record<string, unknown>) =>
   JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: { update } });
@@ -462,11 +525,18 @@ Bun.serve({
         // A small tree, so the file browser has something to be a file browser
         // about. A real box has a checkout here; an empty mock made the
         // explorer look broken when it was merely accurate.
+        //
+        // It is the tree `MOCK_DIFF` describes, after those changes: the file
+        // it renames is here under its new name, the file it adds is here, and
+        // the file it deletes is not. A Changes list that points at paths the
+        // tree does not have is a fake disagreeing with itself.
         for (const [path, body] of [
-          [`${WORK_ROOT}/t1/README.md`, "# Your machine\n\nThis is a mock checkout.\n"],
+          [`${WORK_ROOT}/t1/README.md`, "# Your machine\n\nThis is a mock checkout, and it has changes in it.\n\nAsk for something in the tab and this is where it shows up.\n"],
           [`${WORK_ROOT}/t1/package.json`, '{\n  "name": "example",\n  "version": "0.1.0"\n}\n'],
-          [`${WORK_ROOT}/t1/src/index.ts`, 'export function hello(): string {\n  return "hello";\n}\n'],
-          [`${WORK_ROOT}/t1/src/lib/util.ts`, "export const answer = 42;\n"],
+          [`${WORK_ROOT}/t1/notes.bin`, "\u0000\u0001binary-ish\u0000"],
+          [`${WORK_ROOT}/t1/src/index.ts`, 'export function hello(): string {\n  return greeting("world");\n}\n\nexport function greeting(who: string): string {\n  return `hello, ${who}`;\n}\n'],
+          [`${WORK_ROOT}/t1/src/parse.ts`, 'export function parse(input: string): string[] {\n  return input.split(",");\n}\n'],
+          [`${WORK_ROOT}/t1/src/lib/helpers.ts`, "export const answer = 42;\n"],
           [`${WORK_ROOT}/t1/test/index.test.ts`, 'import { hello } from "../src/index";\n'],
         ] as [string, string][]) {
           state.files.set(path, body);
@@ -569,7 +639,10 @@ Bun.serve({
       return json({ data: { path: dir || "/", entries: [...seen.values()], truncated: false } });
     }
     const sbDiff = /^\/api\/sandboxes\/([^/]+)\/diff$/.exec(p);
-    if (sbDiff) return json({ data: { path: url.searchParams.get("path") ?? "", repo_root: "/home/sprite/api", staged: false, ref: "main", diff: "", truncated: false } });
+    if (sbDiff) {
+      const path = url.searchParams.get("path") ?? "";
+      return json({ data: { path, repo_root: `${WORK_ROOT}/t1`, staged: false, ref: "main", diff: MOCK_DIFF, truncated: false } });
+    }
     const sbOne = /^\/api\/sandboxes\/([^/]+)$/.exec(p);
     if (sbOne) return state.sandbox ? json({ data: state.sandbox }) : json({ error: "not_found" }, 404);
 

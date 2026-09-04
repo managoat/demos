@@ -268,10 +268,30 @@ to the wrong place by the one skill it always has.
 
 ## Files, and what is not there
 
-The Files panel is a file tree — expand directories in place, click a file to
-read it, `git diff` beside it — over the same read-only routes. There is no write, and there will not be one: to change
-something, ask for it in the tab. The panel says so rather than leaving people
-hunting for an edit button that does not exist.
+The Files panel opens on **Changes**: the files `git diff` reports, one row
+each, with the letter `git status --short` uses and the lines added and
+removed. Below it is the tree — directories expand in place, and a file that
+has changed carries the same letter where it sits. Clicking either opens the
+file in a modal, on its diff when it has one, with the file itself a tab away
+and both numbered by line.
+
+The modal is why the tree gets the whole sidebar. This was a 170px tree beside
+a 170px code pane inside a 360px inspector, too narrow to read a nested path
+*or* a line of code. The file is worth the window and the tree is worth the
+sidebar, so each got one.
+
+`GET /api/sandboxes/:id/{files,file,diff}` is still all of it. The diff route
+returns one string — every changed file concatenated, as git printed it — and
+`src/lib/diff.ts` splits it per file and numbers the lines inside each hunk.
+That parsing is where the awkward cases live: a rename with no hunks, a binary
+with none either, `/dev/null` standing in for the side that does not exist,
+and the `\ No newline at end of file` marker that makes a naive `+` counter
+over-count. So it is pure, out of the component, and tested against literal
+`git diff` output rather than a diff written to suit the parser.
+
+There is no write, and there will not be one: to change something, ask for it
+in the tab. The panel says so rather than leaving people hunting for an edit
+button that does not exist.
 
 The terminal is a Claude Code prompt rendered as scrollback, not a PTY, for the
 same reason. It does not pretend otherwise anywhere in the UI.
