@@ -29,6 +29,8 @@ import { asHttpError } from "./fountain";
 import { authenticate } from "./context";
 import { hub } from "./hub";
 import { HttpError, json } from "./http";
+import { belongsTo } from "../shared/tabs";
+import type { PaddockRow } from "./db";
 
 export interface RetireReport {
   /** Conversations ended. */
@@ -40,19 +42,24 @@ export interface RetireReport {
 }
 
 export async function rebuild(ctx: AppContext, req: Request, paddockId: string): Promise<Response> {
-  const report = await retire(ctx, req, paddockId, { settings: false });
-  return json({ data: report });
+  const id = await authenticate(ctx, req);
+  const access = paddockAccess(ctx, id, paddockId);
+  requireOwner(access.role);
+  return json({ data: await retire(ctx, access.paddock, access.original, { settings: false }) });
 }
 
 export async function reset(ctx: AppContext, req: Request, paddockId: string): Promise<Response> {
-  const report = await retire(ctx, req, paddockId, { settings: true });
-  return json({ data: report });
+  const id = await authenticate(ctx, req);
+  const access = paddockAccess(ctx, id, paddockId);
+  requireOwner(access.role);
+  return json({ data: await retire(ctx, access.paddock, access.original, { settings: true }) });
 }
 
-async function retire(ctx: AppContext, req: Request, paddockId: string, opts: { settings: boolean }): Promise<RetireReport> {
-  const id = await authenticate(ctx, req);
-  const { paddock, role } = paddockAccess(ctx, id, paddockId);
-  requireOwner(role);
+/**
+ * Take one computer apart. Owner-only, and the caller checks that — this is
+ * also what `computers.remove` runs before forgetting the row.
+ */
+export async function retire(ctx: AppContext, paddock: PaddockRow, original: boolean, opts: { settings: boolean }): Promise<RetireReport> {
   const client = await ownerClient(ctx, paddock);
 
   let all: ConversationSummary[];
@@ -61,7 +68,10 @@ async function retire(ctx: AppContext, req: Request, paddockId: string, opts: { 
   } catch (err) {
     throw asHttpError(err, "find this machine");
   }
-  const mine = all.filter((c) => c.channel_id?.startsWith("paddock:"));
+  // This computer's conversations, not every paddock conversation on the
+  // account. An owner with two machines who rebuilds one must not have the
+  // other's tabs terminated and its agent deleted underneath them.
+  const mine = all.filter((c) => belongsTo(c.channel_id, paddock.id, original));
   const live = mine.filter((c) => ["pending", "idle", "running"].includes(c.status ?? ""));
 
   const report: RetireReport = { terminated: 0, removed: [], failed: [] };

@@ -9,10 +9,20 @@ import type { SkillHit } from "../lib/skills";
 
 export type Role = "owner" | "member" | "guest";
 
+/** One computer this person can open: theirs, or one shared with them. */
 export interface Reachable {
   id: string;
+  /** The owner's name for it. Blank on a machine somebody else owns. */
+  name: string;
   ownerEmail: string;
   role: Role;
+  /**
+   * The first computer this account ever had, and so the one that owns
+   * anything from before there could be a second — an agent with no computer
+   * on it, a tab whose channel names none. Decided by the server, on the row
+   * order, and never worked out again here.
+   */
+  original: boolean;
 }
 
 export interface Me {
@@ -41,6 +51,7 @@ export interface RetireReport {
 
 export interface PaddockDto {
   id: string;
+  name: string;
   role: Role;
   ownerEmail: string;
   /** Null for the owner: every tab is theirs. Otherwise the tabs they may reach. */
@@ -87,6 +98,16 @@ export const paddock = {
 
   show: () => call<{ data: PaddockDto }>("GET", "/api/paddock").then((r) => r.data),
   showOne: (id: string) => call<{ data: PaddockDto }>("GET", `/api/paddock/${id}`).then((r) => r.data),
+
+  /**
+   * Another computer. This makes a row and nothing else — the agent,
+   * environment, vault and box are built by `ensureIdentity` the first time
+   * the machine is actually opened, so an unvisited computer costs nothing.
+   */
+  addComputer: (name?: string) => call<{ data: Reachable }>("POST", "/api/paddocks", { name: name ?? "" }).then((r) => r.data),
+  renameComputer: (id: string, name: string) => call<{ data: Reachable }>("PATCH", `/api/paddock/${id}`, { name }).then((r) => r.data),
+  /** Retire the machine and forget the computer. The account's last one stays. */
+  removeComputer: (id: string) => call<{ data: RetireReport }>("DELETE", `/api/paddock/${id}`).then((r) => r.data),
 
   tabPeople: (id: string, conv: string) => call<{ data: TabPeopleDto }>("GET", `/api/paddock/${id}/tabs/${conv}/people`).then((r) => r.data),
   addMember: (id: string, conv: string, email: string) =>
@@ -146,6 +167,10 @@ export function describePaddockError(err: unknown): string {
         return "That invite link is not valid any more.";
       case "owner_only":
         return "Only the owner of this machine can change it.";
+      case "last_computer":
+        return "This is your only computer. Start over instead, which empties it without removing it.";
+      case "account_required":
+        return "Sign in to add a computer of your own.";
       case "bad_key":
         return "Fountain rejected that key.";
       case "unauthenticated":

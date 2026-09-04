@@ -14,18 +14,30 @@ import { Cipher, randomToken, sha256 } from "./crypto";
 import { Db } from "./db";
 import { hub } from "./hub";
 import { channelFor, OPS_SLUG } from "../shared/tabs";
+import { MAX_COMPUTERS } from "./computers";
 
 const OWNER = "owner@example.com";
 const OTHER = "other@example.com";
 const BOX = "sb-test-1";
 const AGENT = "a1";
 
+/**
+ * The computer the fake Fountain's machine is on.
+ *
+ * A channel names its computer, and the id is only known once a paddock row
+ * exists — so `paddockFor` fills this in for whoever asks first, which in
+ * every test that has a machine is the owner. Tests about a second computer
+ * set it themselves.
+ */
+let machinePaddock: string | null = null;
+
 /** The conversations the fake Fountain reports for the owner's account. */
 function conversations() {
+  const pid = machinePaddock ?? "unclaimed";
   return [
-    conv("c1", channelFor("t1", 1), "2026-09-04T10:00:00Z"),
-    conv("c2", channelFor("t2", 1), "2026-09-04T11:00:00Z"),
-    conv("cops", channelFor(OPS_SLUG, 1), "2026-09-04T12:00:00Z"),
+    conv("c1", channelFor(pid, "t1", 1), "2026-09-04T10:00:00Z"),
+    conv("c2", channelFor(pid, "t2", 1), "2026-09-04T11:00:00Z"),
+    conv("cops", channelFor(pid, OPS_SLUG, 1), "2026-09-04T12:00:00Z"),
   ];
 }
 
@@ -58,6 +70,7 @@ beforeEach(async () => {
   route = buildRouter(ctx);
   upstream = [];
   hub.reset();
+  machinePaddock = null;
 
   // A fake Fountain. Only the calls the proxy actually makes are answered;
   // anything else 404s, so an unexpected upstream call fails a test loudly.
@@ -87,7 +100,7 @@ beforeEach(async () => {
           }
         }
       }
-      return Response.json({ data: conv("c3", channelFor("t3", 1), "2026-09-04T13:00:00Z") });
+      return Response.json({ data: conv("c3", channelFor(machinePaddock!, "t3", 1), "2026-09-04T13:00:00Z") });
     }
     if (/^\/api\/conversations\/[^/]+/.test(url.pathname)) return Response.json({ status: "accepted" });
     if (url.pathname === "/api/catalog") return Response.json({ data: { runtimes: ["claude"], models: {} } });
@@ -135,7 +148,17 @@ function call(cookie: string | null, method: string, path: string, body?: unknow
 async function paddockFor(email: string): Promise<{ cookie: string; id: string }> {
   const cookie = await signIn(email);
   const me = (await (await call(cookie, "GET", "/api/me")).json()) as { paddockId: string };
+  // The first computer asked for in a test is the one the fake's machine is
+  // on. Tests with a second computer are explicit about which is which.
+  machinePaddock ??= me.paddockId;
   return { cookie, id: me.paddockId };
+}
+
+/** Add a computer to an account that already has one, and give back its id. */
+async function addComputer(cookie: string, name?: string): Promise<string> {
+  const res = await call(cookie, "POST", "/api/paddocks", name === undefined ? {} : { name });
+  expect(res.status).toBe(201);
+  return ((await res.json()) as { data: { id: string } }).data.id;
 }
 
 describe("the ops tab", () => {
@@ -168,7 +191,7 @@ describe("what a guest may do", () => {
     expect((await call(guest, "GET", `/f/${owner.id}/api/conversations/c1/events`)).status).toBe(200);
     expect((await call(guest, "POST", `/f/${owner.id}/api/conversations/c1/prompts`, { prompt: "hi" })).status).toBe(200);
     // Opening a tab is not among them any more — see "only the owner opens tabs".
-    expect((await call(guest, "POST", `/f/${owner.id}/api/conversations`, { channel_id: channelFor("t3", 1) })).status).toBe(403);
+    expect((await call(guest, "POST", `/f/${owner.id}/api/conversations`, { channel_id: channelFor(machinePaddock!, "t3", 1) })).status).toBe(403);
   });
 
   test("but not terminate a tab — that ends it for everybody", async () => {
@@ -420,6 +443,221 @@ describe("turns carry who sent them", () => {
   });
 });
 
+describe("more than one computer", () => {
+  test("adding one makes a row and touches Fountain not at all", async () => {
+    const owner = await paddockFor(OWNER);
+    upstream = [];
+    const second = await addComputer(owner.cookie);
+
+    expect(second).not.toBe(owner.id);
+    // No agent, no environment, no vault, no sandbox. All of that is built by
+    // the browser the first time somebody opens the machine, which is what
+    // makes an unvisited computer free.
+    expect(upstream).toEqual([]);
+
+    const me = (await (await call(owner.cookie, "GET", "/api/me")).json()) as {
+      paddocks: { id: string; name: string; role: string; original: boolean }[];
+    };
+    expect(me.paddocks.map((p) => p.id)).toEqual([owner.id, second]);
+    expect(me.paddocks.map((p) => p.name)).toEqual(["My computer", "Computer 2"]);
+    // Only the first one is the original, and that never moves.
+    expect(me.paddocks.map((p) => p.original)).toEqual([true, false]);
+  });
+
+  test("the original is the one that was there first, however fast they were made", async () => {
+    // The tiebreak used to be the paddock id — a random token — so signing in
+    // and adding a computer inside the same millisecond made the *new* one the
+    // original about half the time, and it adopted the old machine's tabs.
+    const owner = await paddockFor(OWNER);
+    const added: string[] = [];
+    for (let n = 0; n < 5; n++) added.push(await addComputer(owner.cookie));
+
+    const me = (await (await call(owner.cookie, "GET", "/api/me")).json()) as { paddocks: { id: string; original: boolean }[] };
+    expect(me.paddocks.map((p) => p.id)).toEqual([owner.id, ...added]);
+    expect(me.paddocks.filter((p) => p.original).map((p) => p.id)).toEqual([owner.id]);
+  });
+
+  test("a new computer has no machine yet, and the one you have is not lent to it", async () => {
+    const owner = await paddockFor(OWNER);
+    const second = await addComputer(owner.cookie);
+
+    // The account's box is on the first computer. Asking the second for a tab
+    // strip gets an empty one rather than the first computer's terminals.
+    const strip = (await (await call(owner.cookie, "GET", `/f/${second}/api/conversations`)).json()) as { data: unknown[] };
+    expect(strip.data).toEqual([]);
+
+    // And the first computer's tabs are not reachable through the second.
+    for (const path of ["/api/conversations/c1", "/api/conversations/c2"]) {
+      expect((await call(owner.cookie, "GET", `/f/${second}${path}`)).status).toBe(404);
+    }
+    // Nor is its box, which the owner's key could otherwise read.
+    expect((await call(owner.cookie, "GET", `/f/${second}/api/sandboxes/${BOX}/files?path=/`)).status).toBe(404);
+    // The first computer still works, so the 404s above are about scope.
+    expect((await call(owner.cookie, "GET", `/f/${owner.id}/api/conversations/c1`)).status).toBe(200);
+  });
+
+  test("a tab cannot be opened onto a computer its channel does not name", async () => {
+    const owner = await paddockFor(OWNER);
+    const second = await addComputer(owner.cookie);
+
+    // The channel is how every later request decides which machine a tab is
+    // on. One that named the other computer would be a tab this paddock could
+    // never see again — and one the other computer's guests suddenly could.
+    upstream = [];
+    const res = await call(owner.cookie, "POST", `/f/${second}/api/conversations`, {
+      channel_id: channelFor(owner.id, "t1", 1),
+    });
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: string }).error).toBe("wrong_computer");
+    expect(upstream).toEqual([]);
+  });
+
+  test("a guest of one computer knows nothing of the other", async () => {
+    const owner = await paddockFor(OWNER);
+    const second = await addComputer(owner.cookie);
+    const guest = await guestSession(owner.id, "c1");
+
+    // Not "empty" — not there. The existence of a second machine is not part
+    // of what a link to Terminal 1 hands over.
+    expect((await call(guest, "GET", `/f/${second}/api/conversations`)).status).toBe(404);
+    expect((await call(guest, "GET", `/api/paddock/${second}`)).status).toBe(404);
+    expect((await call(guest, "POST", `/api/paddock/${second}/presence`, { clientId: "x" })).status).toBe(404);
+  });
+
+  test("retiring one computer leaves the other's machine alone", async () => {
+    const owner = await paddockFor(OWNER);
+    const second = await addComputer(owner.cookie);
+
+    // The fake's tabs are all on the first computer, so a rebuild of the
+    // second has nothing of its own to end — and must not reach for theirs.
+    upstream = [];
+    const res = await call(owner.cookie, "POST", `/api/paddock/${second}/rebuild`);
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as { data: { terminated: number; removed: string[] } };
+    expect(data.terminated).toBe(0);
+    expect(data.removed).toEqual([]);
+    expect(upstream.some((u) => u.path.endsWith("/terminate"))).toBe(false);
+    expect(upstream.some((u) => u.method === "DELETE")).toBe(false);
+  });
+
+  test("removing a computer retires its machine and forgets the row", async () => {
+    const owner = await paddockFor(OWNER);
+    const second = await addComputer(owner.cookie);
+
+    const res = await call(owner.cookie, "DELETE", `/api/paddock/${second}`);
+    expect(res.status).toBe(200);
+    expect(ctx.db.getPaddock(second)).toBeNull();
+
+    const me = (await (await call(owner.cookie, "GET", "/api/me")).json()) as { paddocks: { id: string }[] };
+    expect(me.paddocks.map((p) => p.id)).toEqual([owner.id]);
+    // And the row is gone for good rather than reappearing under /api/me.
+    expect((await call(owner.cookie, "GET", `/api/paddock/${second}`)).status).toBe(404);
+  });
+
+  test("the last computer cannot be removed — an account always has one", async () => {
+    const owner = await paddockFor(OWNER);
+    upstream = [];
+    const res = await call(owner.cookie, "DELETE", `/api/paddock/${owner.id}`);
+    // Removing it would hand back a fresh empty machine on the next /api/me,
+    // which reads as the delete having silently failed. Start over is the
+    // operation for emptying the one you have, and the message says so.
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe("last_computer");
+    expect(ctx.db.getPaddock(owner.id)).not.toBeNull();
+    // Nothing was retired on the way to that refusal.
+    expect(upstream).toEqual([]);
+  });
+
+  test("names are the owner's, and nobody else's to set", async () => {
+    const owner = await paddockFor(OWNER);
+    const second = await addComputer(owner.cookie, "  the   build   box  ");
+    expect(ctx.db.getPaddock(second)!.name).toBe("the build box");
+
+    await call(owner.cookie, "PATCH", `/api/paddock/${second}`, { name: "laptop" });
+    expect(ctx.db.getPaddock(second)!.name).toBe("laptop");
+    expect((await call(owner.cookie, "PATCH", `/api/paddock/${second}`, { name: "   " })).status).toBe(422);
+
+    // A guest of the first computer cannot rename either of them.
+    const guest = await guestSession(owner.id, "c1");
+    expect((await call(guest, "PATCH", `/api/paddock/${owner.id}`, { name: "mine now" })).status).toBe(403);
+    expect((await call(guest, "PATCH", `/api/paddock/${second}`, { name: "mine now" })).status).toBe(404);
+    expect(ctx.db.getPaddock(second)!.name).toBe("laptop");
+  });
+
+  test("a member of somebody's terminal cannot add a computer to their account", async () => {
+    const owner = await paddockFor(OWNER);
+    const memberCookie = await signIn(OTHER);
+    ctx.db.addMember(owner.id, "c1", OTHER, OWNER);
+
+    // They can have one of their own — everybody with an account can — but it
+    // is on *their* account, not on the one that invited them.
+    const made = await addComputer(memberCookie);
+    expect(ctx.db.getPaddock(made)!.owner_email).toBe(OTHER);
+    expect(ctx.db.paddocksOf(OWNER).map((p) => p.id)).toEqual([owner.id]);
+
+    // And neither of the other account's computers is theirs to remove.
+    expect((await call(memberCookie, "DELETE", `/api/paddock/${owner.id}`)).status).toBe(403);
+  });
+
+  test("a guest has no account to hang a computer off", async () => {
+    const owner = await paddockFor(OWNER);
+    const guest = await guestSession(owner.id, "c1");
+    const res = await call(guest, "POST", "/api/paddocks", {});
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: string }).error).toBe("account_required");
+  });
+
+  test("there is a ceiling, because every computer opened is a machine somebody pays for", async () => {
+    const owner = await paddockFor(OWNER);
+    for (let n = 1; n < MAX_COMPUTERS; n++) await addComputer(owner.cookie);
+    expect(ctx.db.paddocksOf(OWNER)).toHaveLength(MAX_COMPUTERS);
+
+    const res = await call(owner.cookie, "POST", "/api/paddocks", {});
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe("too_many");
+  });
+});
+
+describe("a machine from before there could be two", () => {
+  /**
+   * The fake, rewired to serve channels with no computer in them — the shape
+   * every tab on a live paddock has today. Losing these would take somebody's
+   * box away on deploy, which is the one outcome this app exists to prevent.
+   */
+  function tabsFromBeforeComputers(): void {
+    const inner = globalThis.fetch;
+    const channels = ["paddock:t1@r1", "paddock:t2@r1", `paddock:${OPS_SLUG}@r1`];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url));
+      if (url.pathname === "/api/conversations" && (init?.method ?? "GET") === "GET") {
+        return Response.json({ data: channels.map((channel, i) => conv(["c1", "c2", "cops"][i]!, channel, `2026-09-04T1${i}:00:00Z`)) });
+      }
+      return inner(input as string, init);
+    }) as typeof fetch;
+  }
+
+  test("its tabs stay with the computer it already had", async () => {
+    const owner = await paddockFor(OWNER);
+    tabsFromBeforeComputers();
+
+    const strip = (await (await call(owner.cookie, "GET", `/f/${owner.id}/api/conversations`)).json()) as { data: { id: string }[] };
+    expect(strip.data.map((c) => c.id)).toEqual(["c1", "c2"]);
+    expect((await call(owner.cookie, "GET", `/f/${owner.id}/api/sandboxes/${BOX}/files?path=/`)).status).toBe(200);
+  });
+
+  test("and a computer added afterwards does not inherit them", async () => {
+    const owner = await paddockFor(OWNER);
+    tabsFromBeforeComputers();
+    const second = await addComputer(owner.cookie);
+
+    // Only the *original* computer claims an un-named tab, so an account can
+    // never end up with two machines pointing at one box.
+    const theirs = (await (await call(owner.cookie, "GET", `/f/${second}/api/conversations`)).json()) as { data: unknown[] };
+    expect(theirs.data).toEqual([]);
+    expect((await call(owner.cookie, "GET", `/f/${second}/api/conversations/c1`)).status).toBe(404);
+  });
+});
+
 describe("replacing the machine", () => {
   test("rebuild ends every tab and retires the agent, and leaves the settings alone", async () => {
     const owner = await paddockFor(OWNER);
@@ -542,14 +780,14 @@ describe("opening a tab on an existing machine", () => {
     // and Fountain refuses it. This is what broke the + button.
     const owner = await paddockFor(OWNER);
     upstream = [];
-    const res = await call(owner.cookie, "POST", `/f/${owner.id}/api/conversations`, { title: "Terminal 3", channel_id: channelFor("t3", 1) });
+    const res = await call(owner.cookie, "POST", `/f/${owner.id}/api/conversations`, { title: "Terminal 3", channel_id: channelFor(machinePaddock!, "t3", 1) });
     expect(res.status).toBe(200);
   });
 
   test("the owner's attach is built from their own machine, whatever the body asks for", async () => {
     const owner = await paddockFor(OWNER);
     const res = await call(owner.cookie, "POST", `/f/${owner.id}/api/conversations`, {
-      channel_id: channelFor("t4", 1),
+      channel_id: channelFor(machinePaddock!, "t4", 1),
       agent_id: "somebody-elses-agent",
       sandbox_id: "somebody-elses-box",
       environment_id: "nope",
@@ -649,13 +887,13 @@ describe("only the owner opens tabs", () => {
 
     upstream = [];
     for (const cookie of [guest, memberCookie]) {
-      const res = await call(cookie, "POST", `/f/${owner.id}/api/conversations`, { channel_id: channelFor("t9", 1) });
+      const res = await call(cookie, "POST", `/f/${owner.id}/api/conversations`, { channel_id: channelFor(machinePaddock!, "t9", 1) });
       expect(res.status).toBe(403);
     }
     expect(upstream.some((u) => u.method === "POST" && u.path === "/api/conversations")).toBe(false);
 
     // And the owner still can.
-    expect((await call(owner.cookie, "POST", `/f/${owner.id}/api/conversations`, { channel_id: channelFor("t9", 1) })).status).toBe(200);
+    expect((await call(owner.cookie, "POST", `/f/${owner.id}/api/conversations`, { channel_id: channelFor(machinePaddock!, "t9", 1) })).status).toBe(200);
   });
 });
 

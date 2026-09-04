@@ -41,15 +41,33 @@ export function meDto(
     email: id.kind === "user" ? id.user.email : null,
     role,
     paddockId,
-    // Everywhere this person can go. A guest has exactly one; somebody who
-    // used to be a guest has two, which is the whole point of upgrading.
-    paddocks: id.kind === "user" ? ctx.db.paddocksFor(id.user.email) : [{ id: id.guest.paddock_id, ownerEmail: "", role: "guest" }],
+    // Everywhere this person can go: the computers they own, oldest first,
+    // then anything shared with them. A guest has exactly one and is told
+    // nothing about it — not even its name, which is the owner's word for
+    // their own machine.
+    paddocks: id.kind === "user" ? ctx.db.paddocksFor(id.user.email) : [guestReachable(ctx, id.guest.paddock_id)],
     ...extra,
   };
 }
 
 /**
- * The machine that belongs to this account, made if it is not there yet.
+ * The one computer a guest can reach, told as little as possible about it.
+ *
+ * No name and no owner: they were lent one terminal, not shown around
+ * somebody's account. `original` is the exception, and it is not a courtesy —
+ * it decides whether a tab whose channel names no computer is on this machine
+ * (`tabs.belongsTo`), so a guest of a paddock that predates computers renders
+ * an empty strip without it. What it discloses is that this is the oldest row
+ * on that account, which is not something anybody can act on.
+ */
+function guestReachable(ctx: AppContext, paddockId: string) {
+  const paddock = ctx.db.getPaddock(paddockId);
+  const original = !!paddock && ctx.db.paddocksOf(paddock.owner_email)[0]?.id === paddock.id;
+  return { id: paddockId, name: "", ownerEmail: "", role: "guest" as Role, original };
+}
+
+/**
+ * The machine this account lands on: its first, made if it has none.
  *
  * An account *is* a Fountain account — you cannot sign in here without a key —
  * so everybody who gets this far is entitled to a machine of their own, and
@@ -57,6 +75,10 @@ export function meDto(
  * until somebody opens it. Leaving it to the browser to ask for one meant
  * anybody who arrived through an invite link never got theirs, because the
  * app only claimed a machine when it had nowhere at all to land.
+ *
+ * Only the *first* one is given out unasked. Every computer after it is asked
+ * for by hand — `computers.create` — because that is a decision somebody
+ * makes rather than a floor they are entitled to.
  */
 export function ownPaddock(ctx: AppContext, email: string): PaddockRow {
   return ctx.db.ensurePaddock(randomToken(9), email);

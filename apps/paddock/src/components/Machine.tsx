@@ -81,6 +81,15 @@ export interface MachineProps {
   onRebuild: () => Promise<void>;
   /** A new box and no settings at all — every secret goes. */
   onReset: () => Promise<void>;
+  /**
+   * The above, and the computer stops existing. Null when there is nothing to
+   * offer — somebody else's machine, or the only one this account has, which
+   * cannot go because an account always has a computer. **Start over** is the
+   * operation for emptying that one, and it is already here.
+   */
+  onRemove: (() => Promise<void>) | null;
+  /** What the owner calls this computer, for the sentence that removes it. */
+  computerName: string;
 }
 
 export function Machine(props: MachineProps) {
@@ -222,7 +231,15 @@ export function Machine(props: MachineProps) {
             <span className="row-label">{props.agent.runtime}</span>
           </li>
         </ul>
-        {isOwner && <Replace onRebuild={props.onRebuild} onReset={props.onReset} busy={!!props.busy} />}
+        {isOwner && (
+          <Replace
+            onRebuild={props.onRebuild}
+            onReset={props.onReset}
+            onRemove={props.onRemove}
+            computerName={props.computerName}
+            busy={!!props.busy}
+          />
+        )}
       </section>
     </div>
   );
@@ -1059,14 +1076,28 @@ function installs(n: number): string {
  * page is a poor way to ask, and the thing worth showing is *what goes*,
  * which a one-line dialog cannot say.
  */
-function Replace({ onRebuild, onReset, busy }: { onRebuild: () => Promise<void>; onReset: () => Promise<void>; busy: boolean }) {
-  const [asking, setAsking] = useState<"rebuild" | "reset" | null>(null);
+function Replace({
+  onRebuild,
+  onReset,
+  onRemove,
+  computerName,
+  busy,
+}: {
+  onRebuild: () => Promise<void>;
+  onReset: () => Promise<void>;
+  onRemove: (() => Promise<void>) | null;
+  computerName: string;
+  busy: boolean;
+}) {
+  const [asking, setAsking] = useState<"rebuild" | "reset" | "remove" | null>(null);
   const [working, setWorking] = useState(false);
 
-  async function go(which: "rebuild" | "reset") {
+  async function go(which: "rebuild" | "reset" | "remove") {
     setWorking(true);
     try {
-      await (which === "rebuild" ? onRebuild() : onReset());
+      if (which === "rebuild") await onRebuild();
+      else if (which === "reset") await onReset();
+      else await onRemove?.();
     } finally {
       setWorking(false);
       setAsking(null);
@@ -1121,6 +1152,29 @@ function Replace({ onRebuild, onReset, busy }: { onRebuild: () => Promise<void>;
     );
   }
 
+  if (asking === "remove") {
+    return (
+      <div className="note danger">
+        <p>
+          <strong>Remove {computerName || "this computer"}?</strong> It stops existing, and you go back to your other one.
+        </p>
+        <p className="fine">
+          Everything <strong>Start over</strong> deletes goes — the machine, the repositories, packages, setup script, MCP
+          servers, skills and every secret — and the computer itself goes with it, so there is nothing left to come back to.
+          Anyone you invited to a terminal on it loses their way in. Your other computers are untouched.
+        </p>
+        <div className="editor-row">
+          <button className="danger" onClick={() => void go("remove")} disabled={busy}>
+            Remove this computer
+          </button>
+          <button className="ghost" onClick={() => setAsking(null)}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <Editor
       title="Replace"
@@ -1128,7 +1182,18 @@ function Replace({ onRebuild, onReset, busy }: { onRebuild: () => Promise<void>;
         <>
           <strong>Build a new machine</strong> keeps everything declared above and starts you on a fresh disk — useful when
           this one is in a state you would rather not unpick. <strong>Start over</strong> deletes the machine and the
-          settings with it, secrets included.
+          settings with it, secrets included, and leaves you an empty computer of the same name.
+          {onRemove ? (
+            <>
+              {" "}
+              <strong>Remove</strong> is that, and the computer too — available because you have another one to go back to.
+            </>
+          ) : (
+            <>
+              {" "}
+              There is no <strong>Remove</strong> here because this is your only computer, and an account always has one.
+            </>
+          )}
         </>
       }
     >
@@ -1137,6 +1202,11 @@ function Replace({ onRebuild, onReset, busy }: { onRebuild: () => Promise<void>;
         <button className="ghost danger-text" onClick={() => setAsking("reset")}>
           Start over
         </button>
+        {onRemove && (
+          <button className="ghost danger-text" onClick={() => setAsking("remove")}>
+            Remove
+          </button>
+        )}
       </div>
     </Editor>
   );

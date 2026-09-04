@@ -14,6 +14,12 @@
  *      A second implementation of "is this a tab on that box?" would be a hole
  *      the day the two disagreed.
  *
+ *      An owner with several computers makes that question sharper, not
+ *      different: the list is first narrowed to the conversations whose
+ *      channel names *this* paddock (`belongsTo`), so `/f/<a>/…` can never
+ *      reach a tab on computer B — which matters most for the people invited
+ *      to computer A, who have no business knowing B exists.
+ *
  *   2. **The ops tab is excluded explicitly.** It is the tab paddock changes
  *      the machine through, so a guest who could prompt it would route around
  *      every permission below by simply asking.
@@ -25,7 +31,7 @@
  *      Fountain account to anything that could script their browser, and the
  *      owner's authority here stops at their own machine.
  */
-import { opsTab, tabsOf, type Tab } from "../shared/tabs";
+import { belongsTo, opsTab, parseChannel, tabsOf, type Tab } from "../shared/tabs";
 import { WORK_ROOT } from "../shared/spec";
 import { withAuthor } from "../shared/author";
 import { actorLabel, ownerClient, paddockAccess, type AppContext, type Identity } from "./context";
@@ -103,16 +109,17 @@ const OWNER_PATHS: { method: string; re: RegExp }[] = [
 ];
 
 export async function handleProxy(ctx: AppContext, req: Request, paddockId: string, path: string, id: Identity): Promise<Response> {
-  const { paddock, role, tabs: allowed } = paddockAccess(ctx, id, paddockId);
+  const { paddock, role, original, tabs: allowed } = paddockAccess(ctx, id, paddockId);
   const client = await ownerClient(ctx, paddock);
   const method = req.method.toUpperCase();
   const url = new URL(req.url);
+  const here = { id: paddock.id, original };
 
   // ── the tab strip ───────────────────────────────────────────────────────
   // Filtered, always. The owner's raw conversation list would show a guest
   // every other conversation on the account, which is nobody's business here.
   if (method === "GET" && path === "/api/conversations") {
-    const tabs = await visibleTabs(client, allowed);
+    const tabs = await visibleTabs(client, here, allowed);
     return jsonRes({ data: tabs.map((t) => t.conversation) });
   }
 
@@ -122,7 +129,7 @@ export async function handleProxy(ctx: AppContext, req: Request, paddockId: stri
     // creating a second — and a guest making tabs on a stranger's box is
     // exactly the thing an anonymous link should not buy.
     if (role !== "owner") throw new HttpError(403, "owner_only", "Only the owner of this machine can open a tab on it.");
-    return newConversation(ctx, req, paddock, client, id);
+    return newConversation(ctx, req, paddock, here, client, id);
   }
 
   // ── one tab ─────────────────────────────────────────────────────────────
@@ -130,7 +137,7 @@ export async function handleProxy(ctx: AppContext, req: Request, paddockId: stri
   if (m) {
     const conversationId = decodeURIComponent(m[1]!);
     const sub = m[2] ?? "";
-    const tabs = await visibleTabs(client, allowed);
+    const tabs = await visibleTabs(client, here, allowed);
     const tab = tabs.find((t) => t.conversation.id === conversationId);
     if (!tab) throw new HttpError(404, "not_found", "No such tab on this machine.");
     if (!tabAllowed(method, sub, role)) throw new HttpError(404, "not_found");
@@ -144,7 +151,7 @@ export async function handleProxy(ctx: AppContext, req: Request, paddockId: stri
   const sb = /^\/api\/sandboxes\/([^/]+)(\/(?:files|file|diff))?$/.exec(path);
   if (sb && method === "GET") {
     const boxId = decodeURIComponent(sb[1]!);
-    const owner = await machineOf(client);
+    const owner = await machineOf(client, here);
     if (!owner || boxId !== owner.sandboxId) throw new HttpError(404, "not_found", "That is not this machine.");
     return forward(client, req, method, `${path}${url.search}`, null);
   }
@@ -164,13 +171,22 @@ export async function handleProxy(ctx: AppContext, req: Request, paddockId: stri
 
 // ── the machine, and the tabs on it ───────────────────────────────────────
 
+/** Which computer a request is about, and whether it is the account's first. */
+export interface Here {
+  id: string;
+  original: boolean;
+}
+
 /**
- * The machine and the agent behind it, from the owner's conversation list
- * alone — the newest live paddock conversation names both, exactly as the
- * client's `findBox` does. Nothing is stored, so nothing goes stale.
+ * This computer's box and the agent behind it, from the owner's conversation
+ * list alone — the newest live conversation whose channel names this paddock
+ * gives both, exactly as the client's `findBox` does from the other side.
+ * Nothing is stored, so nothing goes stale, and an account with four machines
+ * needs no more state than an account with one.
  */
 async function machineOf(
   client: FountainClient,
+  here: Here,
 ): Promise<{ agentId: string; sandboxId: string; environmentId: string | null; vaultId: string | null; all: ConversationSummary[] } | null> {
   let all: ConversationSummary[];
   try {
@@ -179,7 +195,7 @@ async function machineOf(
     throw asHttpError(err, "find this machine");
   }
   const newest = all
-    .filter((c) => c.sandbox_id && c.agent_id && c.channel_id?.startsWith("paddock:") && ["pending", "idle", "running"].includes(c.status))
+    .filter((c) => c.sandbox_id && c.agent_id && belongsTo(c.channel_id, here.id, here.original) && ["pending", "idle", "running"].includes(c.status))
     .sort((a, b) => b.inserted_at.localeCompare(a.inserted_at))[0];
   return newest
     ? {
@@ -197,14 +213,20 @@ async function machineOf(
  * who is not the owner sees only the tabs they were invited to — `allowed`
  * comes from `paddockAccess`, which is the one place that decides it.
  */
-async function visibleTabs(client: FountainClient, allowed: string[] | null): Promise<Tab[]> {
-  const machine = await machineOf(client);
+async function visibleTabs(client: FountainClient, here: Here, allowed: string[] | null): Promise<Tab[]> {
+  const machine = await machineOf(client, here);
   if (!machine) return [];
   const conversations = machine.all as unknown as Parameters<typeof tabsOf>[0];
   // `rev` only decides staleness in the UI, which the proxy has no opinion
   // about; 0 keeps every tab in the set rather than fetching the agent for a
   // number nothing here reads.
-  const tabs = tabsOf(conversations, { sandboxId: machine.sandboxId, agentId: machine.agentId, rev: 0, workRoot: WORK_ROOT });
+  const tabs = tabsOf(conversations, {
+    paddock: { id: here.id, original: here.original },
+    sandboxId: machine.sandboxId,
+    agentId: machine.agentId,
+    rev: 0,
+    workRoot: WORK_ROOT,
+  });
   const ops = opsTab(tabs);
   return tabs.filter((t) => t !== ops && (allowed === null || allowed.includes(t.conversation.id)));
 }
@@ -248,11 +270,16 @@ async function prompt(ctx: AppContext, req: Request, paddock: PaddockRow, client
  * guest attaching a tab to a box that is not this paddock's. Only the owner
  * may take the other branch, because it spends money.
  */
-async function newConversation(ctx: AppContext, req: Request, paddock: PaddockRow, client: FountainClient, id: Identity): Promise<Response> {
+async function newConversation(ctx: AppContext, req: Request, paddock: PaddockRow, here: Here, client: FountainClient, id: Identity): Promise<Response> {
   const body = await readJson(req);
   const channel = str(body.channel_id, 200);
-  if (!channel.startsWith("paddock:")) throw new HttpError(422, "bad_channel", "A tab needs a paddock channel id.");
-  const machine = await machineOf(client);
+  // The channel is how every later request decides which computer this tab is
+  // on, so a tab that named a different one would be a tab this paddock could
+  // never see again — and one that computer's guests suddenly could.
+  const parts = parseChannel(channel);
+  if (!parts) throw new HttpError(422, "bad_channel", "A tab needs a paddock channel id.");
+  if (parts.paddock !== here.id) throw new HttpError(422, "wrong_computer", "That channel names a different computer.");
+  const machine = await machineOf(client, here);
 
   if (!machine) {
     // First run: forwarded as the client built it, so the persistent-mode and

@@ -37,6 +37,8 @@ export interface GuestRow {
 export interface PaddockRow {
   id: string;
   owner_email: string;
+  /** What the owner calls this computer. Theirs to change; never empty. */
+  name: string;
   created_at: string;
 }
 
@@ -69,6 +71,9 @@ export function now(): string {
   return new Date().toISOString();
 }
 
+/** What an account's first computer is called before anybody renames it. */
+export const FIRST_NAME = "My computer";
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   email             TEXT PRIMARY KEY,
@@ -77,12 +82,17 @@ CREATE TABLE IF NOT EXISTS users (
   created_at        TEXT NOT NULL
 );
 
+-- An account owns as many computers as it asks for. It used to own exactly
+-- one, enforced by a unique index here; migrate() drops that index rather than
+-- the table, because this row is what every membership, invitation and guest
+-- points at.
 CREATE TABLE IF NOT EXISTS paddocks (
   id           TEXT PRIMARY KEY,
   owner_email  TEXT NOT NULL REFERENCES users(email),
+  name         TEXT NOT NULL DEFAULT '',
   created_at   TEXT NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS paddocks_owner ON paddocks(owner_email);
+CREATE INDEX IF NOT EXISTS paddocks_by_owner ON paddocks(owner_email, created_at);
 
 -- Membership is of a *tab*, not of the machine. Somebody invited to Terminal 2
 -- sees Terminal 2; the rest of the box is not theirs to look at. The original
@@ -158,6 +168,8 @@ export class Db {
   }
 
   /**
+   * Two changes of shape, handled differently on purpose.
+   *
    * Invitations became per-tab, and there is no honest way to convert the old
    * rows: somebody invited to "the machine" was not invited to any particular
    * tab, and guessing one would hand them a terminal nobody chose. So the two
@@ -166,6 +178,13 @@ export class Db {
    * That is a real, if small, loss, and it is the right one: the alternative
    * is silently widening or narrowing an access grant somebody made. Anyone
    * affected is re-invited in a click.
+   *
+   * A paddock became one computer of several rather than *the* computer, which
+   * is the opposite kind of change: nothing about an existing row became
+   * wrong, only the unique index saying there could be no second one. So the
+   * index goes and every row stays exactly where it is. Dropping one here
+   * would take somebody's machine away, which is the thing this app exists not
+   * to do.
    */
   private migrate(): void {
     for (const table of ["paddock_members", "paddock_guests"]) {
@@ -174,7 +193,17 @@ export class Db {
         this.sql.exec(`DROP TABLE ${table}`);
       }
     }
+
+    const paddockColumns = this.sql.query("PRAGMA table_info(paddocks)").all() as { name: string }[];
+    if (paddockColumns.length && !paddockColumns.some((c) => c.name === "name")) {
+      this.sql.exec("ALTER TABLE paddocks ADD COLUMN name TEXT NOT NULL DEFAULT ''");
+    }
+    this.sql.exec("DROP INDEX IF EXISTS paddocks_owner");
+
     this.sql.exec(SCHEMA);
+    // A row from before computers had names is somebody's only machine, so it
+    // gets the name a first machine is given.
+    this.sql.query("UPDATE paddocks SET name = $name WHERE name = ''").run({ name: FIRST_NAME });
   }
 
   // ── users ───────────────────────────────────────────────────────────────
@@ -217,11 +246,22 @@ export class Db {
 
   // ── paddocks ────────────────────────────────────────────────────────────
 
-  /** One paddock per owner: the machine is the account's, so the row is too. */
+  /**
+   * The account's first computer, made if it has none.
+   *
+   * Everybody who can sign in is entitled to one and the row costs nothing
+   * until somebody opens it. Every computer after the first is asked for —
+   * `createPaddock` — because a second machine is a decision and a first one
+   * is not.
+   */
   ensurePaddock(id: string, ownerEmail: string): PaddockRow {
-    const existing = this.paddockOf(ownerEmail);
-    if (existing) return existing;
-    this.sql.query("INSERT INTO paddocks (id, owner_email, created_at) VALUES ($id, $o, $at)").run({ id, o: ownerEmail, at: now() });
+    return this.paddocksOf(ownerEmail)[0] ?? this.createPaddock(id, ownerEmail, FIRST_NAME);
+  }
+
+  createPaddock(id: string, ownerEmail: string, name: string): PaddockRow {
+    this.sql
+      .query("INSERT INTO paddocks (id, owner_email, name, created_at) VALUES ($id, $o, $n, $at)")
+      .run({ id, o: ownerEmail, n: name, at: now() });
     return this.getPaddock(id)!;
   }
 
@@ -229,8 +269,35 @@ export class Db {
     return this.sql.query("SELECT * FROM paddocks WHERE id = $id").get({ id }) as PaddockRow | null;
   }
 
-  paddockOf(ownerEmail: string): PaddockRow | null {
-    return this.sql.query("SELECT * FROM paddocks WHERE owner_email = $o").get({ o: ownerEmail }) as PaddockRow | null;
+  /**
+   * Every computer this account owns, oldest first.
+   *
+   * The order is load-bearing rather than cosmetic: the first row is the
+   * *original* machine, and it is the only one that may claim a tab whose
+   * channel names no computer (`tabs.belongsTo`).
+   *
+   * `rowid` breaks the tie, and it has to be something monotonic rather than
+   * anything about the row. Signing in and immediately adding a computer puts
+   * both inserts in the same millisecond often enough to see it, and with the
+   * id as the tiebreak — a random token — the *new* machine sorted first
+   * roughly half the time and adopted the old one's tabs. Insert order is the
+   * question being asked, so insert order is what is sorted on.
+   */
+  paddocksOf(ownerEmail: string): PaddockRow[] {
+    return this.sql.query("SELECT * FROM paddocks WHERE owner_email = $o ORDER BY created_at, rowid").all({ o: ownerEmail }) as PaddockRow[];
+  }
+
+  renamePaddock(id: string, name: string): void {
+    this.sql.query("UPDATE paddocks SET name = $n WHERE id = $id").run({ id, n: name });
+  }
+
+  /**
+   * Forget a computer. Its members, guests, links and tab openers go with it
+   * through `ON DELETE CASCADE`; what happens to the machine on Fountain is
+   * `lifecycle.ts`'s business and has already happened by the time this runs.
+   */
+  deletePaddock(id: string): void {
+    this.sql.query("DELETE FROM paddocks WHERE id = $id").run({ id });
   }
 
   /** The tab a link opens, or null when the link is dead. */
@@ -258,26 +325,28 @@ export class Db {
   }
 
   /**
-   * Every paddock this person can reach: their own, and any whose tab they
-   * were invited to. One row each, owner first.
+   * Every paddock this person can reach: the computers they own, oldest first,
+   * then any whose tab they were invited to.
    *
-   * A guest who signs in ends up in exactly this position — a machine of their
-   * own plus somebody else's terminal — which is why it needs a list rather
-   * than the single id the app assumed until now.
+   * `original` marks the first machine they ever had, and it travels with the
+   * row because both sides need it and neither should work it out again: the
+   * server uses it to decide which computer an un-named tab is on, the browser
+   * to decide which computer an un-marked Fountain agent belongs to. Two
+   * answers to that question is one too many.
    */
-  paddocksFor(email: string): { id: string; ownerEmail: string; role: Role }[] {
-    const own = this.paddockOf(email);
+  paddocksFor(email: string): { id: string; name: string; ownerEmail: string; role: Role; original: boolean }[] {
+    const own = this.paddocksOf(email);
     const shared = this.sql
       .query(
-        `SELECT DISTINCT p.id AS id, p.owner_email AS owner_email
+        `SELECT DISTINCT p.id AS id, p.name AS name, p.owner_email AS owner_email
            FROM paddock_members m JOIN paddocks p ON p.id = m.paddock_id
           WHERE m.email = $e AND p.owner_email != $e
           ORDER BY p.created_at`,
       )
-      .all({ e: email }) as { id: string; owner_email: string }[];
+      .all({ e: email }) as { id: string; name: string; owner_email: string }[];
     return [
-      ...(own ? [{ id: own.id, ownerEmail: own.owner_email, role: "owner" as Role }] : []),
-      ...shared.map((r) => ({ id: r.id, ownerEmail: r.owner_email, role: "member" as Role })),
+      ...own.map((p, i) => ({ id: p.id, name: p.name, ownerEmail: p.owner_email, role: "owner" as Role, original: i === 0 })),
+      ...shared.map((r) => ({ id: r.id, name: r.name, ownerEmail: r.owner_email, role: "member" as Role, original: false })),
     ];
   }
 

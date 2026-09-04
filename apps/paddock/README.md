@@ -3,11 +3,15 @@
 **paddock.demo.managoat.com** — a computer in the cloud that stays yours, on
 the [Fountain](https://github.com/BinaryBourbon/fountain) API.
 
-Sign in, pick a runtime, and you have a machine. Terminal tabs are threads on
-it. Everything you change about it afterwards — repositories, packages, a setup
-script, secrets, MCP servers, skills — is changed **on** the machine rather
-than by replacing it, and the app is explicit at every point about whether a
-change has actually landed.
+Sign in and you have a machine. Terminal tabs are threads on it. Everything you
+change about it afterwards — repositories, packages, a setup script, secrets,
+MCP servers, skills — is changed **on** the machine rather than by replacing
+it, and the app is explicit at every point about whether a change has actually
+landed.
+
+Want a second one — a different checkout, a different set of secrets, something
+you would rather not have next to your real work? Add a computer. It is a
+separate box with its own disk, and the sidebar switches between them.
 
 Invite people in — by email, or by a link that needs no account at all. They
 use your machine and you pay for it.
@@ -65,10 +69,15 @@ by id. Change any of those ids and the machine you were using no longer matches
 that is fine. For a computer somebody *lives* on it is not: nobody accepts
 losing their box because they added a package.
 
-So paddock keeps exactly **one** agent, **one** environment and **one** vault,
-made on first run and never replaced. Every setting it offers is a mutation of
-one of those three records, in place. The ids never move, the identity always
-matches, and no configuration change can take the machine away.
+So each computer keeps exactly **one** agent, **one** environment and **one**
+vault, made the first time it is opened and never replaced. Every setting
+paddock offers is a mutation of one of those three records, in place. The ids
+never move, the identity always matches, and no configuration change can take
+the machine away.
+
+The same fact is what makes a second computer a *computer* rather than a tab: a
+different agent is a different identity is a different box. Adding one is
+therefore not a special case of anything — it is the ordinary first run, again.
 
 Which leaves the real question, and the thing the app is actually about:
 changing the config is instant, and changing the *machine* is not. Fountain has
@@ -105,9 +114,9 @@ alternative, treating silence as emptiness, reinstalls the world.
 Secrets, MCP servers and skills are injected by Fountain when a session starts.
 They are real the moment you save them and they do not reach a tab that is
 already open. So saving one bumps a revision on the agent, each tab carries the
-revision it opened at in its `channel_id` (`paddock:t2@r7`), and a tab behind
-the current one is badged *older settings*. Nothing is stored to work this out
-and nothing can get it wrong.
+revision it opened at in its `channel_id` (`paddock:<computer>/t2@r7`), and a
+tab behind the current one is badged *older settings*. Nothing is stored to
+work this out and nothing can get it wrong.
 
 **What goes in the two boxes comes from a catalog, not from memory.** MCP
 servers are `GET /api/catalog`'s `mcp_servers` — the remote servers whose
@@ -140,6 +149,43 @@ condition, it is the shape of owning one computer, so the prompt line says
 which tab has the machine and queues behind it. The queued line sends itself
 when the box frees up.
 
+## More than one computer
+
+**New computer** in the sidebar. It makes a database row and nothing else —
+no agent, no environment, no vault, no sandbox — and the machine itself is
+built by the browser the moment you land on it, down the same path first run
+has always taken. A computer you make and never open costs nothing.
+
+They are separate in the way that matters: separate disks, separate declared
+packages and repositories, separate secrets, separate terminals, separate
+people invited to them. Nothing crosses. **Start over** empties one and leaves
+it; **Remove** takes the computer with it, and is offered only when you have
+another to go back to, because an account always has a computer.
+
+The name is yours and stays in this app's database. It never reaches Fountain,
+and somebody you invited to a terminal never sees it — they were lent a
+terminal, not shown around your account.
+
+### How one is told from another
+
+Everything else here is derived from Fountain rather than stored, and adding a
+second machine had to not break that. The obvious approach — a table saying
+which agent belongs to which computer — is a second copy of a fact, and this
+app's whole argument is that a second copy is a bug waiting for the day the two
+disagree.
+
+So the computer rides in the `channel_id` alongside the slug and the revision:
+`paddock:<computer>/t2@r7`. Which tabs are on which machine is then a question
+the conversation list alone answers, for the browser and the server both, with
+nothing to keep in sync and nothing to go stale. `shared/tabs.ts` still holds
+the one implementation of it, and `belongsTo` is the whole of the new rule.
+
+Channels written before any of this exist and name no computer. They belong to
+the account's **original** computer — its oldest row — and only to that one, so
+an existing machine stays exactly where it is and a computer added afterwards
+can never inherit it. The same rule, one level up, decides which agent an
+identity without a computer on it belongs to. Nobody loses a box to a deploy.
+
 ## Sharing a machine
 
 **Invite by email** and they sign in with Fountain; **invite by link** and
@@ -157,7 +203,9 @@ cannot half-happen.
 **An invitation is to a terminal, not to the machine.** Somebody let into
 Terminal 2 gets Terminal 2: they do not see your other terminals, cannot open
 one, and cannot change what is installed. Each terminal has its own link, and
-closing one leaves the others alone.
+closing one leaves the others alone. They do not see your other computers
+either: the invitation names a terminal on one machine, and every route is
+scoped to that machine before it is scoped to that tab.
 
 The link is the credential, so **a new link is the revoke**: minting one evicts
 every guest who came in on the old one, mid-session, from that terminal only.
@@ -234,10 +282,11 @@ the paddock and changing it is not; and even the owner gets a list of shapes
 rather than "anything under `/api`", so a scripted browser cannot spend their
 whole Fountain account.
 
-`server/app.test.ts` is that boundary written down as twenty-three ways in that
-stay shut. Two of them are the newest surface: the owner's connections are
-readable by the owner and nobody else, because a connection names the account
-behind it, and paddock creates a connection provider for no one at all.
+`server/app.test.ts` is that boundary written down as fifty-nine ways in that
+stay shut. The newest of them are about the second machine: a guest of one
+computer cannot see that another exists, a tab cannot be opened onto a computer
+its channel does not name, and retiring one computer does not reach for
+another's tabs or delete another's agent.
 
 ## How the pieces map
 
@@ -246,8 +295,9 @@ and it is all still there.
 
 | It knows | From |
 | --- | --- |
-| which machine is yours | the newest live paddock conversation's `sandbox_id` (`lib/tabs.ts`) |
-| which tabs are open | conversations sharing that sandbox (`tabsOf`) |
+| which computers you have | rows in paddock's own database, and nothing else |
+| which machine is one of them | the newest live conversation naming it (`findBox`, `belongsTo`) |
+| which tabs are open | conversations on that sandbox naming that computer (`tabsOf`) |
 | what is on the machine | the receipt the machine wrote (`lib/protocol.ts`) |
 | which tabs are behind | the revision in each `channel_id` vs. the agent's |
 
