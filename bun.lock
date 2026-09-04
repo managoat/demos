@@ -224,6 +224,23 @@
         "vite": "^6.3.0",
       },
     },
+    "apps/switchyard": {
+      "name": "switchyard",
+      "version": "0.1.0",
+      "dependencies": {
+        "@managoat/fountain-app": "workspace:*",
+        "react": "^19.1.0",
+        "react-dom": "^19.1.0",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.2.0",
+        "@types/react": "^19.1.0",
+        "@types/react-dom": "^19.1.0",
+        "@vitejs/plugin-react": "^4.5.0",
+        "typescript": "^5.8.0",
+        "vite": "^6.3.0",
+      },
+    },
     "apps/table-talk": {
       "name": "table-talk",
       "version": "0.1.0",
@@ -563,6 +580,8 @@
     "semver": ["semver@6.3.1", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA=="],
 
     "source-map-js": ["source-map-js@1.2.1", "", {}, "sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA=="],
+
+    "switchyard": ["switchyard@workspace:apps/switchyard"],
 
     "table-talk": ["table-talk@workspace:apps/table-talk"],
 
