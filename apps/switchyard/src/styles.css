@@ -395,8 +395,17 @@ h4 { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spaci
 .dot.running { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
 .dot.opening { background: var(--warn); animation: pulse 1.4s ease-in-out infinite; }
 .dot.failed { background: var(--bad); }
+
+/* The machine's temperature, which is a different axis from a track's status
+   above and so gets its own three names. Cold is a ring rather than a filled
+   dot on purpose: a project whose box is asleep should read as an outline of
+   something rather than as a state anybody needs to act on. */
+.dot.active { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+.dot.warm { background: var(--ok); }
+.dot.cold { background: transparent; box-shadow: inset 0 0 0 1.5px var(--dimmer); }
+
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.32; } }
-@media (prefers-reduced-motion: reduce) { .dot.running, .dot.opening { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .dot.running, .dot.opening, .dot.active { animation: none; } }
 
 .yard-foot { padding: 8px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 5px; }
 .yard-foot-row { display: flex; align-items: center; gap: 6px; padding: 0 2px; }
@@ -471,6 +480,12 @@ h4 { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spaci
 .chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); background: var(--warn-soft); }
 .chip.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); background: var(--bad-soft); }
 .chip.accent { color: var(--accent-ink); border-color: var(--accent-line); background: var(--accent-soft); }
+
+/* The heat chip carries its own dot, so it borrows a colour and stays quiet:
+   it sits in the crumbs beside the branch and must not out-shout it. */
+.chip.heat.active { color: var(--accent-ink); border-color: var(--accent-line); background: var(--accent-soft); }
+.chip.heat.warm { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, var(--line)); background: var(--ok-soft); }
+.chip.heat.cold { color: var(--dim); }
 
 /* ── the ribbon: what this track is, in four lines ─────────────────────── */
 

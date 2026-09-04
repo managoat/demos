@@ -480,29 +480,49 @@ async function machinesFor(ctx: AppContext, rows: ProjectRow[]): Promise<Map<str
     list.push(c);
     byAgent.set(c.agent_id, list);
   }
-  for (const row of rows) {
-    const mine = (byAgent.get(row.agentId) ?? [])
-      .filter((c) => c.sandbox_id)
-      .sort((a, b) => b.inserted_at.localeCompare(a.inserted_at));
-    const newest = mine[0];
-    out.set(
-      row.id,
-      newest
-        ? {
-            sandboxId: newest.sandbox_id!,
-            status: ["pending", "idle", "running"].includes(newest.status) ? "ready" : "suspended",
-            // Deliberately null: the conversation list serves `"sandbox": null`,
-            // so the only honest answer here is "not read". The terminal asks
-            // `spriteFor` when it actually needs one.
-            spriteName: null,
-          }
-        : none(),
-    );
-  }
+  for (const row of rows) out.set(row.id, machineFrom(byAgent.get(row.agentId) ?? []));
   return out;
 }
 
-const none = (): MachineState => ({ sandboxId: null, status: "none", spriteName: null });
+/** Conversation statuses that mean the box behind them is up. */
+const LIVE = ["pending", "idle", "running"];
+
+/**
+ * One project's machine, read off the conversations standing on it.
+ *
+ * Every question here is answered by the *set* rather than by the newest row,
+ * and that is the correction worth stating. A project's tracks are several
+ * conversations on one box: the one opened most recently can be idle while
+ * another is mid-turn, so "is the machine busy" is a question about all of
+ * them. Reading only the newest reported a machine as warm while it was
+ * running somebody else's turn — which is exactly the case the indicator
+ * exists to show, because it is the case where your prompt has to wait.
+ *
+ * Heat and status come apart in one place and it is deliberate: a project that
+ * has never been built is `none` and one that went to sleep is `suspended`,
+ * and both are `cold`. The dot shows the temperature; the label beside it says
+ * which of the two you have.
+ *
+ * Exported and pure so `projects.test.ts` can hold it to that.
+ */
+export function machineFrom(conversations: { status: string; sandbox_id: string | null; inserted_at: string }[]): MachineState {
+  const mine = conversations.filter((c) => c.sandbox_id).sort((a, b) => b.inserted_at.localeCompare(a.inserted_at));
+  if (!mine.length) return none();
+  const live = mine.filter((c) => LIVE.includes(c.status));
+  return {
+    // The newest *live* conversation, so the id and the status agree — and so
+    // this names the same box `machineOf` attaches a new track to.
+    sandboxId: (live[0] ?? mine[0]!).sandbox_id!,
+    status: live.length ? "ready" : "suspended",
+    heat: live.some((c) => c.status === "running") ? "active" : live.length ? "warm" : "cold",
+    // Deliberately null: the conversation list serves `"sandbox": null`, so the
+    // only honest answer here is "not read". The terminal asks `spriteFor` when
+    // it actually needs one.
+    spriteName: null,
+  };
+}
+
+const none = (): MachineState => ({ sandboxId: null, status: "none", heat: "cold", spriteName: null });
 
 // ── shapes and small decisions ─────────────────────────────────────────
 

@@ -12,6 +12,7 @@
  */
 import type { Project, Track } from "../../shared/api";
 import { Home, Plus, Search, Settings } from "../lib/icons";
+import { MachineDot } from "./MachineHeat";
 import { ThemePicker } from "./ThemePicker";
 
 export interface YardProps {
@@ -106,7 +107,7 @@ export function Yard(props: YardProps) {
                   </span>
                   <strong className="truncate">{project.name}</strong>
                   <span className="spacer" />
-                  <MachineDot project={project} />
+                  <MachineDot machine={project.machine} />
                 </button>
                 {owner ? (
                   <button
@@ -168,16 +169,4 @@ export function Yard(props: YardProps) {
       </div>
     </nav>
   );
-}
-
-/**
- * One dot for the machine, and it says whether the disk exists rather than
- * whether anything is running. A project with a machine that has gone to sleep
- * is not in trouble — Fountain wakes it on the next turn — so a sleeping box
- * and a missing one must not look the same.
- */
-function MachineDot({ project }: { project: Project }) {
-  const state = project.machine.status;
-  const label = state === "none" ? "no machine yet" : state === "ready" ? "machine up" : state;
-  return <span className={`dot ${state === "ready" ? "ready" : ""}`} title={label} aria-label={label} />;
 }

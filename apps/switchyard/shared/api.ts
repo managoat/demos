@@ -180,9 +180,30 @@ export interface Project {
   role: "owner" | "member";
 }
 
+/**
+ * How ready the machine is for the next thing you do.
+ *
+ * `status` below is Fountain's vocabulary and answers "what is this box". Heat
+ * answers the question a person actually has before they type, which is "what
+ * happens when I press send":
+ *
+ *   `active`  a turn is running on it now, so what you send queues behind it —
+ *             one machine, one turn, which is the whole premise of the app.
+ *   `warm`    up and idle. The next turn starts straight away.
+ *   `cold`    nothing is up. The next turn wakes the box, or builds it, and
+ *             that is a minute rather than a moment.
+ *
+ * Three words rather than seven because it goes on a dot in a sidebar. The
+ * difference between a box that is asleep and one that was never built is real
+ * and is kept — in `status`, and in the label beside the dot — but it is not a
+ * difference in temperature: both are cold, and both cost you the same wait.
+ */
+export type MachineHeat = "active" | "warm" | "cold";
+
 export interface MachineState {
   sandboxId: string | null;
   status: "none" | "pending" | "starting" | "ready" | "suspended" | "terminated" | "failed";
+  heat: MachineHeat;
   /** Present only when the server holds a Sprites token and the sandbox named one. */
   spriteName: string | null;
 }

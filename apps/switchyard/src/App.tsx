@@ -24,6 +24,7 @@ import { Info, Machine, Plus, X } from "./lib/icons";
 import { Empty } from "./components/Empty";
 import { Home, SignIn } from "./components/Home";
 import { Yard } from "./components/Yard";
+import { MachineChip } from "./components/MachineHeat";
 import { TrackView } from "./components/TrackView";
 import { Inspector } from "./components/Inspector";
 import { Dock } from "./components/Dock";
@@ -153,7 +154,13 @@ export function App() {
     if (!projectId) return;
     return subscribe(`/api/projects/${projectId}/stream`, {
       tracks: () => void reloadTracks(projectId),
-      turn: () => void reloadTracks(projectId),
+      // A turn beginning or ending is also the machine going active or back to
+      // warm, and the rail's dot would otherwise sit on the last reading until
+      // something else happened to re-read the list.
+      turn: () => {
+        void reloadTracks(projectId);
+        void reloadProjects();
+      },
       settings: () => void reloadProjects(),
       machine: () => void reloadProjects(),
       // Somebody joined by link, or was invited or removed from another
@@ -304,6 +311,10 @@ export function App() {
                 <span className="chip mono">{project.repo}</span>
               ) : null}
               {detail ? <PeopleStack people={detail.track.people} onOpen={() => setDialog("people")} /> : null}
+              {/* Spelled out here rather than left as a dot: this is the line
+                  above the composer, and whether the next thing you send waits
+                  on a boot or on somebody else's turn is worth a word. */}
+              <MachineChip machine={project.machine} />
               <span className="spacer" />
               {/* A member has neither of these on the server, so they do not
                   get them here — an owner-only button that answers 403 teaches
@@ -348,7 +359,12 @@ export function App() {
                     capabilities={capabilities}
                     onError={notify}
                     onOpenSettings={() => setDialog("settings")}
-                    onActivity={() => void reloadTracks(project.id)}
+                    // Fires on exactly the two boundaries heat moves on: a
+                    // prompt sent, and `stage: turn` ending.
+                    onActivity={() => {
+                      void reloadTracks(project.id);
+                      void reloadProjects();
+                    }}
                   />
                   <div className="inspector">
                     {/* Keyed for the same reason as the transcript: an open

@@ -16,6 +16,7 @@
  */
 import type { Project, SessionInfo } from "../../shared/api";
 import { Folder, FolderPlus, GitHub, Globe, Machine, Sparkle } from "../lib/icons";
+import { MachineDot } from "./MachineHeat";
 import { Wordmark } from "./Wordmark";
 import { ThemePicker } from "./ThemePicker";
 
@@ -159,6 +160,9 @@ export function Home({ session, projects, onNewProject, onQuickStart, onPickProj
                 <span className="meta">
                   <span className="mono">{p.repo ?? "no repository"}</span>
                 </span>
+                {/* Which of these is already up is most of what decides where
+                    you go back to, so it belongs on the row you pick from. */}
+                <MachineDot machine={p.machine} />
               </button>
             ))}
           </div>
