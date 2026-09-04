@@ -320,11 +320,13 @@ button.danger-text { color: var(--bad); }
 .panel-tabs button.on { background: var(--bg); border-color: var(--line); color: var(--ink); }
 
 /* ── file explorer ─────────────────────────────────────────────────────── */
-/* Tree at a fixed width so the file gets the rest — the panel is narrow
-   enough that a percentage split starves whichever side you are reading. */
-.explorer { display: grid; grid-template-columns: 170px 1fr; gap: 10px; align-items: start; min-height: 0; }
-.tree { overflow: auto; max-height: 55vh; border: 1px solid var(--line); border-radius: 6px; padding: 4px 0; background: var(--code-bg); }
-.node { display: flex; align-items: center; gap: 5px; width: 100%; text-align: left; background: none; border: none;
+/* The tree gets the whole sidebar. It used to share a 360px panel with a code
+   pane, at 170px each, which starved both — you could read neither a path nor
+   a line of the file. The file opens over the window instead, and the width
+   here goes to the thing that needs a width: nested names. */
+.files section { margin-bottom: 16px; }
+.tree { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; padding: 4px 0; background: var(--code-bg); }
+.node { display: flex; align-items: center; gap: 5px; width: 100%; min-width: max-content; text-align: left; background: none; border: none;
         border-radius: 0; padding: 2px 6px; color: var(--dim); white-space: nowrap; }
 .node:hover { background: var(--surface-hover); }
 .node .caret { width: 10px; color: var(--dim); }
@@ -333,14 +335,70 @@ button.danger-text { color: var(--bad); }
 .node.file.selected { background: var(--accent-soft); }
 .node.file.selected .node-name { color: var(--accent); }
 .node.empty { color: var(--dim); font-size: 12px; padding: 2px 6px; }
-.viewer { min-width: 0; }
-.viewer-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 6px; overflow: hidden; }
-.viewer-head .dim { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.viewer .code { max-height: 55vh; }
+.node .dim { flex: none; padding-left: 8px; font-size: 11px; }
+.node.inert { opacity: 0.45; }
 
-@media (max-width: 1100px) {
-  .explorer { grid-template-columns: 1fr; }
-  .tree { max-height: 30vh; }
+/* ── changes ───────────────────────────────────────────────────────────── */
+/* The question people open this panel with, answered above the tree rather
+   than behind a button that printed the whole diff into one box. */
+.rows.changed { display: flex; flex-direction: column; gap: 1px; }
+.change { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 3px 6px; background: none; border: 1px solid transparent; border-radius: 5px; text-align: left; }
+.change:hover { background: var(--surface-hover); border-color: var(--line); }
+.change-path { flex: 1; min-width: 0; color: var(--ink); }
+.stat { flex: none; display: inline-flex; gap: 5px; font-size: 11px; }
+.stat .add, .code.diff .add { color: var(--ok); }
+.stat .del, .code.diff .del { color: var(--bad); }
+
+/* One letter, the one `git status --short` already taught everyone. */
+.mark { flex: none; width: 11px; text-align: center; font-size: 11px; font-weight: 650; }
+.mark.added { color: var(--ok); }
+.mark.modified { color: var(--warn); }
+.mark.deleted { color: var(--bad); }
+.mark.renamed { color: var(--accent); }
+
+/* ── the file, over the window ─────────────────────────────────────────── */
+.modal-root { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 28px; }
+.backdrop { position: absolute; inset: 0; background: color-mix(in srgb, var(--bg) 62%, transparent); backdrop-filter: blur(2px); }
+.modal { position: relative; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 12px; padding: 14px; box-shadow: 0 24px 70px var(--shadow); }
+/* Tall enough for a real file, short enough that a three-line diff is not
+   shown in a mostly empty box: the height follows the content up to the
+   window. */
+.viewer-modal { width: min(1100px, 100%); max-height: 100%; }
+.modal-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+.modal-head .head-copy { flex: 1; min-width: 0; }
+.modal-head .fine { margin: 2px 0 0; }
+.modal-head .row-actions { flex: none; align-items: center; }
+.modal-head .stat { margin-left: 5px; }
+.modal-head button.x { font-size: 17px; padding: 0 4px; }
+.modal .code { flex: 0 1 auto; min-height: 0; max-height: none; overflow: auto; padding: 8px 0; }
+.modal .fine { flex: none; }
+
+/* Numbered lines. The gutter is its own column so a selection drag over the
+   code does not pick the numbers up with it. */
+.code.numbered { display: flex; flex-direction: column; white-space: pre; }
+.code.numbered .line { display: flex; align-items: flex-start; padding-left: 4px; }
+.code.numbered .ln { flex: none; width: 42px; padding-right: 10px; text-align: right; color: var(--dim); opacity: 0.55; user-select: none; }
+.code.numbered .lt { flex: 1; min-width: 0; padding-right: 10px; }
+.code.numbered.wrap { white-space: pre-wrap; }
+.code.numbered.wrap .lt { overflow-wrap: anywhere; }
+.code.diff.numbered .line.add { background: color-mix(in srgb, var(--ok) 11%, transparent); }
+.code.diff.numbered .line.del { background: color-mix(in srgb, var(--bad) 11%, transparent); }
+/* The tint carries the signal; the text stays close to ink so a long added
+   line is as readable as an unchanged one. Full --ok on the light theme's
+   pale green was legible only just. */
+.code.diff.numbered .line.add .lt { color: color-mix(in srgb, var(--ok) 45%, var(--ink)); }
+.code.diff.numbered .line.del .lt { color: color-mix(in srgb, var(--bad) 45%, var(--ink)); }
+.code.diff.numbered .line.hunk { background: var(--surface); }
+.code.diff.numbered .line.hunk .lt { color: var(--accent); }
+.code.diff.numbered .line.meta .lt { color: var(--dim); }
+/* Two gutters on a diff, one on a file: the old side is narrower because it
+   is blank on every added line and the whole column would otherwise be
+   dead air on a new file. */
+.code.diff.numbered .ln.old { width: 38px; }
+
+@media (max-width: 820px) {
+  .modal-root { padding: 10px; }
+  .code.numbered .ln { width: 30px; padding-right: 6px; }
 }
 
 /* Becoming a user. The tab is tinted because it is an offer, not a section. */
@@ -348,7 +406,6 @@ button.danger-text { color: var(--bad); }
 .upgrade .rows .mark { color: var(--ok); width: 14px; }
 .upgrade .primary { width: 100%; padding: 8px; margin-top: 10px; }
 .switcher { width: auto; padding: 3px 6px; font-size: 12px; }
-.node.inert { opacity: 0.45; }
 
 /* ── theme picker ─────────────────────────────────────────────────────── */
 .theme-picker { position: relative; margin-bottom: 3px; }
