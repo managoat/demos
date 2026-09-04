@@ -2,7 +2,6 @@
  * Who is in a *tab*, and how they got there.
  *
  *   GET    /api/paddock                      the caller's paddock and role
- *   POST   /api/paddock                      owner: claim this account's machine
  *   GET    /api/paddock/:id/tabs/:c/people    who is in one tab
  *   POST   /api/paddock/:id/tabs/:c/members   owner: { email }
  *   DELETE /api/paddock/:id/tabs/:c/members/:email  owner, or yourself (leave)
@@ -20,6 +19,7 @@
  * MCP servers, skills, apply, rebuild — stays out of this file entirely. That
  * separation is the permission model.
  */
+import { ownPaddock } from "./auth";
 import { actorLabel, authenticate, paddockAccess, requireOwner, type AppContext } from "./context";
 import { randomToken } from "./crypto";
 import type { Role } from "./db";
@@ -62,18 +62,13 @@ function tabDto(ctx: AppContext, paddockId: string, conversationId: string, role
   return out;
 }
 
+/** The caller's own machine. Anything else they can reach is asked for by id. */
 export async function show(ctx: AppContext, req: Request): Promise<Response> {
   const id = await authenticate(ctx, req);
   if (id.kind === "guest") {
     return json({ data: paddockDto(ctx, id.guest.paddock_id, "guest", [id.guest.conversation_id]) });
   }
-  const own = ctx.db.paddockOf(id.user.email);
-  if (own) return json({ data: paddockDto(ctx, own.id, "owner", null) });
-  const shared = ctx.db.sql
-    .query("SELECT paddock_id FROM paddock_members WHERE email = $e ORDER BY added_at LIMIT 1")
-    .get({ e: id.user.email }) as { paddock_id: string } | null;
-  if (!shared) throw new HttpError(404, "no_paddock", "You have no machine here yet.");
-  return json({ data: paddockDto(ctx, shared.paddock_id, "member", ctx.db.memberTabs(shared.paddock_id, id.user.email)) });
+  return json({ data: paddockDto(ctx, ownPaddock(ctx, id.user.email).id, "owner", null) });
 }
 
 /** One named paddock, for somebody who can reach more than one. */
@@ -81,14 +76,6 @@ export async function showOne(ctx: AppContext, req: Request, paddockId: string):
   const id = await authenticate(ctx, req);
   const access = paddockAccess(ctx, id, paddockId);
   return json({ data: paddockDto(ctx, access.paddock.id, access.role, access.tabs) });
-}
-
-/** Claim this account's machine. Idempotent: one paddock per owner. */
-export async function claim(ctx: AppContext, req: Request): Promise<Response> {
-  const id = await authenticate(ctx, req);
-  if (id.kind !== "user") throw new HttpError(403, "guest", "A guest cannot own a machine.");
-  const paddock = ctx.db.ensurePaddock(randomToken(9), id.user.email);
-  return json({ data: paddockDto(ctx, paddock.id, "owner", null) }, 201);
 }
 
 /**

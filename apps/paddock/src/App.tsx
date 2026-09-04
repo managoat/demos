@@ -37,7 +37,7 @@ type Side = "machine" | "files" | "people" | "account";
 
 export function App() {
   const [me, setMe] = useState<Me | null>(null);
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(rememberedWorkspace);
   const [checked, setChecked] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -107,6 +107,11 @@ export function App() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
+  const selectWorkspace = useCallback((id: string | null) => {
+    rememberWorkspace(id);
+    setWorkspaceId(id);
+  }, []);
+
   const connect = useCallback(async (apiKey: string) => {
     setAuthError(null);
     try {
@@ -115,7 +120,12 @@ export function App() {
       // A guest who just upgraded is now a different person in the same seat.
       // Reload rather than reconcile: the identity, the role, the reachable
       // paddocks and every ref keyed to the old session all moved at once.
-      if (next.upgradedFrom) window.location.reload();
+      // The seat is written down first — they now own a machine too, and
+      // landing on that empty one instead is exactly the seat being lost.
+      if (next.upgradedFrom) {
+        rememberWorkspace(next.paddockId);
+        window.location.reload();
+      }
     } catch (err) {
       setAuthError(describePaddockError(err));
     }
@@ -123,6 +133,8 @@ export function App() {
 
   const signOut = useCallback(async () => {
     await paddock.signOut().catch(() => undefined);
+    rememberWorkspace(null);
+    setWorkspaceId(null);
     setMe(null);
   }, []);
 
@@ -141,12 +153,38 @@ export function App() {
       me={selectedMe}
       onMe={(next) => {
         setMe(next);
-        setWorkspaceId(next.paddockId);
+        selectWorkspace(next.paddockId);
       }}
-      onSelectWorkspace={setWorkspaceId}
+      onSelectWorkspace={selectWorkspace}
       onSignOut={() => void signOut()}
     />
   );
+}
+
+/**
+ * Which computer the sidebar was left on, kept in this browser.
+ *
+ * The server's answer to "where do I land" is a default — your own machine —
+ * and a person with more than one wants the one they were last in, across a
+ * reload and across the reload the guest upgrade does on purpose.
+ */
+const WORKSPACE_KEY = "paddock.workspace";
+
+function rememberedWorkspace(): string | null {
+  try {
+    return localStorage.getItem(WORKSPACE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function rememberWorkspace(id: string | null): void {
+  try {
+    if (id) localStorage.setItem(WORKSPACE_KEY, id);
+    else localStorage.removeItem(WORKSPACE_KEY);
+  } catch {
+    // A storage-restricted browser just lands on the default every time.
+  }
 }
 
 /** `#/join/<token>` — the anonymous way in. */
@@ -168,7 +206,9 @@ function Paddock({
 }) {
   // Every Fountain call goes through this machine's own proxy, on the owner's
   // key. A guest's browser makes exactly the same calls and holds nothing.
-  const [paddockId, setPaddockId] = useState<string | null>(me.paddockId);
+  // Which machine is not this component's to change: switching computers
+  // remounts it (see the key), so it reads the one it was mounted for.
+  const paddockId = me.paddockId;
   /** Which paddock the boot effect has already run for. See the effect. */
   const bootedRef = useRef<string | null | undefined>(undefined);
   const client = useMemo(() => new FountainClient(`/f/${paddockId ?? "none"}`), [paddockId]);
@@ -230,9 +270,11 @@ function Paddock({
   const machineHolder = holder(tabs);
 
   // ── boot ─────────────────────────────────────────────────────────────────
-  // The owner claims a paddock (idempotent) and then finds or makes the
-  // identity behind the machine. A guest does neither: they were handed a
-  // paddock id by the invite and everything else is derived.
+  // The owner finds or makes the identity behind the machine. A guest does
+  // not: they were handed a paddock id by the invite and everything else is
+  // derived. Nobody asks for a paddock here — the server hands every account
+  // its own, so there is no state where the app is signed in with nowhere
+  // to be.
   useEffect(() => {
     // Once per client, ever. React double-invokes effects in development and
     // will re-run this on any dep change; `ensureIdentity` creates records, so
@@ -243,26 +285,8 @@ function Paddock({
     bootedRef.current = paddockId;
     void (async () => {
       try {
-        let id = paddockId;
-        if (!id && isOwner === false && me.kind === "user") {
-          // A signed-in user with no machine yet: claiming one is free and
-          // creates nothing on Fountain.
-          const claimed = await paddock.claim();
-          id = claimed.id;
-          setPaddockId(id);
-          onMe({
-            ...me,
-            role: "owner",
-            paddockId: id,
-            paddocks: me.paddocks.some((workspace) => workspace.id === id)
-              ? me.paddocks
-              : [...me.paddocks, { id, ownerEmail: me.email ?? me.label, role: "owner" }],
-          });
-          return; // the effect reruns with a real paddock id
-        }
-        if (!id) return;
-
-        setPeople(await paddock.show().catch(() => null));
+        if (!paddockId) return;
+        setPeople(await paddock.showOne(paddockId).catch(() => null));
         if (!isOwner) return;
 
         const [cat, agents] = await Promise.all([
@@ -285,7 +309,7 @@ function Paddock({
         setBooting(false);
       }
     })();
-  }, [client, paddockId, isOwner, me, onMe]);
+  }, [client, paddockId, isOwner]);
 
   // No agent filter and no identity gate: the proxy already returns exactly
   // this machine's tabs, to everybody in the paddock.
@@ -392,8 +416,10 @@ function Paddock({
     setUpgradeError(null);
     try {
       const next = await paddock.signIn(apiKey);
-      if (next.upgradedFrom) window.location.reload();
-      else onMe(next);
+      if (next.upgradedFrom) {
+        rememberWorkspace(next.paddockId);
+        window.location.reload();
+      } else onMe(next);
     } catch (err) {
       setUpgradeError(describePaddockError(err));
     }
@@ -619,7 +645,7 @@ function Paddock({
         // Somebody opened a tab, took a turn, or was invited: re-read rather
         // than trying to patch state from another browser's event.
         void refreshConversations();
-        if (msg.event === "people") void paddock.show().then(setPeople).catch(() => undefined);
+        if (msg.event === "people") void paddock.showOne(paddockId).then(setPeople).catch(() => undefined);
       },
       onClose: () => undefined,
     });

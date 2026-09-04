@@ -9,7 +9,6 @@
  *   POST   /api/join/:token                   follow an invite link (no account needed)
  *
  *   GET    /api/paddock                       the caller's machine and its people
- *   POST   /api/paddock                       owner: claim it
  *   GET    /api/paddock/:id/tabs/:c/people    who is in one tab
  *   POST   /api/paddock/:id/tabs/:c/members   owner: invite by email, to that tab
  *   DELETE /api/paddock/:id/tabs/:c/members/:email  owner, or leave
@@ -57,7 +56,6 @@ export function buildRouter(ctx: AppContext): (req: Request) => Promise<Response
   on("POST", "/api/join/:token", (req, p) => auth.join(ctx, req, p.token!));
 
   on("GET", "/api/paddock", (req) => people.show(ctx, req));
-  on("POST", "/api/paddock", (req) => people.claim(ctx, req));
   on("GET", "/api/paddock/:id", (req, p) => people.showOne(ctx, req, p.id!));
   on("GET", "/api/paddock/:id/tabs/:c/people", (req, p) => people.tabPeople(ctx, req, p.id!, p.c!));
   on("POST", "/api/paddock/:id/tabs/:c/members", (req, p) => people.addMember(ctx, req, p.id!, p.c!));

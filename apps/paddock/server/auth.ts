@@ -20,7 +20,7 @@
 import { actorLabel, authenticate, type AppContext, type Identity } from "./context";
 import { guestHandle, randomToken, sha256 } from "./crypto";
 import { FountainClient, FountainHttpError } from "./fountain";
-import type { Role } from "./db";
+import type { PaddockRow, Role } from "./db";
 import { clearedSessionCookie, cookieValue, HttpError, json, readJson, SESSION_COOKIE, sessionCookie, str } from "./http";
 
 export function config(ctx: AppContext): Response {
@@ -48,13 +48,25 @@ export function meDto(
   };
 }
 
+/**
+ * The machine that belongs to this account, made if it is not there yet.
+ *
+ * An account *is* a Fountain account — you cannot sign in here without a key —
+ * so everybody who gets this far is entitled to a machine of their own, and
+ * the row for it costs nothing: no agent, no sandbox, nothing on Fountain
+ * until somebody opens it. Leaving it to the browser to ask for one meant
+ * anybody who arrived through an invite link never got theirs, because the
+ * app only claimed a machine when it had nowhere at all to land.
+ */
+export function ownPaddock(ctx: AppContext, email: string): PaddockRow {
+  return ctx.db.ensurePaddock(randomToken(9), email);
+}
+
 export async function me(ctx: AppContext, req: Request): Promise<Response> {
   const id = await authenticate(ctx, req);
   if (id.kind === "guest") return json(meDto(ctx, id, "guest", id.guest.paddock_id));
-  const own = ctx.db.paddockOf(id.user.email);
-  const reachable = ctx.db.paddocksFor(id.user.email);
-  const landing = own ?? (reachable[0] ? { id: reachable[0].id } : null);
-  return json(meDto(ctx, id, own ? "owner" : reachable.length ? "member" : null, landing?.id ?? null));
+  const own = ownPaddock(ctx, id.user.email);
+  return json(meDto(ctx, id, "owner", own.id));
 }
 
 export async function signIn(ctx: AppContext, req: Request): Promise<Response> {
@@ -100,12 +112,12 @@ export async function signIn(ctx: AppContext, req: Request): Promise<Response> {
   ctx.db.createUserSession(await sha256(token), email);
   ctx.db.expireSessions(ctx.config.sessionMaxAgeMs);
 
-  const own = ctx.db.paddockOf(email);
+  const own = ownPaddock(ctx, email);
   const id: Identity = { kind: "user", user: ctx.db.getUser(email)! };
   // Land where they were, if they were somewhere. Signing in to keep a seat
   // and then being dropped somewhere else is not keeping it.
-  const landing = upgraded?.paddockId ?? own?.id ?? null;
-  const role: Role | null = own ? (own.id === landing ? "owner" : "member") : upgraded ? "member" : null;
+  const landing = upgraded?.paddockId ?? own.id;
+  const role: Role = own.id === landing ? "owner" : "member";
   return json(meDto(ctx, id, role, landing, upgraded ? { upgradedFrom: upgraded.from } : {}), 200, {
     "set-cookie": sessionCookie(token, req, ctx.config.sessionMaxAgeMs / 1000),
   });
@@ -139,6 +151,9 @@ export async function join(ctx: AppContext, req: Request, token: string): Promis
     if (session?.email) {
       const user = ctx.db.getUser(session.email);
       if (user) {
+        // Their own machine still belongs in the list they are handed back,
+        // even though the link lands them on somebody else's.
+        ownPaddock(ctx, user.email);
         const role: Role = paddock.owner_email === user.email ? "owner" : "member";
         if (role === "member") ctx.db.addMember(paddock.id, invite.conversation_id, user.email, `link:${paddock.owner_email}`);
         return json(meDto(ctx, { kind: "user", user }, role, paddock.id));
