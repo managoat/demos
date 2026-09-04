@@ -75,7 +75,6 @@ export const paddock = {
 
   show: () => call<{ data: PaddockDto }>("GET", "/api/paddock").then((r) => r.data),
   showOne: (id: string) => call<{ data: PaddockDto }>("GET", `/api/paddock/${id}`).then((r) => r.data),
-  claim: () => call<{ data: PaddockDto }>("POST", "/api/paddock").then((r) => r.data),
 
   tabPeople: (id: string, conv: string) => call<{ data: TabPeopleDto }>("GET", `/api/paddock/${id}/tabs/${conv}/people`).then((r) => r.data),
   addMember: (id: string, conv: string, email: string) =>
@@ -135,8 +134,6 @@ export function describePaddockError(err: unknown): string {
         return "That invite link is not valid any more.";
       case "owner_only":
         return "Only the owner of this machine can change it.";
-      case "no_paddock":
-        return "You have no machine here yet.";
       case "bad_key":
         return "Fountain rejected that key.";
       case "unauthenticated":

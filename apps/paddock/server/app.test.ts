@@ -129,11 +129,12 @@ function call(cookie: string | null, method: string, path: string, body?: unknow
   return route(new Request(`http://paddock.test${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }));
 }
 
+/** Somebody with an account, and therefore a machine — asking for it is what
+ *  `/api/me` is; there is no separate way to be given one. */
 async function paddockFor(email: string): Promise<{ cookie: string; id: string }> {
   const cookie = await signIn(email);
-  const res = await call(cookie, "POST", "/api/paddock");
-  const { data } = (await res.json()) as { data: { id: string } };
-  return { cookie, id: data.id };
+  const me = (await (await call(cookie, "GET", "/api/me")).json()) as { paddockId: string };
+  return { cookie, id: me.paddockId };
 }
 
 describe("the ops tab", () => {
@@ -631,11 +632,45 @@ describe("a guest signing in", () => {
     const upgraded = await call(guestCookie, "POST", "/api/auth/session", { apiKey: "ftn_theirs" });
     const cookie = upgraded.headers.get("set-cookie")!.split(";")[0]!;
 
-    // Their own is claimed the way any signed-in person's is.
-    await call(cookie, "POST", "/api/paddock");
+    // Nobody asked for it: an account has a machine of its own because it is
+    // an account. Asking used to be the browser's job, and the browser only
+    // asked when it had nowhere at all to land — which somebody let in by a
+    // link never is, so they were left holding only the terminal they were lent.
     const me = (await (await call(cookie, "GET", "/api/me")).json()) as { paddocks: { id: string; role: string }[] };
     expect(me.paddocks.map((p) => p.role).sort()).toEqual(["member", "owner"]);
     expect(me.paddocks.some((p) => p.id === owner.id && p.role === "member")).toBe(true);
+  });
+
+  test("and the machine of their own is theirs alone — the invite did not follow them onto it", async () => {
+    const owner = await paddockFor(OWNER);
+    const guestCookie = await joinByLink(owner, "c2");
+    const upgraded = await call(guestCookie, "POST", "/api/auth/session", { apiKey: "ftn_theirs" });
+    const cookie = upgraded.headers.get("set-cookie")!.split(";")[0]!;
+    const me = (await (await call(cookie, "GET", "/api/me")).json()) as { email: string; paddocks: { id: string; role: string }[] };
+    const own = me.paddocks.find((p) => p.role === "owner")!;
+
+    expect(own.id).not.toBe(owner.id);
+    expect(ctx.db.getPaddock(own.id)!.owner_email).toBe(me.email);
+    // And whoever invited them has no seat on it.
+    expect((await call(owner.cookie, "GET", `/api/paddock/${own.id}`)).status).toBe(404);
+  });
+
+  test("somebody already signed in who follows a link keeps a machine of their own too", async () => {
+    const owner = await paddockFor(OWNER);
+    // An account that was never a guest, arriving at somebody else's terminal.
+    const theirs = await signIn(OTHER);
+    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/tabs/c2/invite`);
+    const token = ctx.db.inviteFor(owner.id, "c2")!.token;
+    const joined = (await (await call(theirs, "POST", `/api/join/${token}`)).json()) as {
+      role: string;
+      paddockId: string;
+      paddocks: { id: string; role: string }[];
+    };
+
+    // Landed on the terminal they were sent, with their own still in the list.
+    expect(joined.role).toBe("member");
+    expect(joined.paddockId).toBe(owner.id);
+    expect(joined.paddocks.map((p) => p.role).sort()).toEqual(["member", "owner"]);
   });
 
   test("the owner signing in on their own link is not demoted to a member of it", async () => {
