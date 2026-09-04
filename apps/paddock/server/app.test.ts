@@ -95,6 +95,7 @@ beforeEach(async () => {
     if (method === "DELETE" && /^\/api\/(agents|environments|vaults)\/[^/]+$/.test(url.pathname)) return new Response(null, { status: 204 });
     if (/^\/api\/environments\/[^/]+$/.test(url.pathname)) return Response.json({ data: { id: "e1", name: "Paddock" } });
     if (/^\/api\/(environments|vaults)\/[^/]+\/secrets$/.test(url.pathname)) return Response.json({ data: [] });
+    if (url.pathname === "/api/connections" || url.pathname === "/api/connections/providers") return Response.json({ data: [] });
     // Only this paddock's box exists upstream; the proxy is what refuses the
     // others, so the fake has to be willing to serve any of them.
     if (/^\/api\/sandboxes\/[^/]+/.test(url.pathname)) return Response.json({ data: { path: "/", entries: [], truncated: false } });
@@ -207,6 +208,39 @@ describe("what a guest may do", () => {
     expect((await call(guest, "GET", `/f/${owner.id}/api/environments`)).status).toBe(404);
   });
 
+  test("and cannot see who the owner has connected", async () => {
+    const owner = await paddockFor(OWNER);
+    const guest = await guestSession(owner.id);
+
+    // Unlike the config surface above, this one is genuinely not a guest's
+    // business: a connection carries `account_email`, the owner's identity at
+    // a third party. It buys nothing to hide MCP server *names* — the agent
+    // holds those anyway — but the account behind one is not on the machine.
+    upstream = [];
+    for (const path of ["/api/connections", "/api/connections/providers"]) {
+      expect((await call(guest, "GET", `/f/${owner.id}${path}`)).status).toBe(404);
+      expect((await call(owner.cookie, "GET", `/f/${owner.id}${path}`)).status).toBe(200);
+    }
+    // Only the owner's two calls reached Fountain.
+    expect(upstream.filter((u) => u.path.startsWith("/api/connections"))).toHaveLength(2);
+  });
+
+  test("and paddock never creates a connection provider, for anyone", async () => {
+    const owner = await paddockFor(OWNER);
+    // Account-level state, and the rule this proxy is built on is that the
+    // owner's authority here stops at their own machine. Connecting happens at
+    // Fountain, in a browser signed in as them.
+    upstream = [];
+    for (const [method, path] of [
+      ["POST", "/api/connection-providers"],
+      ["POST", "/api/connection-providers/cp1/discover"],
+      ["DELETE", "/api/connections/cn1"],
+    ] as const) {
+      expect((await call(owner.cookie, method, `/f/${owner.id}${path}`, {})).status).toBe(404);
+    }
+    expect(upstream).toEqual([]);
+  });
+
   test("and cannot read a sandbox that is not this machine", async () => {
     const owner = await paddockFor(OWNER);
     const guest = await guestSession(owner.id);
@@ -314,6 +348,54 @@ describe("unauthenticated", () => {
     expect((await call(null, "GET", `/f/${owner.id}/api/conversations/c1`)).status).toBe(401);
     expect((await call(null, "GET", "/api/config")).status).toBe(200);
     expect((await call(null, "GET", "/healthz")).status).toBe(200);
+    // The skills index says nothing about any paddock, but a session is still
+    // required — otherwise this is an open proxy in front of skills.sh.
+    expect((await call(null, "GET", "/api/skills/search?q=pdf")).status).toBe(401);
+  });
+});
+
+describe("the skills index", () => {
+  test("a session reaches it, and a query too short never leaves the server", async () => {
+    const owner = await paddockFor(OWNER);
+    upstream = [];
+    const res = await call(owner.cookie, "GET", "/api/skills/search?q=p");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: [] });
+    expect(upstream).toEqual([]);
+  });
+
+  test("an index that will not answer is not an error — the manual form still works", async () => {
+    const owner = await paddockFor(OWNER);
+    // The fake upstream 404s anything it does not know, skills.sh included.
+    // A query of its own: the 60s cache is module-level and outlives a test.
+    const res = await call(owner.cookie, "GET", "/api/skills/search?q=nothing-answers");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: [], unavailable: true });
+  });
+
+  test("a hit that could not be installed is dropped rather than offered", async () => {
+    const owner = await paddockFor(OWNER);
+    const inner = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).startsWith("https://skills.sh/")) {
+        return Response.json({
+          skills: [
+            { id: "anthropics/skills/pdf", skillId: "pdf", name: "pdf", installs: 190_279, source: "anthropics/skills" },
+            // Fountain interpolates the id into a `bash -lc` behind an
+            // allow-list that raises on `&`. skills.sh really lists this one.
+            { skillId: "pdf-merge-&-split", name: "pdf merge & split", installs: 3914, source: "claude-office-skills/skills" },
+            // Not an owner/repo, so nothing can be installed from it.
+            { skillId: "pdf", name: "pdf", installs: 12, source: "bare" },
+          ],
+        });
+      }
+      return inner(input, init);
+    }) as typeof fetch;
+
+    const res = await call(owner.cookie, "GET", "/api/skills/search?q=pdf-hits");
+    expect(await res.json()).toEqual({
+      data: [{ source: "anthropics/skills", skill: "pdf", label: "pdf", installs: 190279 }],
+    });
   });
 });
 

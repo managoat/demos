@@ -45,6 +45,18 @@ The server takes `FOUNTAIN_URL`, `DATA_DIR`, `PADDOCK_SECRET` (encrypts stored
 keys; generated into `DATA_DIR/secret` if unset), `PUBLIC_URL` (where invite
 links point) and `STATIC_DIR`.
 
+It also takes `SKILLS_URL`, which defaults to skills.sh. The mock serves the
+same shape, so pointing it there makes the Skills search work offline like
+everything else:
+
+```bash
+SKILLS_URL=http://localhost:8792/api/skills/search \
+FOUNTAIN_URL=http://localhost:8792 bun run server
+```
+
+Worth doing even online: the real index answers in two to eight seconds when it
+answers at all, and times out about half the time.
+
 ## The problem it exists for
 
 Fountain builds a machine from an identity: `(user, agent, environment, vault)`,
@@ -97,6 +109,30 @@ revision it opened at in its `channel_id` (`paddock:t2@r7`), and a tab behind
 the current one is badged *older settings*. Nothing is stored to work this out
 and nothing can get it wrong.
 
+**What goes in the two boxes comes from a catalog, not from memory.** MCP
+servers are `GET /api/catalog`'s `mcp_servers` — the remote servers whose
+authorization chain Fountain watched complete, with the date it last checked.
+A chip says which of three states a server is in, and the difference is the
+whole point: *connected* means the owner has authorized it and adding it names
+that connection, so the egress broker attaches the token in flight and the box
+never holds it; *connect ↗* means it has not been authorized, and the link goes
+to Fountain, because connecting needs a browser session there and this app is
+not it. Paddock reads connections and never creates one — that is account-level
+state, and this app's authority stops at one machine.
+
+Skills have no Fountain catalog ("Fountain curates no list"), so the search box
+is [skills.sh](https://skills.sh), which is also the CLI Fountain shells out to
+on the box. It goes through this server rather than the browser because
+skills.sh sends no CORS header. The panel labels it as somebody else's list,
+and says the thing that follows from that: adding one runs its installer on
+your machine.
+
+A skill is an object — `{source, ref?, name?}` from GitHub, or `{name, content}`
+written here — and `name` on a GitHub entry *selects* one skill out of a
+repository holding dozens rather than renaming it. Without a `ref`, Fountain
+resolves the default branch when a tab opens, so two tabs a week apart can
+install different code.
+
 ### One turn at a time
 
 A box runs one turn at a time (`sandbox_at_capacity`). That is not an error
@@ -143,6 +179,40 @@ The one real mitigation is the distinction the Machine panel already draws: an
 substitutes it in flight. Once other people are in your paddock, that is where
 anything sensitive belongs.
 
+The case that matters most is a private repository, and it works out better
+than it sounds. Fountain's broker keeps a two-entry catalog — `GITHUB_TOKEN`
+and `GH_TOKEN` — and a secret under one of those names is brokered with no
+binding and no configuration at all. The sandbox holds `__github_token__`, the
+clone URL is written with that placeholder, and the broker attaches git's real
+`x-access-token` basic auth on the way out. So marking a repository **private**
+in the Machine panel stores a `GITHUB_TOKEN`, names it in the repository's
+`secret_key`, and the clone works with the token never on the machine — where
+somebody you invited could have printed it.
+
+Three things about that are worth knowing rather than discovering:
+
+- **The name is load-bearing.** Only `GITHUB_TOKEN` and `GH_TOKEN` get git's
+  basic-auth rule. A GitHub *connection* is brokered too, but under
+  `GITHUB_ACCESS_TOKEN` and as a *bearer* — which git over HTTPS does not use.
+  A connection gives the agent the GitHub API. It does not give it a checkout.
+- **The broker is what protects it, not the vault.** `Broker.split` runs over
+  the environment and vault secrets *merged*, so a catalog key gets the
+  placeholder from either store. Paddock still puts it in the vault — that is
+  where sensitive things belong, and a vault wins a key collision — but the
+  panel credits the broker for the protection, because the vault does not
+  provide it.
+- **Without the broker there is none of this.** On a Fountain with no broker
+  for you, it is an ordinary env var in the box, and the panel says so where
+  you are typing the token rather than here.
+
+There is no GitHub App and there will not be one. Fountain already owns that
+layer — Connections, with a preset for your own GitHub OAuth app — and
+connecting one needs a browser session at Fountain, so paddock could not own
+the flow even if it wanted to. Salon has an App because each *participant* there
+brings a repository from their own account; in a paddock only the owner adds
+one, so an App would buy a repository picker and a worse credential than the
+one above.
+
 ## Why there is a server
 
 Phase 1 had none: the browser held your key and talked to Fountain directly,
@@ -164,8 +234,10 @@ the paddock and changing it is not; and even the owner gets a list of shapes
 rather than "anything under `/api`", so a scripted browser cannot spend their
 whole Fountain account.
 
-`server/app.test.ts` is that boundary written down as fifteen ways in that stay
-shut.
+`server/app.test.ts` is that boundary written down as twenty-three ways in that
+stay shut. Two of them are the newest surface: the owner's connections are
+readable by the owner and nobody else, because a connection names the account
+behind it, and paddock creates a connection provider for no one at all.
 
 ## How the pieces map
 
@@ -185,7 +257,14 @@ never shares, because they are the product. Change one, change both.
 
 A tab's first turn makes its working directory under `~/work/<slug>` — a real
 `git worktree` when the box has a repository, so two tabs can hold different
-branches at once.
+branches at once. It branches from the *first* repository; the rest are cloned
+and left alone, and the panel says which one it is when there is more than one.
+
+Repositories are cloned to `/workspace/<name>`, which is Fountain's convention
+and, more to the point, where the bundled `fountain` skill — mounted into every
+sandbox whatever you declare — tells the agent to look first. Paddock used
+`/home/sprite/<name>` until it did not, and the agent on the box was being sent
+to the wrong place by the one skill it always has.
 
 ## Files, and what is not there
 

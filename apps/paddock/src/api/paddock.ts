@@ -5,6 +5,7 @@
  * Same origin, cookie-authenticated, no key anywhere near the browser.
  */
 import { readSse, type SseMessage } from "../lib/sse";
+import type { SkillHit } from "../lib/skills";
 
 export type Role = "owner" | "member" | "guest";
 
@@ -72,6 +73,17 @@ export const paddock = {
   signIn: (apiKey: string) => call<Me>("POST", "/api/auth/session", { apiKey }),
   signOut: () => call<{ ok: true }>("DELETE", "/api/auth/session"),
   join: (token: string) => call<Me>("POST", `/api/join/${encodeURIComponent(token)}`),
+
+  /**
+   * The skills.sh index, through this server because skills.sh sends no CORS
+   * header and the browser cannot read it directly (`server/skills.ts`).
+   *
+   * `unavailable` rather than a rejection when the index is down: the Skills
+   * editor has a manual form, and search failing must not stop somebody adding
+   * an `owner/repo` they already know.
+   */
+  searchSkills: (q: string) =>
+    call<{ data: SkillHit[]; unavailable?: boolean }>("GET", `/api/skills/search?${new URLSearchParams({ q })}`),
 
   show: () => call<{ data: PaddockDto }>("GET", "/api/paddock").then((r) => r.data),
   showOne: (id: string) => call<{ data: PaddockDto }>("GET", `/api/paddock/${id}`).then((r) => r.data),

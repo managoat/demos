@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, describeError, FountainClient } from "./api/client";
-import type { Agent, Catalog, Conversation, Environment, LogEvent, Repository, Sandbox } from "./api/types";
+import type { Agent, Catalog, Connection, ConnectionProvider, Conversation, Environment, LogEvent, Repository, Sandbox } from "./api/types";
 import { Starting } from "./components/Starting";
 import { Connect } from "./components/Connect";
 import { Files } from "./components/Files";
@@ -220,6 +220,19 @@ function Paddock({
 
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
+  /**
+   * The owner's remote-MCP connections, and where a new one is made.
+   *
+   * Both are `null` — not empty — where the egress credential broker is not on
+   * for this person, which is not an error. That null is the only evidence the
+   * panel has that nothing is brokered, and it decides what is true about the
+   * machine's secrets as well as its MCP
+   * servers. `fountainUrl` is where somebody is sent to connect one, because
+   * connecting needs a browser session at Fountain and this app is not it.
+   */
+  const [connections, setConnections] = useState<Connection[] | null>(null);
+  const [providers, setProviders] = useState<ConnectionProvider[] | null>(null);
+  const [fountainUrl, setFountainUrl] = useState<string | null>(null);
   const [booting, setBooting] = useState(true);
   const [step, setStep] = useState<BootStep>("environment");
   const [fatal, setFatal] = useState<string | null>(null);
@@ -289,11 +302,17 @@ function Paddock({
         setPeople(await paddock.showOne(paddockId).catch(() => null));
         if (!isOwner) return;
 
-        const [cat, agents] = await Promise.all([
+        const [cat, agents, conns, provs, cfg] = await Promise.all([
           client.getCatalog().catch(() => null),
           client.listAgents().catch(() => [] as Agent[]),
+          client.listConnections().catch(() => null),
+          client.listConnectionProviders().catch(() => null),
+          paddock.config().catch(() => null),
         ]);
         setCatalog(cat);
+        setConnections(conns);
+        setProviders(provs);
+        setFountainUrl(cfg?.fountainUrl ?? null);
         const mine = agents.find((a) => {
           const meta = (a.metadata ?? {})["paddock"];
           return !!meta && typeof meta === "object" && !Array.isArray(meta) && (meta as { identity?: unknown }).identity === true;
@@ -977,6 +996,10 @@ function Paddock({
                   agent={identity.agent}
                   environment={identity.environment}
                   vault={identity.vault}
+                  catalog={catalog}
+                  connections={connections}
+                  providers={providers}
+                  fountainUrl={fountainUrl}
                   rev={rev}
                   desired={desired}
                   drift={drift}

@@ -28,6 +28,7 @@
 import type { Agent, Environment } from "../api/types";
 import type { Receipt } from "./protocol";
 import type { ApplyItem } from "../../shared/spec";
+import { isGithubSkill, readSkills, skillKey, skillLabel } from "./skills";
 
 /** Which of the three ways a change reaches the machine. */
 export type Tier = "box" | "session" | "machine";
@@ -80,9 +81,7 @@ export function setupId(script: string): string {
   return `setup:${fingerprint(script)}`;
 }
 
-export function skillId(name: string): string {
-  return `skill:${name}`;
-}
+/** A skill's id is `skillKey` in `lib/skills.ts`, next to the shape it reads. */
 
 export function mcpId(name: string): string {
   return `mcp:${name}`;
@@ -164,14 +163,20 @@ export function desiredItems(d: Declared): DesiredItem[] {
     });
   }
 
-  for (const name of skillNames(d.agent.skills)) {
+  for (const entry of readSkills(d.agent.skills)) {
     out.push({
-      id: skillId(name),
+      id: skillKey(entry),
       tier: "session",
       kind: "skill",
-      label: name,
-      detail: "skill",
-      instruction: `ensure the skill \`${name}\` is installed`,
+      label: skillLabel(entry),
+      detail: isGithubSkill(entry) ? "skills.sh" : "inline",
+      // Nothing, and it took a look at Fountain to be sure of that. Skills are
+      // mounted by `SandboxSkills.mount` on every conversation start — warm or
+      // cold — not by anything paddock can send. The old text here asked the
+      // agent to "ensure the skill is installed", which described an apply turn
+      // that never happens: tier-`session` items are filtered out of
+      // `applyTodo` and this string has never once been sent.
+      instruction: "(mounted by Fountain when a session starts; nothing to do on the box)",
     });
   }
 
@@ -320,32 +325,6 @@ export function shortRepo(url: string): string {
   const trimmed = url.replace(/\.git$/, "").replace(/\/+$/, "");
   const parts = trimmed.split("/").filter(Boolean);
   return parts.length >= 2 ? parts.slice(-2).join("/") : (parts[parts.length - 1] ?? url);
-}
-
-/**
- * Skill names out of the agent's `skills`, which Fountain serves as either
- * bare strings or objects with a name. Unknown shapes are dropped.
- */
-export function skillNames(skills: unknown): string[] {
-  if (!Array.isArray(skills)) return [];
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const s of skills) {
-    const name = typeof s === "string" ? s : typeof s === "object" && s !== null ? nameOf(s as Record<string, unknown>) : null;
-    const trimmed = name?.trim();
-    if (!trimmed || seen.has(trimmed)) continue;
-    seen.add(trimmed);
-    out.push(trimmed);
-  }
-  return out.sort();
-}
-
-function nameOf(o: Record<string, unknown>): string | null {
-  for (const k of ["name", "slug", "id"]) {
-    const v = o[k];
-    if (typeof v === "string" && v.trim()) return v;
-  }
-  return null;
 }
 
 /**

@@ -16,6 +16,8 @@
 import { RECEIPT_PATH, WORK_ROOT } from "../shared/spec";
 
 const PORT = 8792;
+/** Where a `connect_url` points. On a real Fountain this is its console. */
+const FOUNTAIN_BASE = `http://localhost:${PORT}`;
 const now = () => new Date().toISOString();
 
 interface Conv {
@@ -184,6 +186,40 @@ function badEnvironment(body: Record<string, unknown>): { error: string; errors:
   return Object.keys(errors).length ? { error: "validation_failed", errors } : null;
 }
 
+/**
+ * `Agent.validate_skills/1`, because its absence here hid a real bug.
+ *
+ * `skills` is an array of *objects* — `{name, content}` or `{source, ref?,
+ * name?}` — and paddock's Machine panel appended a bare string for a year. It
+ * worked perfectly against this mock, which stored whatever it was handed, and
+ * failed against every real Fountain. A mock that accepts what Fountain rejects
+ * is not a convenience, it is a place for that class of bug to live.
+ */
+function badAgent(body: Record<string, unknown>): { error: string; errors: Record<string, string[]> } | null {
+  const skills = body.skills;
+  if (skills === undefined || skills === null) return null;
+  if (!Array.isArray(skills)) return fail("skills", "Invalid array.");
+
+  for (const [i, entry] of skills.entries()) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return fail("skills", `entry ${i}: must be an object`);
+    const e = entry as Record<string, unknown>;
+    const hasContent = typeof e.content === "string";
+    const hasSource = typeof e.source === "string";
+    if (hasContent && hasSource) return fail("skills", `entry ${i}: only one of content or source may be set`);
+    if (!hasContent && !hasSource) return fail("skills", `entry ${i}: must set content (inline) or source (github)`);
+    if (hasContent && typeof e.name !== "string") return fail("skills", `entry ${i}: inline skills require a name`);
+    if (hasContent && e.ref !== undefined && e.ref !== null) return fail("skills", `entry ${i}: ref only applies to github-sourced skills`);
+    if (e.ref !== undefined && e.ref !== null && !(typeof e.ref === "string" && /^[A-Za-z0-9._/-]+$/.test(e.ref))) {
+      return fail("skills", `entry ${i}: ref must match [A-Za-z0-9._/-]+ (tag, branch, or sha)`);
+    }
+  }
+  return null;
+}
+
+function fail(field: string, message: string) {
+  return { error: "validation_failed", errors: { [field]: [message] } };
+}
+
 /** One server-sent stream, either for a conversation or for the account. */
 function sse(conversationId: string | null): Response {
   const enc = new TextEncoder();
@@ -248,11 +284,94 @@ Bun.serve({
       const email = !key || key === "ftn_owner" ? "you@example.com" : `${key.replace(/^ftn_/, "")}@example.com`;
       return json({ id: `u-${key || "anon"}`, email });
     }
+    // Not Fountain's — skills.sh's shape, so `SKILLS_URL` can point the paddock
+    // server here and the Skills search works with no network at all. The real
+    // index is slow and not reliably up (see `server/skills.ts`), which makes
+    // an offline stand-in worth more here than it looks.
+    if (p === "/api/skills/search") {
+      const q = url.searchParams.get("q")?.trim().toLowerCase() ?? "";
+      const all = [
+        { id: "anthropics/skills/pdf", skillId: "pdf", name: "pdf", installs: 190_279, source: "anthropics/skills" },
+        { id: "openai/skills/pdf", skillId: "pdf", name: "pdf", installs: 12_046, source: "openai/skills" },
+        { id: "vercel-labs/json-render/react-pdf", skillId: "react-pdf", name: "react-pdf", installs: 1974, source: "vercel-labs/json-render" },
+        { id: "supabase/skills/postgres", skillId: "postgres", name: "postgres", installs: 41_002, source: "supabase/skills" },
+        { id: "anthropics/skills/code-review", skillId: "code-review", name: "code review", installs: 88_120, source: "anthropics/skills" },
+        // Two the paddock server must drop rather than offer: `&` is outside
+        // the allow-list Fountain interpolates behind, and `bare` is not an
+        // owner/repo so nothing can be installed from it.
+        { id: "x/skills/pdf-merge", skillId: "pdf-merge-&-split", name: "pdf merge & split", installs: 3914, source: "claude-office-skills/skills" },
+        { id: "bare/pdf", skillId: "pdf", name: "pdf", installs: 12, source: "bare" },
+      ];
+      return json({ query: q, skills: all.filter((s) => s.skillId.includes(q) || s.source.includes(q)) });
+    }
+
     if (p === "/api/catalog")
-      return json({ data: { runtimes: ["claude", "codex"], models: { claude: ["claude-opus-5", "claude-sonnet-5"], codex: ["gpt-5"] } } });
+      return json({
+        data: {
+          runtimes: ["claude", "codex"],
+          models: { claude: ["claude-opus-5", "claude-sonnet-5"], codex: ["gpt-5"] },
+          package_managers: ["apt", "npm"],
+          // Three of the real ten, chosen so the Machine panel's three chip
+          // states are all reachable offline: linear is connected below, sentry
+          // has a provider waiting to be authorized, and github has no provider
+          // at all (and `dcr: false`, so connecting it needs a client id).
+          mcp_servers: [
+            { slug: "linear", name: "Linear", url: "https://mcp.linear.app/mcp", dcr: true, verified_on: "2026-09-01" },
+            { slug: "sentry", name: "Sentry", url: "https://mcp.sentry.dev/mcp", dcr: true, verified_on: "2026-09-01" },
+            { slug: "github", name: "GitHub", url: "https://api.githubcopilot.com/mcp", dcr: false, verified_on: "2026-09-01" },
+          ],
+        },
+      });
+
+    // Connections. A Fountain that does not broker for the caller answers 404
+    // `connections_not_enabled` instead — a self-hosted one, or an account not
+    // enrolled. `MOCK_NO_BROKER=1` gets that shape, which is the branch the
+    // panel needs and the one nobody developing against a brokered account
+    // would otherwise ever see.
+    if (p === "/api/connections" || p === "/api/connections/providers") {
+      if (process.env.MOCK_NO_BROKER) return json({ error: "connections_not_enabled" }, 404);
+      if (p === "/api/connections") {
+        return json({
+          data: [
+            {
+              id: "cn1",
+              provider: "linear",
+              provider_id: "cp1",
+              account_email: "you@example.com",
+              env_key: "LINEAR_ACCESS_TOKEN",
+              status: "active",
+            },
+          ],
+        });
+      }
+      return json({
+        data: [
+          {
+            id: "cp1",
+            slug: "linear",
+            name: "Linear",
+            kind: "mcp",
+            mcp_url: "https://mcp.linear.app/mcp",
+            connect_url: `${FOUNTAIN_BASE}/connections/cp1/start`,
+            env_key: "LINEAR_ACCESS_TOKEN",
+          },
+          {
+            id: "cp2",
+            slug: "sentry",
+            name: "Sentry",
+            kind: "mcp",
+            mcp_url: "https://mcp.sentry.dev/mcp",
+            connect_url: `${FOUNTAIN_BASE}/connections/cp2/start`,
+            env_key: "SENTRY_ACCESS_TOKEN",
+          },
+        ],
+      });
+    }
 
     if (p === "/api/agents" && method === "GET") return json({ data: state.agents });
     if (p === "/api/agents" && method === "POST") {
+      const bad = badAgent(body);
+      if (bad) return json(bad, 422);
       const agent = { id: `a${state.agents.length + 1}`, ...body };
       state.agents.push(agent);
       return json({ data: agent });
@@ -265,7 +384,11 @@ Bun.serve({
         state.agents = state.agents.filter((a) => a.id !== agentId);
         return new Response(null, { status: 204 });
       }
-      if (method === "PUT") Object.assign(agent, body);
+      if (method === "PUT") {
+        const bad = badAgent(body);
+        if (bad) return json(bad, 422);
+        Object.assign(agent, body);
+      }
       return json({ data: agent });
     }
 

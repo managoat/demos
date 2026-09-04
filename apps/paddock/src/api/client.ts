@@ -20,6 +20,8 @@
 import type {
   Agent,
   Catalog,
+  Connection,
+  ConnectionProvider,
   Conversation,
   Environment,
   LogEvent,
@@ -49,6 +51,23 @@ export class ApiError extends Error {
 
 /** Where a secret lives. Two genuinely different things — see `lib/machine.ts`. */
 export type SecretParent = "environments" | "vaults";
+
+/**
+ * A feature this Fountain does not have, as `null` rather than an empty list.
+ *
+ * The distinction is load-bearing and an earlier version of this lost it. "The
+ * broker is off for this account, so connections do not exist" and "the broker
+ * is on and you have not connected anything" are different facts, and the
+ * Machine panel says a different — and differently *true* — thing about
+ * credentials in each. Collapsing both to `[]` made the panel guess.
+ *
+ * Only for reads whose absence is a real deployment state, never for a write:
+ * a swallowed 404 there would look like a save that worked.
+ */
+function absentAsNull<T>(err: unknown): T[] | null {
+  if (err instanceof ApiError && (err.status === 403 || err.status === 404 || err.status === 501)) return null;
+  throw err;
+}
 
 /**
  * Fountain, through paddock.
@@ -126,6 +145,32 @@ export class FountainClient {
 
   async listVaults(): Promise<Vault[]> {
     return (await this.json<{ data: Vault[] }>("GET", "/api/vaults")).data;
+  }
+
+  // ── connections: read-only, and absent where nothing is brokered ──────────
+
+  /**
+   * The owner's connections, or `null` where this account has none to have.
+   *
+   * A 404 here is `connections_not_enabled`, which every Fountain that does not
+   * broker for this person answers — a self-hosted one, or an account not
+   * enrolled. Connections exist only where a token can be held *outside* the
+   * sandbox, and without the broker there is nowhere to hold it. Not an error,
+   * and not the same as an empty list: `null` is the panel's evidence that this
+   * Fountain brokers nothing for this person, which changes what is true about
+   * every credential on the machine.
+   */
+  listConnections(): Promise<Connection[] | null> {
+    return this.json<{ data: Connection[] }>("GET", "/api/connections")
+      .then((r) => r.data)
+      .catch((err) => absentAsNull<Connection>(err));
+  }
+
+  /** Where the owner goes to connect one. Same 404 rule as above. */
+  listConnectionProviders(): Promise<ConnectionProvider[] | null> {
+    return this.json<{ data: ConnectionProvider[] }>("GET", "/api/connections/providers")
+      .then((r) => r.data)
+      .catch((err) => absentAsNull<ConnectionProvider>(err));
   }
 
   createVault(input: { name: string }): Promise<Vault> {
