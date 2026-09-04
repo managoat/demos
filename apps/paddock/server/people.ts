@@ -20,7 +20,7 @@
  * separation is the permission model.
  */
 import { ownPaddock } from "./auth";
-import { actorLabel, authenticate, paddockAccess, requireOwner, type AppContext } from "./context";
+import { actorLabel, authenticate, paddockAccess, requireClaimed, requireOwner, type AppContext } from "./context";
 import { randomToken } from "./crypto";
 import type { Role } from "./db";
 import { hub } from "./hub";
@@ -54,7 +54,9 @@ function paddockDto(ctx: AppContext, paddockId: string, role: Role, tabs: string
     // owner calls their machine is not part of the loan.
     name: role === "guest" ? "" : paddock.name,
     role,
-    ownerEmail: paddock.owner_email,
+    // Blank while unclaimed: there is no owner to name yet, and the anonymous
+    // owner already knows they are the person looking at it.
+    ownerEmail: paddock.owner_email ?? "",
     tabs,
     here: hub.present(paddock.id),
   };
@@ -79,6 +81,10 @@ export async function show(ctx: AppContext, req: Request): Promise<Response> {
   if (id.kind === "guest") {
     return json({ data: paddockDto(ctx, id.guest.paddock_id, "guest", [id.guest.conversation_id]) });
   }
+  // A starter's own machine is the unclaimed one their session names. Asking
+  // `ownPaddock` would ask for the first computer of an account that does not
+  // exist yet, which is not a question with a right answer.
+  if (id.kind === "starter") return json({ data: paddockDto(ctx, id.paddock.id, "owner", null) });
   return json({ data: paddockDto(ctx, ownPaddock(ctx, id.user.email).id, "owner", null) });
 }
 
@@ -108,6 +114,7 @@ export async function addMember(ctx: AppContext, req: Request, paddockId: string
   const id = await authenticate(ctx, req);
   const access = paddockAccess(ctx, id, paddockId);
   requireOwner(access.role);
+  requireClaimed(access, "invite somebody");
   const email = normalizeEmail((await readJson(req)).email);
   if (!isEmail(email)) throw new HttpError(422, "bad_email", "That is not an email address.");
   if (email === access.paddock.owner_email) throw new HttpError(422, "already_owner", "That is you.");
@@ -137,6 +144,10 @@ export async function mintInvite(ctx: AppContext, req: Request, paddockId: strin
   const id = await authenticate(ctx, req);
   const access = paddockAccess(ctx, id, paddockId);
   requireOwner(access.role);
+  // A link is the widest thing this app hands out: it lets a stranger prompt
+  // the machine with no account at all, on whoever is paying. Before a claim
+  // that is this application, which is not a bill anybody chose to pick up.
+  requireClaimed(access, "share a link to it");
   const evicted = ctx.db.revokeGuests(access.paddock.id, conversationId);
   ctx.db.setInvite(access.paddock.id, conversationId, randomToken(18));
   hub.publish(access.paddock.id, "people", { tab: conversationId, relinked: true, evicted });

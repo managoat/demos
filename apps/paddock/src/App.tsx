@@ -2,6 +2,12 @@
  * Paddock: one persistent machine per person, terminal tabs on it, and a panel
  * that says what the machine actually has.
  *
+ * The first thing a visitor sees is their own computer starting, not a
+ * registration wall: with no session and no invite link, `POST /api/start`
+ * opens one on a claimable Fountain principal and Terminal 1 comes up. Signing
+ * in later *claims* that exact machine — same disk, same history — rather than
+ * building a second one. See `server/starter.ts`.
+ *
  * Nothing about the box lives in this browser. The machine is found from the
  * conversation list (`tabs.findBox`), the tabs are derived from it
  * (`tabs.tabsOf`), what is installed is read out of the machine's own receipt
@@ -19,6 +25,7 @@ import { Details } from "./components/Details";
 import { Setup } from "./components/Setup";
 import { People } from "./components/People";
 import { Upgrade } from "./components/Upgrade";
+import { Claim, remaining } from "./components/Claim";
 import { Tabs } from "./components/Tabs";
 import { Terminal } from "./components/Terminal";
 import { Workspaces } from "./components/Workspaces";
@@ -26,7 +33,7 @@ import { defaultChoice, ensureIdentity, isPaddockAgent, type BootStep, type Iden
 import { boxDrift, applyKeep, applyTodo, configRev, desiredItems, primaryRepoPath, withRev } from "./lib/machine";
 import { parseReceipt, decodeFile, type Receipt } from "./lib/protocol";
 import { completeLoginIfCallback } from "./lib/oauth";
-import { describePaddockError, paddock, type Me, type PaddockDto, type Reachable, type TabPeopleDto } from "./api/paddock";
+import { describePaddockError, paddock, type Me, type PaddockDto, type Reachable, type Role, type TabPeopleDto } from "./api/paddock";
 import { applyPrompt, bootstrapPrompt, reconcilePrompt, welcomePrompt, RECEIPT_PATH, WORK_ROOT } from "../shared/spec";
 import { canPrompt, channelFor, findBox, holder, nextSlug, opsTab, OPS_SLUG, staleTabs, tabsOf, visibleTabs } from "../shared/tabs";
 
@@ -47,11 +54,37 @@ export function App() {
   const [checked, setChecked] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
+  /**
+   * Who this browser is, settled once — and if that is nobody, a computer.
+   *
+   * The old branch here was "no session, show the sign-in wall". A visitor who
+   * has never been here does not want a form, they want the thing the form is
+   * in front of, so this asks the server for a machine instead. It is not
+   * unconditional: `anonymousStart` says whether this deployment offers one at
+   * all, and a deployment that does not falls back to exactly the old
+   * behaviour, which is why the sign-in screen is still here.
+   */
   const refreshMe = useCallback(async () => {
-    try {
-      setMe(await paddock.me());
-    } catch {
+    const existing = await paddock.me().catch(() => null);
+    if (existing) {
+      setMe(existing);
+      setChecked(true);
+      return;
+    }
+    const offered = await paddock.config().then((c) => c.anonymousStart).catch(() => false);
+    if (!offered) {
       setMe(null);
+      setChecked(true);
+      return;
+    }
+    try {
+      setMe(await paddock.start(startKey()));
+    } catch (err) {
+      // Out of introductory credit, at capacity, or Fountain is unreachable.
+      // The sign-in screen is the honest fallback: it is a real way in, and
+      // the message says why the easy one did not happen.
+      setMe(null);
+      setAuthError(describePaddockError(err));
     } finally {
       setChecked(true);
     }
@@ -68,9 +101,20 @@ export function App() {
       try {
         const cb = await completeLoginIfCallback();
         if (cb) {
-          setMe(await paddock.signIn(cb.apiKey));
-          setChecked(true);
+          const next = await paddock.signIn(cb.apiKey);
           window.location.hash = cb.hash || "";
+          // A claim turned an anonymous owner into a registered one on the same
+          // machine. Everything in this tree — the identity, the role, the
+          // reachable computers, the refs keyed to the old session — moved at
+          // once, so reload rather than reconcile, remembering the computer so
+          // the reload lands back on it. Same call the guest upgrade makes.
+          if (next.claimedFrom) {
+            rememberWorkspace(next.paddockId);
+            window.location.reload();
+            return;
+          }
+          setMe(next);
+          setChecked(true);
           return;
         }
         if (joinToken) {
@@ -128,7 +172,7 @@ export function App() {
       // paddocks and every ref keyed to the old session all moved at once.
       // The seat is written down first — they now own a machine too, and
       // landing on that empty one instead is exactly the seat being lost.
-      if (next.upgradedFrom) {
+      if (next.upgradedFrom || next.claimedFrom) {
         rememberWorkspace(next.paddockId);
         window.location.reload();
       }
@@ -226,6 +270,38 @@ function rememberWorkspace(id: string | null): void {
   }
 }
 
+/**
+ * This browser's start key, made once and kept.
+ *
+ * The server derives the computer's id from it, which is what makes starting
+ * idempotent: a dropped response, a refresh mid-flight, or React
+ * double-invoking the boot effect all name the same machine rather than
+ * opening a second one on this demo's money.
+ *
+ * A browser that will not store gets a fresh computer per visit. That is the
+ * honest degradation — the alternative is pretending a machine persisted for
+ * somebody who gave us nothing to recognise them by — and it is exactly what
+ * happens today to anyone who clears their cookies.
+ */
+const START_KEY = "paddock.start";
+
+function startKey(): string {
+  try {
+    const kept = localStorage.getItem(START_KEY);
+    if (kept) return kept;
+  } catch {
+    return crypto.randomUUID();
+  }
+  const made = crypto.randomUUID();
+  try {
+    localStorage.setItem(START_KEY, made);
+  } catch {
+    // Storage went away between the read and the write. One visit, one
+    // computer; nothing else here depends on it.
+  }
+  return made;
+}
+
 /** `#/join/<token>` — the anonymous way in. */
 function joinTokenFromHash(): string | null {
   const m = /^#\/join\/([^/?#]+)/.exec(window.location.hash);
@@ -261,6 +337,27 @@ function Paddock({
   const client = useMemo(() => new FountainClient(`/f/${paddockId ?? "none"}`), [paddockId]);
   const role = me.role;
   const isOwner = role === "owner";
+  /**
+   * The owner of a computer nobody has claimed yet.
+   *
+   * They are a full owner of Terminal 1 and of the files, and not an owner of
+   * anything that costs more or lets somebody else in — a second terminal, the
+   * config surface, invitations, rebuild. Every one of those is refused by the
+   * server (`context.requireClaimed`); what this flag does is stop offering
+   * buttons that would only come back with a refusal.
+   */
+  const unclaimed = me.kind === "starter";
+  /**
+   * What the read-only panels are told this person is.
+   *
+   * A starter really is the owner — `role` says so, and the server agrees —
+   * but every control those panels gate on `owner` is one the server refuses
+   * until the computer is claimed: apply, reconcile, open a fresh tab, invite,
+   * mint a link. Handing them the guest view is how they get a panel that
+   * describes the machine without offering a single button that comes back
+   * with `claim_required`.
+   */
+  const panelRole: Role = unclaimed ? "guest" : (role ?? "guest");
   const [people, setPeople] = useState<PaddockDto | null>(null);
   /** Who is in the tab being looked at. Invitations are per tab, so this is too. */
   const [tabPeople, setTabPeople] = useState<TabPeopleDto | null>(null);
@@ -451,6 +548,13 @@ function Paddock({
       setStep("waking");
       await refreshConversations();
     } catch (err) {
+      // A box that cannot be started because the grant is spent is not a
+      // failure to retry — "Try again" would fail identically forever — so it
+      // is worth naming the one thing that would actually change the answer.
+      if (unclaimed && err instanceof ApiError && (err.status === 402 || err.code === "insufficient_credits")) {
+        setFatal("This computer has used up its free time. Claim it with a Fountain account to keep going.");
+        return;
+      }
       setFatal(describeError(err));
     }
   }
@@ -482,18 +586,31 @@ function Paddock({
   }
 
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
+  /**
+   * The introductory grant is spent, or the computer's time is up.
+   *
+   * Kept as state rather than read off an error each time, because it is a
+   * property of the machine from here on: every turn will fail the same way
+   * until somebody claims it, and the prompt should say so instead of failing
+   * again once per attempt.
+   */
+  const [halted, setHalted] = useState<string | null>(null);
 
   /**
-   * A guest signing in. The server sees the guest cookie on the way through
-   * and turns that seat into a real membership before issuing the new session
-   * — so this is the same call the sign-in screen makes, and the upgrade is
-   * the server's doing rather than a second request that could half-happen.
+   * Signing in from inside the app: a guest keeping their seat, or the
+   * anonymous owner of an unclaimed computer claiming it.
+   *
+   * One function for both, because it is one call. The server sees whichever
+   * session is on the way through and does the corresponding thing — promote
+   * the guest, or attach this account to the machine's principal — before it
+   * issues the new session, so neither can half-happen the way two requests
+   * could. Which of them it did comes back in the answer.
    */
   async function onUpgrade(apiKey: string) {
     setUpgradeError(null);
     try {
       const next = await paddock.signIn(apiKey);
-      if (next.upgradedFrom) {
+      if (next.upgradedFrom || next.claimedFrom) {
         rememberWorkspace(next.paddockId);
         window.location.reload();
       } else onMe(next);
@@ -736,6 +853,18 @@ function Paddock({
     };
   }, [paddockId, refreshConversations]);
 
+  /**
+   * A sign-in that worked while its claim did not.
+   *
+   * They are signed in and standing on a machine of their own, which is the
+   * right outcome — but it is not the machine they were just using, and that
+   * has to be said. The alternative is a computer full of somebody's work
+   * silently becoming a different, empty one.
+   */
+  useEffect(() => {
+    if (me.claimFailed) setNotice(me.claimFailed);
+  }, [me.claimFailed]);
+
   // A tab that was waiting for the box gets its turn the moment it frees up.
   useEffect(() => {
     if (machineHolder) return;
@@ -766,6 +895,13 @@ function Paddock({
     } catch (err) {
       if (err instanceof ApiError && (err.code === "sandbox_at_capacity" || err.code === "conversation_busy")) {
         setQueued((q) => ({ ...q, [slug]: text }));
+        return;
+      }
+      // Money, not machinery. Fountain answers `insufficient_credits` at every
+      // door that spends, so this is the same answer whether the grant ran out
+      // mid-turn or the computer's time expired between turns.
+      if (unclaimed && err instanceof ApiError && (err.status === 402 || err.code === "insufficient_credits")) {
+        setHalted("This computer has used up its free time.");
         return;
       }
       setNotice(describeError(err));
@@ -951,6 +1087,7 @@ function Paddock({
         step={step}
         name={place?.name ?? ""}
         another={!!place && !place.original}
+        unclaimed={unclaimed}
         error={fatal}
         onRetry={() => void retryBoot()}
       />
@@ -966,7 +1103,7 @@ function Paddock({
         activeId={paddockId}
         activeStatus={sandbox?.status ?? null}
         me={me.label}
-        guest={me.kind === "guest"}
+        session={me.kind}
         onSelect={onSelectWorkspace}
         onAdd={onAddComputer}
         onRename={onRenameComputer}
@@ -981,6 +1118,22 @@ function Paddock({
           </div>
         )}
 
+        {/*
+          The offer, in front of somebody rather than behind a menu — and
+          persistent rather than a modal. Nothing about it interrupts a person
+          who only wants to keep typing in Terminal 1, which is the whole
+          reason they were given a machine before an account.
+        */}
+        {unclaimed && side !== "account" && (
+          <div className="notice claim-offer" onClick={() => setSide("account")}>
+            <span>
+              This computer is not claimed{claimLeft(me) ? ` — it stops in ${claimLeft(me)}` : ""}. Claim it and it stays yours,
+              with everything on it.
+            </span>
+            <span className="notice-dismiss">Claim →</span>
+          </div>
+        )}
+
         <div className="split">
           <main className="conversation-panel">
             <Tabs
@@ -990,8 +1143,8 @@ function Paddock({
               onOpen={() => void openTab()}
               onClose={(slug) => void closeTab(slug)}
               opening={opening}
-              canClose={isOwner}
-              canOpen={isOwner}
+              canClose={isOwner && !unclaimed}
+              canOpen={isOwner && !unclaimed}
             />
             {active && (
               <Terminal
@@ -1002,6 +1155,7 @@ function Paddock({
                 onSend={(text) => void send(active.slug, text)}
                 onInterrupt={() => void client.interrupt(active.conversation.id).catch(() => undefined)}
                 loading={!loadedTabs[active.conversation.id]}
+                halted={halted ? { line: halted, action: "Claim this computer", onAction: () => setSide("account") } : null}
               />
             )}
           </main>
@@ -1019,7 +1173,11 @@ function Paddock({
             */}
             <nav className="panel-tabs">
               {(["details", "setup", "files", "people"] as const)
-                .filter((which) => which !== "setup" || role === "owner")
+                // Setup is the owner's, and an unclaimed computer is not one
+                // anybody may change yet — the server refuses every write on it
+                // until it is claimed, so offering the editors would only be
+                // offering refusals.
+                .filter((which) => which !== "setup" || (role === "owner" && !unclaimed))
                 .map((which) => (
                   <button key={which} className={side === which ? "on" : ""} onClick={() => setSide(which)}>
                     {which === "details"
@@ -1031,19 +1189,30 @@ function Paddock({
                           : `People${people && people.here.length > 1 ? ` (${people.here.length})` : ""}`}
                   </button>
                 ))}
-              {me.kind === "guest" && (
+              {(me.kind === "guest" || unclaimed) && (
                 <button className={`upgrade-tab ${side === "account" ? "on" : ""}`} onClick={() => setSide("account")}>
-                  Sign in
+                  {unclaimed ? "Claim" : "Sign in"}
                 </button>
               )}
             </nav>
             {side === "account" ? (
-              <Upgrade handle={me.label} onKey={(key) => void onUpgrade(key)} error={upgradeError} />
+              // Two panels behind one strip button, because they are the same
+              // offer to two different people: a guest is being offered a seat
+              // of their own, somebody on an unclaimed computer is being
+              // offered the machine they are already standing on.
+              unclaimed ? (
+                <Claim claim={me.claim} onKey={(key) => void onUpgrade(key)} error={upgradeError} />
+              ) : (
+                <Upgrade handle={me.label} onKey={(key) => void onUpgrade(key)} error={upgradeError} />
+              )
             ) : side === "people" ? (
               people && active ? (
                 <People
                   tab={tabPeople}
-                  role={role ?? "guest"}
+                  // An unclaimed computer cannot let anybody in — the server
+                  // refuses both the invitation and the link — so the panel is
+                  // shown the way a visitor sees it: who is here, no doors.
+                  role={panelRole}
                   meLabel={me.label}
                   ownerEmail={people.ownerEmail}
                   here={people.here}
@@ -1117,8 +1286,12 @@ function Paddock({
                   onApply={() => void apply()}
                   onReconcile={() => void reconcile()}
                   onOpenTab={() => void openTab()}
-                  onSetup={role === "owner" ? () => setSide("setup") : null}
-                  role={role ?? "guest"}
+                  onSetup={role === "owner" && !unclaimed ? () => setSide("setup") : null}
+                  // Apply, "ask the box what it has" and "open a fresh tab" are
+                  // all owner-gated in this panel and all claim-gated on the
+                  // server, so an unclaimed computer is shown the reading and
+                  // none of the three.
+                  role={panelRole}
                 />
               )
             ) : (
@@ -1129,6 +1302,11 @@ function Paddock({
       </div>
     </div>
   );
+}
+
+/** How long an unclaimed computer has left, or nothing when it has no clock. */
+function claimLeft(me: Me): string | null {
+  return me.claim ? remaining(me.claim.expiresAt) : null;
 }
 
 function Splash({ line, error }: { line: string; error?: boolean }) {

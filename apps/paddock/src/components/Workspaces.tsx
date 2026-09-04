@@ -21,7 +21,7 @@ export function Workspaces({
   activeId,
   activeStatus,
   me,
-  guest,
+  session,
   onSelect,
   onAdd,
   onRename,
@@ -31,7 +31,13 @@ export function Workspaces({
   activeId: string | null;
   activeStatus: string | null;
   me: string;
-  guest: boolean;
+  /**
+   * Which of the three kinds of person is looking. Not a boolean any more:
+   * a `starter` owns the computer in front of them but has no account to hang
+   * a second off and no session to sign out of, which is neither of the two
+   * answers `guest` could give.
+   */
+  session: "user" | "guest" | "starter";
   onSelect: (id: string) => void;
   onAdd: () => Promise<void>;
   onRename: (id: string, name: string) => Promise<void>;
@@ -72,9 +78,11 @@ export function Workspaces({
           activeStatus={activeStatus}
           onSelect={onSelect}
           onRename={onRename}
-          /* A guest has no account to hang a machine off; the Sign in panel is
-             the offer that makes sense for them, and it is already on screen. */
-          onAdd={guest ? undefined : add}
+          /* A guest has no account to hang a machine off, and somebody on an
+             unclaimed computer has not got one yet either; the Sign in and
+             Claim panels are the offers that make sense for them, and both are
+             already on screen. */
+          onAdd={session === "user" ? add : undefined}
           adding={adding}
         />
         <WorkspaceGroup
@@ -94,11 +102,20 @@ export function Workspaces({
           <span className="account-avatar">{initials(me)}</span>
           <span className="account-copy">
             <span title={me}>{me}</span>
-            <small>{guest ? "Guest session" : "Signed in"}</small>
+            <small>{session === "guest" ? "Guest session" : session === "starter" ? "Unclaimed computer" : "Signed in"}</small>
           </span>
-          <button type="button" className="account-action" onClick={onSignOut} title={guest ? "Leave" : "Sign out"}>
-            ↗
-          </button>
+          {/*
+            No way out for a starter, on purpose. There is no account to sign
+            out of, and the session cookie is the only thing that reaches this
+            machine — an "↗" that read as tidying up would quietly be the
+            button that throws the computer away. Claiming is the way forward
+            and it is on screen.
+          */}
+          {session !== "starter" && (
+            <button type="button" className="account-action" onClick={onSignOut} title={session === "guest" ? "Leave" : "Sign out"}>
+              ↗
+            </button>
+          )}
         </div>
       </div>
     </aside>

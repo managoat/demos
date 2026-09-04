@@ -23,7 +23,7 @@
  * cannot reach or an identity pointing at nothing. The report says what
  * actually happened, including what would not go.
  */
-import { ownerClient, paddockAccess, requireOwner, type AppContext } from "./context";
+import { ownerClient, paddockAccess, requireClaimed, requireOwner, type AppContext } from "./context";
 import type { ConversationSummary, FountainClient } from "./fountain";
 import { asHttpError } from "./fountain";
 import { authenticate } from "./context";
@@ -45,6 +45,10 @@ export async function rebuild(ctx: AppContext, req: Request, paddockId: string):
   const id = await authenticate(ctx, req);
   const access = paddockAccess(ctx, id, paddockId);
   requireOwner(access.role);
+  // Throwing away the machine somebody is being lent is not a decision they
+  // get to make before it is theirs — and after a rebuild there would be
+  // nothing left to claim but an empty box.
+  requireClaimed(access, "rebuild it");
   return json({ data: await retire(ctx, access.paddock, access.original, { settings: false }) });
 }
 
@@ -52,6 +56,7 @@ export async function reset(ctx: AppContext, req: Request, paddockId: string): P
   const id = await authenticate(ctx, req);
   const access = paddockAccess(ctx, id, paddockId);
   requireOwner(access.role);
+  requireClaimed(access, "start it over");
   return json({ data: await retire(ctx, access.paddock, access.original, { settings: true }) });
 }
 

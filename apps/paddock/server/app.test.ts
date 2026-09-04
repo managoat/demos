@@ -15,9 +15,16 @@ import { Db } from "./db";
 import { hub } from "./hub";
 import { channelFor, OPS_SLUG } from "../shared/tabs";
 import { MAX_COMPUTERS } from "./computers";
+import { sweepExpired } from "./starter";
+import { Database } from "bun:sqlite";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const OWNER = "owner@example.com";
 const OTHER = "other@example.com";
+/** This application's own Fountain credential, which opens claimable principals. */
+const APP_KEY = "ftn_app";
 const BOX = "sb-test-1";
 const AGENT = "a1";
 
@@ -61,30 +68,140 @@ function conv(id: string, channel: string, at: string) {
 
 let ctx: AppContext;
 let route: (req: Request) => Promise<Response>;
-let upstream: { method: string; path: string }[] = [];
+let upstream: { method: string; path: string; key: string }[] = [];
 const realFetch = globalThis.fetch;
 
+/**
+ * The fake Fountain's claimable principals (fountain#1551).
+ *
+ * Modelled on the two properties paddock actually depends on, rather than on
+ * the whole API. `principal_id` never changes, so a test can assert that a
+ * claim did not move the machine; and both create and claim are idempotent by
+ * `Idempotency-Key`, with create handing back a *new* pair of secrets each
+ * time — which is what makes a replay dangerous and worth testing.
+ */
+interface Grant {
+  id: string;
+  principal_id: string;
+  api_key: string;
+  claim_token: string;
+  status: string;
+  expires_at: string | null;
+  claimed_by: string | null;
+}
+let grants: Map<string, Grant>;
+let grantByIdem: Map<string, string>;
+let grantSeq = 0;
+
+/**
+ * What the next claimable-users call should do instead of working. One hook
+ * rather than a flag per failure: every interesting case here is "Fountain
+ * answered X once", and a test that has to reach for two flags is a test about
+ * the harness.
+ */
+let claimableHook: ((method: string, path: string) => Response | null) | null = null;
+
+/** How long a grant lasts in these tests, and where its clock is wound to. */
+let grantExpiresAt: string | null = "2099-01-01T00:00:00.000Z";
+
+function claimableRoutes(method: string, path: string, headers: Record<string, string>, body: Record<string, unknown>): Response | null {
+  const hooked = claimableHook?.(method, path);
+  if (hooked) return hooked;
+
+  if (path === "/api/claimable-users" && method === "POST") {
+    const idem = headers["idempotency-key"] ?? "";
+    const known = idem ? grantByIdem.get(idem) : undefined;
+    const grant: Grant = known
+      ? grants.get(known)!
+      : { id: `cl-${++grantSeq}`, principal_id: `pr-${++grantSeq}`, api_key: "", claim_token: "", status: "unclaimed", expires_at: grantExpiresAt, claimed_by: null };
+    // New secrets on every create, replay included: Fountain kept neither, so
+    // it has nothing to give back twice, and the previous pair stops working.
+    grant.api_key = `ftn_principal_${++grantSeq}`;
+    grant.claim_token = `clt_${++grantSeq}`;
+    grants.set(grant.id, grant);
+    if (idem) grantByIdem.set(idem, grant.id);
+    return Response.json({ data: grant });
+  }
+
+  const m = /^\/api\/claimable-users\/([^/]+)(\/claim)?$/.exec(path);
+  if (!m) return null;
+  const grant = grants.get(m[1]!);
+  if (!grant) return Response.json({ error: "not_found" }, { status: 404 });
+
+  if (m[2]) {
+    if (method !== "POST") return Response.json({ error: "not_found" }, { status: 404 });
+    const claimer = (headers.authorization ?? "").replace(/^Bearer /, "");
+    if (grant.status === "claimed") {
+      // Idempotent for the account that already holds it — that is what lets a
+      // lost response be finished — and a refusal for anybody else.
+      if (grant.claimed_by !== claimer) return Response.json({ error: "already_claimed" }, { status: 409 });
+      return Response.json({ data: { user: { id: `u-${claimer}`, email: emailFor(claimer) }, principal_id: grant.principal_id, status: "claimed", api_key: grant.api_key } });
+    }
+    if (grant.status !== "unclaimed") return Response.json({ error: "gone" }, { status: 410 });
+    if (body.claim_token !== grant.claim_token) return Response.json({ error: "forbidden" }, { status: 403 });
+    grant.status = "claimed";
+    grant.claimed_by = claimer;
+    grant.api_key = `ftn_claimed_${++grantSeq}`;
+    return Response.json({ data: { user: { id: `u-${claimer}`, email: emailFor(claimer) }, principal_id: grant.principal_id, status: "claimed", api_key: grant.api_key } });
+  }
+
+  if (method === "DELETE") {
+    if (grant.status === "claimed") return Response.json({ error: "conflict" }, { status: 409 });
+    grant.status = "released";
+    return new Response(null, { status: 204 });
+  }
+  const { api_key: _k, claim_token: _t, claimed_by: _c, ...rest } = grant;
+  return Response.json({ data: rest });
+}
+
+/** The fake's one identity rule, in one place: a key names its owner. */
+function emailFor(key: string): string {
+  return key === "ftn_owner" ? OWNER : `${key}@example.com`;
+}
+
 beforeEach(async () => {
-  const config = { ...loadConfig({ DATA_DIR: "/tmp", PADDOCK_SECRET: "0123456789abcdef0123" }), dbPath: ":memory:" };
+  const config = {
+    ...loadConfig({
+      DATA_DIR: "/tmp",
+      PADDOCK_SECRET: "0123456789abcdef0123",
+      // The feature ships behind these two, and both are needed: the flag on
+      // its own leaves `anonymousStart` false, which is the point of it.
+      ANONYMOUS_START: "1",
+      FOUNTAIN_APP_KEY: APP_KEY,
+    }),
+    dbPath: ":memory:",
+  };
   ctx = { config, db: new Db(":memory:"), cipher: await Cipher.from(config.secret) };
   route = buildRouter(ctx);
   upstream = [];
   hub.reset();
   machinePaddock = null;
+  grants = new Map();
+  grantByIdem = new Map();
+  claimableHook = null;
+  grantExpiresAt = "2099-01-01T00:00:00.000Z";
 
   // A fake Fountain. Only the calls the proxy actually makes are answered;
   // anything else 404s, so an unexpected upstream call fails a test loudly.
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     const method = (init?.method ?? "GET").toUpperCase();
-    upstream.push({ method, path: url.pathname });
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    const key = (headers.authorization ?? "").replace(/^Bearer /, "");
+    // The key is recorded, not just the path: after a claim the machine has to
+    // run on the credential the claim handed back, and nothing but the key on
+    // the wire can show that it does.
+    upstream.push({ method, path: url.pathname, key });
     if (url.pathname === "/api/auth/me") {
       // One identity per key, so a test can be somebody else. The fake used to
       // answer OWNER for every key, which quietly made every "another person"
       // scenario a test of the owner signing in as themselves.
-      const auth = ((init?.headers ?? {}) as Record<string, string>).authorization ?? "";
-      const key = auth.replace(/^Bearer /, "");
-      return Response.json({ id: `u-${key}`, email: key === "ftn_owner" ? OWNER : `${key}@example.com` });
+      return Response.json({ id: `u-${key}`, email: emailFor(key) });
+    }
+    if (url.pathname.startsWith("/api/claimable-users")) {
+      const parsed = url.pathname === "/api/claimable-users" || method === "POST" ? JSON.parse(String(init?.body ?? "{}")) : {};
+      const answer = claimableRoutes(method, url.pathname, headers, parsed as Record<string, unknown>);
+      if (answer) return answer;
     }
     if (url.pathname === "/api/conversations" && method === "GET") return Response.json({ data: conversations() });
     if (url.pathname === "/api/conversations" && method === "POST") {
@@ -107,6 +224,11 @@ beforeEach(async () => {
     if (/^\/api\/agents\/[^/]+$/.test(url.pathname)) return Response.json({ data: { id: AGENT, name: "Paddock", runtime: "claude", model: "m" } });
     if (method === "DELETE" && /^\/api\/(agents|environments|vaults)\/[^/]+$/.test(url.pathname)) return new Response(null, { status: 204 });
     if (/^\/api\/environments\/[^/]+$/.test(url.pathname)) return Response.json({ data: { id: "e1", name: "Paddock" } });
+    // First run makes all three. The fake answered none of them until an
+    // unclaimed computer had to build its own machine through this proxy.
+    if (method === "POST" && url.pathname === "/api/environments") return Response.json({ data: { id: "e1", name: "Paddock" } });
+    if (method === "POST" && url.pathname === "/api/vaults") return Response.json({ data: { id: "v1", name: "Paddock" } });
+    if (method === "POST" && url.pathname === "/api/agents") return Response.json({ data: { id: AGENT, name: "Paddock", runtime: "claude", model: "m" } });
     if (/^\/api\/(environments|vaults)\/[^/]+\/secrets$/.test(url.pathname)) return Response.json({ data: [] });
     if (url.pathname === "/api/connections" || url.pathname === "/api/connections/providers") return Response.json({ data: [] });
     // Only this paddock's box exists upstream; the proxy is what refuses the
@@ -152,6 +274,22 @@ async function paddockFor(email: string): Promise<{ cookie: string; id: string }
   // on. Tests with a second computer are explicit about which is which.
   machinePaddock ??= me.paddockId;
   return { cookie, id: me.paddockId };
+}
+
+/**
+ * A visitor with nothing: no account, no key, no invite. They get a computer.
+ *
+ * `startKey` is the browser's, and the same one twice is the same browser
+ * twice — which is what every idempotence test below turns on.
+ */
+async function startComputer(startKey = "browser-1"): Promise<{ cookie: string; id: string; me: Record<string, unknown> }> {
+  const res = await call(null, "POST", "/api/start", { startKey });
+  expect(res.status).toBe(201);
+  const me = (await res.json()) as Record<string, unknown>;
+  const cookie = (res.headers.get("set-cookie") ?? "").split(";")[0]!;
+  const id = me.paddockId as string;
+  machinePaddock ??= id;
+  return { cookie, id, me };
 }
 
 /** Add a computer to an account that already has one, and give back its id. */
@@ -1010,5 +1148,560 @@ describe("a guest signing in", () => {
     const body = (await res.json()) as { upgradedFrom?: string; email: string };
     expect(body.upgradedFrom).toBeUndefined();
     expect(ctx.db.memberTabs(owner.id, body.email)).toEqual([]);
+  });
+});
+
+/**
+ * Starting a computer before there is anybody to own it, and claiming it.
+ * Issue #14, on fountain#1551.
+ *
+ * The two things worth writing down are at the ends of the flow. At the front:
+ * a visitor with nothing gets exactly one machine, however many times they ask
+ * — because every one of those is a real tenant on this application's bill. At
+ * the back: claiming changes who is behind the machine and nothing else, so
+ * every id a person could have come to depend on reads the same afterwards.
+ *
+ * In between is a permission boundary that is new rather than adapted. An
+ * anonymous owner is a full owner of one terminal and of nothing that spends
+ * more, invites anybody, or changes what the machine is made of.
+ */
+describe("starting a computer without an account", () => {
+  test("a visitor with no session gets one unclaimed computer, one session, and a real principal", async () => {
+    const { cookie, id, me } = await startComputer();
+
+    expect(me.kind).toBe("starter");
+    expect(me.role).toBe("owner");
+    expect(me.email).toBeNull();
+    expect(me.claim).toEqual({ status: "unclaimed", expiresAt: "2099-01-01T00:00:00.000Z" });
+    expect(me.paddocks).toHaveLength(1);
+
+    const row = ctx.db.getPaddock(id)!;
+    expect(row.claim_status).toBe("unclaimed");
+    expect(row.owner_email).toBeNull();
+    expect(row.fountain_principal_id).toBeTruthy();
+    // The machine runs on the principal's own credential, not on any user's.
+    expect(row.compute_key_enc).toBeTruthy();
+    expect(ctx.db.getUser("")).toBeNull();
+
+    // And the session is that computer's, not a guest's and not a user's.
+    const me2 = (await (await call(cookie, "GET", "/api/me")).json()) as Record<string, unknown>;
+    expect(me2.kind).toBe("starter");
+    expect(me2.paddockId).toBe(id);
+  });
+
+  test("the grant is opened on the application's key, never on anything the browser holds", async () => {
+    await startComputer();
+    const opened = upstream.find((u) => u.method === "POST" && u.path === "/api/claimable-users");
+    expect(opened?.key).toBe(APP_KEY);
+  });
+
+  test("a deployment without the flag does not offer it, and says so rather than 500ing", async () => {
+    const plain = { ...loadConfig({ DATA_DIR: "/tmp", PADDOCK_SECRET: "0123456789abcdef0123" }), dbPath: ":memory:" };
+    expect(plain.anonymousStart).toBe(false);
+    const off = buildRouter({ ...ctx, config: plain });
+    const res = await off(new Request("http://paddock.test/api/start", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }));
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { error: string }).error).toBe("start_unavailable");
+    // And the SPA is told, so it shows the sign-in screen instead of asking.
+    const cfg = (await (await off(new Request("http://paddock.test/api/config"))).json()) as { anonymousStart: boolean };
+    expect(cfg.anonymousStart).toBe(false);
+  });
+
+  test("a flag with no application key is still off — the credential is the feature", async () => {
+    expect(loadConfig({ DATA_DIR: "/tmp", PADDOCK_SECRET: "0123456789abcdef0123", ANONYMOUS_START: "1" }).anonymousStart).toBe(false);
+  });
+});
+
+describe("starting twice", () => {
+  test("a refresh finds the same computer rather than opening a second principal", async () => {
+    const first = await startComputer("same-browser");
+    upstream = [];
+    const second = await startComputer("same-browser");
+
+    expect(second.id).toBe(first.id);
+    expect(grants.size).toBe(1);
+    expect(upstream.filter((u) => u.path === "/api/claimable-users")).toEqual([]);
+  });
+
+  test("concurrent starts from one browser are one start — a replayed create would kill the first key", async () => {
+    const [a, b] = await Promise.all([call(null, "POST", "/api/start", { startKey: "racy" }), call(null, "POST", "/api/start", { startKey: "racy" })]);
+    const [ja, jb] = (await Promise.all([a.json(), b.json()])) as Record<string, unknown>[];
+
+    expect(ja!.paddockId).toBe(jb!.paddockId as string);
+    expect(grants.size).toBe(1);
+    expect(upstream.filter((u) => u.method === "POST" && u.path === "/api/claimable-users")).toHaveLength(1);
+
+    // The stored credential is the one Fountain last handed out. A second
+    // create would have rotated it and left this row holding a dead key.
+    const row = ctx.db.getPaddock(ja!.paddockId as string)!;
+    expect(await ctx.cipher.decrypt(row.compute_key_enc!)).toBe([...grants.values()][0]!.api_key);
+  });
+
+  test("a start with a live session answers with that session, not with another machine", async () => {
+    const owner = await paddockFor(OWNER);
+    const res = await call(owner.cookie, "POST", "/api/start", { startKey: "irrelevant" });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { kind: string }).kind).toBe("user");
+    expect(grants.size).toBe(0);
+  });
+
+  test("an invite link is joined without an unclaimed computer being opened first", async () => {
+    const owner = await paddockFor(OWNER);
+    const minted = (await (await call(owner.cookie, "POST", `/api/paddock/${owner.id}/tabs/c1/invite`)).json()) as { data: { inviteUrl: string } };
+    const token = minted.data.inviteUrl.split("/join/")[1]!;
+
+    const res = await call(null, "POST", `/api/join/${token}`);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { kind: string }).kind).toBe("guest");
+    // The whole point of the client trying the hash first: a guest must not
+    // arrive holding a machine of their own that nobody asked for.
+    expect(grants.size).toBe(0);
+  });
+});
+
+describe("what an unclaimed computer may do", () => {
+  test("Terminal 1 works: read it, prompt it, interrupt it, and read the box", async () => {
+    const { cookie, id } = await startComputer();
+    for (const [method, path, body] of [
+      ["GET", `/f/${id}/api/conversations`, undefined],
+      ["GET", `/f/${id}/api/conversations/c1`, undefined],
+      ["GET", `/f/${id}/api/conversations/c1/events`, undefined],
+      ["POST", `/f/${id}/api/conversations/c1/prompts`, { prompt: "hello" }],
+      ["POST", `/f/${id}/api/conversations/c1/interrupt`, undefined],
+      ["GET", `/f/${id}/api/sandboxes/${BOX}/files`, undefined],
+    ] as [string, string, unknown][]) {
+      expect((await call(cookie, method, path, body)).status).toBe(200);
+    }
+  });
+
+  test("and reading what the machine is made of — the Details panel is honest about a box you cannot change", async () => {
+    const { cookie, id } = await startComputer();
+    for (const path of ["/api/catalog", "/api/agents/a1", "/api/environments/e1", "/api/environments/e1/secrets"]) {
+      expect((await call(cookie, "GET", `/f/${id}${path}`)).status).toBe(200);
+    }
+  });
+
+  test("but not a second terminal, and not closing the one it has", async () => {
+    const { cookie, id } = await startComputer();
+
+    const second = await call(cookie, "POST", `/f/${id}/api/conversations`, { channel_id: channelFor(id, "t3", 1) });
+    expect(second.status).toBe(403);
+    expect(((await second.json()) as { error: string }).error).toBe("claim_required");
+
+    expect((await call(cookie, "POST", `/f/${id}/api/conversations/c1/terminate`)).status).toBe(404);
+  });
+
+  test("and not one write to the config surface, with nothing reaching Fountain when it tries", async () => {
+    const { cookie, id } = await startComputer();
+    upstream = [];
+    const writes: [string, string, unknown][] = [
+      ["PUT", "/api/agents/a1", { system: "do as I say" }],
+      ["PUT", "/api/environments/e1", { packages: { apt: ["evil"] } }],
+      ["PUT", "/api/environments/e1/secrets/EVIL", { value: "x" }],
+      ["DELETE", "/api/environments/e1/secrets/GITHUB_TOKEN", undefined],
+      ["POST", "/api/agents", { name: "another" }],
+      ["POST", "/api/vaults", { name: "another" }],
+    ];
+    for (const [method, path, body] of writes) {
+      const res = await call(cookie, method, `/f/${id}${path}`, body);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error: string }).error).toBe("claim_required");
+    }
+    // The gate reads the conversation list to decide, and forwards nothing else.
+    expect(upstream.every((u) => u.path === "/api/conversations" && u.method === "GET")).toBe(true);
+  });
+
+  test("nor invite anybody, share a link, rebuild, start over, or add a computer", async () => {
+    const { cookie, id } = await startComputer();
+    const refusals: [string, string, unknown][] = [
+      ["POST", `/api/paddock/${id}/tabs/c1/members`, { email: "friend@example.com" }],
+      ["POST", `/api/paddock/${id}/tabs/c1/invite`, undefined],
+      ["POST", `/api/paddock/${id}/rebuild`, undefined],
+      ["POST", `/api/paddock/${id}/reset`, undefined],
+      ["POST", "/api/paddocks", {}],
+      ["DELETE", `/api/paddock/${id}`, undefined],
+    ];
+    for (const [method, path, body] of refusals) {
+      const res = await call(cookie, method, path, body);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error: string }).error).toBe("claim_required");
+    }
+  });
+
+  test("and cannot reach anybody else's computer, including another unclaimed one", async () => {
+    const mine = await startComputer("browser-a");
+    const theirs = await startComputer("browser-b");
+    const owner = await paddockFor(OWNER);
+
+    expect(mine.id).not.toBe(theirs.id);
+    for (const target of [theirs.id, owner.id]) {
+      expect((await call(mine.cookie, "GET", `/api/paddock/${target}`)).status).toBe(404);
+      expect((await call(mine.cookie, "GET", `/f/${target}/api/conversations`)).status).toBe(404);
+    }
+  });
+
+  test("building the machine is allowed, because first run has to write the same records Setup does", async () => {
+    // The fake's machine is on somebody else's computer, so `machineOf` finds
+    // nothing on this one — which is the state first run is.
+    machinePaddock = "somebody-elses";
+    const { cookie, id } = await startComputer("fresh");
+    expect(id).not.toBe(machinePaddock);
+
+    expect((await call(cookie, "POST", `/f/${id}/api/environments`, { name: "Paddock" })).status).toBe(200);
+    expect((await call(cookie, "POST", `/f/${id}/api/agents`, { name: "Paddock" })).status).toBe(200);
+    expect((await call(cookie, "POST", `/f/${id}/api/conversations`, { channel_id: channelFor(id, "t1", 1) })).status).toBe(200);
+  });
+});
+
+describe("claiming", () => {
+  /** Start a computer, then sign in on it. The whole flow, in one line. */
+  async function claimWith(key: string, startKey = "browser-1") {
+    const started = await startComputer(startKey);
+    const res = await call(started.cookie, "POST", "/api/auth/session", { apiKey: key });
+    return { started, res, me: (await res.json()) as Record<string, unknown> };
+  }
+
+  test("the machine survives: same computer, same principal, same agent, environment, vault, box and tabs", async () => {
+    const started = await startComputer();
+    const before = ctx.db.getPaddock(started.id)!;
+    const tabsBefore = (await (await call(started.cookie, "GET", `/f/${started.id}/api/conversations`)).json()) as { data: { id: string }[] };
+
+    const res = await call(started.cookie, "POST", "/api/auth/session", { apiKey: "ftn_owner" });
+    const me = (await res.json()) as Record<string, unknown>;
+    expect(me.claimedFrom).toBe(started.id);
+    expect(me.kind).toBe("user");
+    expect(me.paddockId).toBe(started.id);
+
+    const after = ctx.db.getPaddock(started.id)!;
+    expect(after.id).toBe(before.id);
+    expect(after.fountain_principal_id).toBe(before.fountain_principal_id);
+    expect(after.claim_status).toBe("claimed");
+    expect(after.owner_email).toBe(OWNER);
+
+    // Nothing about the machine moved, so the tabs are the same conversations
+    // on the same box — and they still are, now under an account.
+    const cookie = (res.headers.get("set-cookie") ?? "").split(";")[0]!;
+    const tabsAfter = (await (await call(cookie, "GET", `/f/${started.id}/api/conversations`)).json()) as { data: { id: string }[] };
+    expect(tabsAfter.data.map((c) => c.id)).toEqual(tabsBefore.data.map((c) => c.id));
+    // And no second machine was built for the account that just registered.
+    expect(ctx.db.paddocksOf(OWNER)).toHaveLength(1);
+  });
+
+  test("the compute credential rotates: the machine stops running on the provisional key", async () => {
+    const started = await startComputer();
+    const provisional = await ctx.cipher.decrypt(ctx.db.getPaddock(started.id)!.compute_key_enc!);
+
+    const res = await call(started.cookie, "POST", "/api/auth/session", { apiKey: "ftn_owner" });
+    const cookie = (res.headers.get("set-cookie") ?? "").split(";")[0]!;
+    const claimed = await ctx.cipher.decrypt(ctx.db.getPaddock(started.id)!.compute_key_enc!);
+    expect(claimed).not.toBe(provisional);
+
+    // The one that matters: what goes on the wire from here on. Not the
+    // provisional key, and not the owner's own account key either — the claim
+    // handed back the credential that selects *this* principal.
+    upstream = [];
+    await call(cookie, "GET", `/f/${started.id}/api/conversations`);
+    expect(upstream.map((u) => u.key)).toEqual([claimed]);
+    expect(upstream.some((u) => u.key === provisional || u.key === "ftn_owner")).toBe(false);
+  });
+
+  test("a brand-new account and one that already owns a computer both claim the same way", async () => {
+    // Somebody who has never been here.
+    const fresh = await claimWith("ftn_owner", "browser-new");
+    expect(fresh.me.claimedFrom).toBe(fresh.started.id);
+    expect(ctx.db.paddocksOf(OWNER)).toHaveLength(1);
+
+    // And somebody who already has one. The claimed machine is a *second*
+    // computer on that account rather than a merge into the first.
+    const existing = await paddockFor(OTHER);
+    // The fake reads a key as its owner's name, so this is OTHER's own key.
+    const other = await claimWith("other", "browser-old");
+    expect(other.me.claimedFrom).toBe(other.started.id);
+    const owned = ctx.db.paddocksOf(OTHER).map((r) => r.id);
+    expect(owned).toContain(existing.id);
+    expect(owned).toContain(other.started.id);
+    expect(owned).toHaveLength(2);
+  });
+
+  test("a claim that makes the machine an account's *second* computer keeps its tabs", async () => {
+    // The subtle one. `original` marks the account's oldest computer, and it
+    // is what decides whether a tab with no computer in its channel is on this
+    // machine. A claimed computer that sorts second stops being original the
+    // moment it is claimed — so if anything depended on that flag, the tabs
+    // somebody had been using would vanish at exactly the wrong moment.
+    const started = await startComputer();
+    expect(ctx.db.isOriginal(ctx.db.getPaddock(started.id)!)).toBe(true);
+
+    // An account that has been here before, whose computer is older.
+    ctx.db.upsertUser(OTHER, "u-other", await ctx.cipher.encrypt("other"));
+    ctx.db.createPaddock("older", OTHER, "My computer");
+    ctx.db.sql.query("UPDATE paddocks SET created_at = '2020-01-01T00:00:00Z' WHERE id = 'older'").run();
+
+    const res = await call(started.cookie, "POST", "/api/auth/session", { apiKey: "other" });
+    const cookie = (res.headers.get("set-cookie") ?? "").split(";")[0]!;
+    expect(((await res.json()) as { claimedFrom: string }).claimedFrom).toBe(started.id);
+    expect(ctx.db.isOriginal(ctx.db.getPaddock(started.id)!)).toBe(false);
+
+    // Not original any more, and every tab still there — because a starter's
+    // channels name their computer outright rather than relying on the flag.
+    const tabs = (await (await call(cookie, "GET", `/f/${started.id}/api/conversations`)).json()) as { data: { id: string }[] };
+    expect(tabs.data.map((c) => c.id)).toEqual(["c1", "c2"]);
+  });
+
+  test("the starter session ends with the claim, so it is not a second way in", async () => {
+    const started = await startComputer();
+    await call(started.cookie, "POST", "/api/auth/session", { apiKey: "ftn_owner" });
+    const res = await call(started.cookie, "GET", "/api/me");
+    expect(res.status).toBe(401);
+  });
+
+  test("signing out and back in returns to the claimed computer, from any browser", async () => {
+    const started = await startComputer();
+    const first = await call(started.cookie, "POST", "/api/auth/session", { apiKey: "ftn_owner" });
+    const cookie = (first.headers.get("set-cookie") ?? "").split(";")[0]!;
+    await call(cookie, "DELETE", "/api/auth/session");
+
+    // A different browser entirely: no cookie, no start key, just the account.
+    const back = (await (await call(null, "POST", "/api/auth/session", { apiKey: "ftn_owner" })).json()) as Record<string, unknown>;
+    expect(back.paddockId).toBe(started.id);
+    expect(back.claimedFrom).toBeUndefined();
+  });
+
+  test("after the claim the owner may do everything a claim was blocking", async () => {
+    const started = await startComputer();
+    const res = await call(started.cookie, "POST", "/api/auth/session", { apiKey: "ftn_owner" });
+    const cookie = (res.headers.get("set-cookie") ?? "").split(";")[0]!;
+
+    expect((await call(cookie, "POST", `/f/${started.id}/api/conversations`, { channel_id: channelFor(started.id, "t3", 1) })).status).toBe(200);
+    expect((await call(cookie, "PUT", `/f/${started.id}/api/agents/a1`, { system: "hello" })).status).toBe(200);
+    expect((await call(cookie, "POST", `/api/paddock/${started.id}/tabs/c1/invite`)).status).toBe(200);
+  });
+
+  test("a start key whose computer has been claimed is told to sign in, not given another", async () => {
+    const started = await startComputer("kept");
+    await call(started.cookie, "POST", "/api/auth/session", { apiKey: "ftn_owner" });
+
+    // The same browser, having lost its cookie. Starting again would abandon
+    // the machine it just claimed.
+    const res = await call(null, "POST", "/api/start", { startKey: "kept" });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe("already_claimed");
+  });
+});
+
+describe("when a claim does not happen", () => {
+  test("a claim somebody else already won is terminal: they are signed in, and told", async () => {
+    const started = await startComputer();
+    // Somebody else got there first, upstream.
+    const grant = [...grants.values()][0]!;
+    grant.status = "claimed";
+    grant.claimed_by = "ftn_thief";
+
+    const res = await call(started.cookie, "POST", "/api/auth/session", { apiKey: "ftn_owner" });
+    const me = (await res.json()) as Record<string, unknown>;
+    expect(res.status).toBe(200);
+    expect(me.claimedFrom).toBeUndefined();
+    expect(me.claimFailed).toContain("claimed that computer first");
+    // Signed in, on a machine of their own, rather than stranded.
+    expect(me.kind).toBe("user");
+    expect(me.paddockId).toBeTruthy();
+    expect(me.paddockId).not.toBe(started.id);
+  });
+
+  test("an expired grant is terminal the same way", async () => {
+    const started = await startComputer();
+    [...grants.values()][0]!.status = "expired";
+    const me = (await (await call(started.cookie, "POST", "/api/auth/session", { apiKey: "ftn_owner" })).json()) as Record<string, unknown>;
+    expect(me.claimFailed).toContain("ran out");
+    expect(me.kind).toBe("user");
+  });
+
+  test("a lost response is not: the sign-in is refused, and the starter session survives to retry", async () => {
+    const started = await startComputer();
+    claimableHook = (method, path) => (path.endsWith("/claim") && method === "POST" ? Response.json({ error: "boom" }, { status: 503 }) : null);
+
+    const failed = await call(started.cookie, "POST", "/api/auth/session", { apiKey: "ftn_owner" });
+    expect(failed.status).toBeGreaterThanOrEqual(500);
+    // Nothing moved: the computer is still unclaimed and still reachable from
+    // the session that was about to claim it.
+    expect(ctx.db.getPaddock(started.id)!.claim_status).toBe("unclaimed");
+    expect(((await (await call(started.cookie, "GET", "/api/me")).json()) as { kind: string }).kind).toBe("starter");
+
+    // And the retry finishes it, because the idempotency key is the same.
+    claimableHook = null;
+    const me = (await (await call(started.cookie, "POST", "/api/auth/session", { apiKey: "ftn_owner" })).json()) as Record<string, unknown>;
+    expect(me.claimedFrom).toBe(started.id);
+    expect(ctx.db.getPaddock(started.id)!.owner_email).toBe(OWNER);
+  });
+
+  test("a claim that landed upstream and not here is finished on the next try, not duplicated", async () => {
+    const started = await startComputer();
+    // Fountain claimed it and the answer never arrived. Exactly the state a
+    // dropped response leaves, reproduced by claiming behind paddock's back.
+    const grant = [...grants.values()][0]!;
+    grant.status = "claimed";
+    grant.claimed_by = "ftn_owner";
+    grant.api_key = "ftn_claimed_upstream";
+    expect(ctx.db.getPaddock(started.id)!.claim_status).toBe("unclaimed");
+
+    const me = (await (await call(started.cookie, "POST", "/api/auth/session", { apiKey: "ftn_owner" })).json()) as Record<string, unknown>;
+    expect(me.claimedFrom).toBe(started.id);
+    const row = ctx.db.getPaddock(started.id)!;
+    expect(row.owner_email).toBe(OWNER);
+    expect(await ctx.cipher.decrypt(row.compute_key_enc!)).toBe("ftn_claimed_upstream");
+    // One principal throughout. Nothing was rebuilt to recover.
+    expect(grants.size).toBe(1);
+  });
+});
+
+describe("expiry and cleanup", () => {
+  test("an expired unclaimed computer is released upstream and forgotten here", async () => {
+    grantExpiresAt = "2000-01-01T00:00:00.000Z";
+    const started = await startComputer();
+
+    const report = await sweepExpired(ctx);
+    expect(report).toEqual({ released: 1, forgotten: 1, stranded: 0, failed: 0 });
+    expect([...grants.values()][0]!.status).toBe("released");
+    expect(ctx.db.getPaddock(started.id)).toBeNull();
+
+    // And the browser that was using it is told which of the two things
+    // happened, rather than the generic "your session ended".
+    const res = await call(started.cookie, "GET", "/api/me");
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: string }).error).toBe("start_expired");
+  });
+
+  test("a sweep that loses a race to a claim destroys nothing", async () => {
+    grantExpiresAt = "2000-01-01T00:00:00.000Z";
+    const started = await startComputer();
+    // The claim landed upstream between the row being listed and the sweep
+    // reading it — which is exactly why the sweep reads it.
+    const grant = [...grants.values()][0]!;
+    grant.status = "claimed";
+    grant.claimed_by = "ftn_owner";
+
+    const report = await sweepExpired(ctx);
+    expect(report.stranded).toBe(1);
+    expect(report.released).toBe(0);
+    expect(grant.status).toBe("claimed");
+    expect(ctx.db.getPaddock(started.id)).not.toBeNull();
+  });
+
+  test("a claimed computer is never swept, however old its clock was", async () => {
+    grantExpiresAt = "2000-01-01T00:00:00.000Z";
+    const started = await startComputer();
+    await call(started.cookie, "POST", "/api/auth/session", { apiKey: "ftn_owner" });
+
+    const report = await sweepExpired(ctx);
+    expect(report).toEqual({ released: 0, forgotten: 0, stranded: 0, failed: 0 });
+    expect(ctx.db.getPaddock(started.id)!.owner_email).toBe(OWNER);
+  });
+
+  test("sweeping twice is the same as sweeping once", async () => {
+    grantExpiresAt = "2000-01-01T00:00:00.000Z";
+    await startComputer();
+    await sweepExpired(ctx);
+    expect(await sweepExpired(ctx)).toEqual({ released: 0, forgotten: 0, stranded: 0, failed: 0 });
+  });
+
+  test("a grant Fountain has already purged is forgotten rather than retried forever", async () => {
+    grantExpiresAt = "2000-01-01T00:00:00.000Z";
+    const started = await startComputer();
+    grants.clear();
+    const report = await sweepExpired(ctx);
+    expect(report.forgotten).toBe(1);
+    expect(report.failed).toBe(0);
+    expect(ctx.db.getPaddock(started.id)).toBeNull();
+  });
+
+  test("a computer whose clock has not run out is left alone", async () => {
+    const started = await startComputer();
+    expect(await sweepExpired(ctx)).toEqual({ released: 0, forgotten: 0, stranded: 0, failed: 0 });
+    expect(ctx.db.getPaddock(started.id)).not.toBeNull();
+  });
+});
+
+describe("the migration to claimable computers", () => {
+  /**
+   * The shape of the database before issue #14, written out rather than
+   * imported: a migration test that builds its input from the current schema
+   * is a test of nothing. `owner_email NOT NULL` and the two-way sessions
+   * CHECK are the two constraints that had to go, so they are the two things
+   * this old schema declares.
+   */
+  const OLD_SCHEMA = `
+    CREATE TABLE users (email TEXT PRIMARY KEY, fountain_user_id TEXT, key_enc TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE paddocks (id TEXT PRIMARY KEY, owner_email TEXT NOT NULL REFERENCES users(email), name TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
+    CREATE TABLE paddock_members (paddock_id TEXT NOT NULL REFERENCES paddocks(id) ON DELETE CASCADE, conversation_id TEXT NOT NULL, email TEXT NOT NULL, added_at TEXT NOT NULL, added_by TEXT NOT NULL, PRIMARY KEY (paddock_id, conversation_id, email));
+    CREATE TABLE paddock_guests (id TEXT PRIMARY KEY, paddock_id TEXT NOT NULL REFERENCES paddocks(id) ON DELETE CASCADE, conversation_id TEXT NOT NULL, handle TEXT NOT NULL, created_at TEXT NOT NULL, seen_at TEXT NOT NULL);
+    CREATE TABLE tab_invites (token TEXT PRIMARY KEY, paddock_id TEXT NOT NULL REFERENCES paddocks(id) ON DELETE CASCADE, conversation_id TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, email TEXT REFERENCES users(email), guest_id TEXT, created_at TEXT NOT NULL, CHECK ((email IS NULL) <> (guest_id IS NULL)));
+    CREATE TABLE tab_openers (conversation_id TEXT PRIMARY KEY, paddock_id TEXT NOT NULL REFERENCES paddocks(id) ON DELETE CASCADE, actor TEXT NOT NULL, opened_at TEXT NOT NULL);
+  `;
+
+  test("every user, computer, membership, guest, link and session survives, as already claimed", () => {
+    const file = join(tmpdir(), `paddock-migrate-${randomToken(6).replace(/[^a-z0-9]/gi, "")}.sqlite`);
+    const old = new Database(file, { create: true, strict: true });
+    old.exec("PRAGMA foreign_keys = ON;");
+    old.exec(OLD_SCHEMA);
+    old.exec(`
+      INSERT INTO users VALUES ('a@example.com', 'u1', 'enc-a', '2026-01-01T00:00:00Z');
+      INSERT INTO users VALUES ('b@example.com', 'u2', 'enc-b', '2026-01-02T00:00:00Z');
+      INSERT INTO paddocks VALUES ('p1', 'a@example.com', 'My computer', '2026-01-01T00:00:00Z');
+      INSERT INTO paddocks VALUES ('p2', 'a@example.com', 'Computer 2', '2026-01-03T00:00:00Z');
+      INSERT INTO paddock_members VALUES ('p1', 'c1', 'b@example.com', '2026-01-04T00:00:00Z', 'a@example.com');
+      INSERT INTO paddock_guests VALUES ('g1', 'p1', 'c1', 'guest-7f3a', '2026-01-05T00:00:00Z', '2026-01-05T00:00:00Z');
+      INSERT INTO tab_invites VALUES ('tok', 'p1', 'c1', '2026-01-05T00:00:00Z');
+      INSERT INTO sessions VALUES ('h1', 'a@example.com', NULL, '2026-01-06T00:00:00Z');
+      INSERT INTO sessions VALUES ('h2', NULL, 'g1', '2026-01-06T00:00:00Z');
+      INSERT INTO tab_openers VALUES ('c1', 'p1', 'a@example.com', '2026-01-06T00:00:00Z');
+    `);
+    old.close();
+
+    const db = new Db(file);
+
+    expect(db.getUser("a@example.com")?.key_enc).toBe("enc-a");
+    expect(db.paddocksOf("a@example.com").map((p) => p.id)).toEqual(["p1", "p2"]);
+    // Already claimed, owned by exactly whoever owned it, and still running on
+    // its owner's own key rather than a per-computer one it never had.
+    for (const id of ["p1", "p2"]) {
+      const row = db.getPaddock(id)!;
+      expect(row.claim_status).toBe("claimed");
+      expect(row.owner_email).toBe("a@example.com");
+      expect(row.compute_key_enc).toBeNull();
+      expect(row.fountain_principal_id).toBeNull();
+    }
+    expect(db.memberTabs("p1", "b@example.com")).toEqual(["c1"]);
+    expect(db.getGuest("g1")?.handle).toBe("guest-7f3a");
+    expect(db.invite("tok")?.paddock_id).toBe("p1");
+    expect(db.session("h1")?.email).toBe("a@example.com");
+    expect(db.session("h1")?.starter_paddock_id).toBeNull();
+    expect(db.session("h2")?.guest_id).toBe("g1");
+    expect(db.tabOpeners("p1")).toEqual({ c1: "a@example.com" });
+
+    // And the new shape actually works on the migrated file: an unclaimed row
+    // and a starter session are what the old constraints refused.
+    db.createUnclaimedPaddock({
+      id: "p3",
+      name: "My computer",
+      principalId: "pr-1",
+      claimableUserId: "cl-1",
+      claimTokenEnc: "enc",
+      computeKeyEnc: "enc",
+      expiresAt: "2099-01-01T00:00:00Z",
+    });
+    db.createStarterSession("h3", "p3");
+    expect(db.getPaddock("p3")!.owner_email).toBeNull();
+    expect(db.session("h3")?.starter_paddock_id).toBe("p3");
+
+    // Running it again changes nothing — the server opens the file on boot.
+    db.sql.close();
+    const again = new Db(file);
+    expect(again.paddocksOf("a@example.com")).toHaveLength(2);
+    expect(again.getPaddock("p3")!.claim_status).toBe("unclaimed");
+    again.sql.close();
+    rmSync(file, { force: true });
+    rmSync(`${file}-wal`, { force: true });
+    rmSync(`${file}-shm`, { force: true });
   });
 });

@@ -34,12 +34,48 @@ export interface GuestRow {
   seen_at: string;
 }
 
+/**
+ * A computer, unclaimed or claimed.
+ *
+ * `unclaimed` is a computer somebody started before they had an account
+ * (issue #14). It has no owner yet, and its compute is a *claimable Fountain
+ * principal* rather than a person's account — a tenant of its own, with its
+ * own agents, sandboxes and conversations, opened on this application's
+ * credential and paid for out of an introductory grant.
+ *
+ * Claiming attaches an owner to that principal. It moves nothing: the
+ * principal id is the same value before and after, and so is every id under
+ * it, which is the only way the machine somebody has been using survives
+ * registration. See fountain#1551 and its ADR 0044.
+ */
+export type ClaimStatus = "unclaimed" | "claimed";
+
 export interface PaddockRow {
   id: string;
-  owner_email: string;
+  /** Null while unclaimed, and only then. */
+  owner_email: string | null;
   /** What the owner calls this computer. Theirs to change; never empty. */
   name: string;
   created_at: string;
+  /** Fountain's stable compute identity: the same before and after a claim. */
+  fountain_principal_id: string | null;
+  /** The grant this principal was opened under — what claim and release name. */
+  claimable_user_id: string | null;
+  /** The capability that claims it, encrypted. Never leaves this server. */
+  claim_token_enc: string | null;
+  claim_status: ClaimStatus;
+  /** When Fountain expires the unclaimed grant. Null once claimed. */
+  claim_expires_at: string | null;
+  /**
+   * The Fountain key this computer's machine runs on, encrypted.
+   *
+   * Per computer rather than per user, and it stays that way after a claim: a
+   * Fountain account may own more than one principal, so the credential a
+   * claim hands back is the one that selects *this* machine's tenant. Null on
+   * every computer made before issue #14, which run on `users.key_enc` as
+   * they always did — see `context.ownerClient`.
+   */
+  compute_key_enc: string | null;
 }
 
 export interface MemberRow {
@@ -59,11 +95,23 @@ export interface InviteRow {
   created_at: string;
 }
 
-/** A session belongs to exactly one of a user or a guest — never both, never neither. */
+/**
+ * A session is exactly one of three people: a registered user, an invited
+ * guest, or the anonymous owner of an unclaimed computer. Never two, never
+ * none.
+ *
+ * The third is deliberately not a guest with an extra flag. A guest borrows
+ * one terminal in somebody else's machine and is evicted when its link is
+ * re-minted; an anonymous owner *possesses* a machine and may claim it. One
+ * column that meant either would be one `if` away from letting a guest claim
+ * the computer they were lent.
+ */
 export interface SessionRow {
   token_hash: string;
   email: string | null;
   guest_id: string | null;
+  /** The unclaimed computer this browser started, and owns until it is claimed. */
+  starter_paddock_id: string | null;
   created_at: string;
 }
 
@@ -86,11 +134,24 @@ CREATE TABLE IF NOT EXISTS users (
 -- one, enforced by a unique index here; migrate() drops that index rather than
 -- the table, because this row is what every membership, invitation and guest
 -- points at.
+--
+-- owner_email is null while a computer is unclaimed, and the CHECK is what
+-- keeps that from meaning anything else: an ownerless *claimed* row would be a
+-- machine nobody can reach and nobody pays for, and an owned *unclaimed* one
+-- would still be spending this application's grant.
 CREATE TABLE IF NOT EXISTS paddocks (
   id           TEXT PRIMARY KEY,
-  owner_email  TEXT NOT NULL REFERENCES users(email),
+  owner_email  TEXT REFERENCES users(email),
   name         TEXT NOT NULL DEFAULT '',
-  created_at   TEXT NOT NULL
+  created_at   TEXT NOT NULL,
+  fountain_principal_id TEXT,
+  claimable_user_id     TEXT,
+  claim_token_enc       TEXT,
+  claim_status          TEXT NOT NULL DEFAULT 'claimed',
+  claim_expires_at      TEXT,
+  compute_key_enc       TEXT,
+  CHECK (claim_status IN ('unclaimed', 'claimed')),
+  CHECK ((owner_email IS NULL) = (claim_status = 'unclaimed'))
 );
 CREATE INDEX IF NOT EXISTS paddocks_by_owner ON paddocks(owner_email, created_at);
 
@@ -125,9 +186,10 @@ CREATE TABLE IF NOT EXISTS tab_invites (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS tab_invites_tab ON tab_invites(paddock_id, conversation_id);
 
--- Exactly one of email / guest_id is set. SQLite cannot express "exactly one"
--- as a foreign key, so it is a CHECK, and context.ts reads the pair as a
--- discriminated union rather than trusting either column alone.
+-- Exactly one of email / guest_id / starter_paddock_id is set. SQLite cannot
+-- express "exactly one" as a foreign key, so it is a CHECK, and context.ts
+-- reads the three as a discriminated union rather than trusting any column
+-- alone.
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY,
   email      TEXT REFERENCES users(email),
@@ -138,8 +200,14 @@ CREATE TABLE IF NOT EXISTS sessions (
   -- the explanation with it; an enforced FK would refuse the delete outright.
   -- The orphans are harmless and expireSessions sweeps them.
   guest_id   TEXT,
+  -- No foreign key either, and for the mirror-image reason: the cleanup job
+  -- deletes an expired computer's row, and the session has to survive long
+  -- enough to say "that computer expired" rather than "your session ended".
+  starter_paddock_id TEXT,
   created_at TEXT NOT NULL,
-  CHECK ((email IS NULL) <> (guest_id IS NULL))
+  CHECK (
+    (email IS NOT NULL) + (guest_id IS NOT NULL) + (starter_paddock_id IS NOT NULL) = 1
+  )
 );
 
 -- Who opened a tab. The channel_id stays exactly as shared/tabs.ts parses it;
@@ -151,6 +219,18 @@ CREATE TABLE IF NOT EXISTS tab_openers (
   actor           TEXT NOT NULL,
   opened_at       TEXT NOT NULL
 );
+`;
+
+/**
+ * Indexes over columns a migration adds, kept out of SCHEMA and run after it.
+ *
+ * SCHEMA is executed before `migrate()` — that is what makes a fresh database
+ * work — and `CREATE INDEX IF NOT EXISTS` over a column the old table does not
+ * have yet is an error rather than a no-op. So anything that indexes a column
+ * younger than the table it is on belongs here.
+ */
+const INDEXES = `
+CREATE INDEX IF NOT EXISTS paddocks_unclaimed ON paddocks(claim_status, claim_expires_at);
 `;
 
 export class Db {
@@ -168,7 +248,7 @@ export class Db {
   }
 
   /**
-   * Two changes of shape, handled differently on purpose.
+   * Three changes of shape, handled differently on purpose.
    *
    * Invitations became per-tab, and there is no honest way to convert the old
    * rows: somebody invited to "the machine" was not invited to any particular
@@ -178,6 +258,12 @@ export class Db {
    * That is a real, if small, loss, and it is the right one: the alternative
    * is silently widening or narrowing an access grant somebody made. Anyone
    * affected is re-invited in a click.
+   *
+   * A computer became something that can exist before its owner does, which is
+   * a third kind again: two constraints had to stop being what they were. That
+   * cannot be an `ALTER` — `owner_email NOT NULL` and the sessions CHECK are
+   * both written into the table — so `claimable()` rebuilds those two tables
+   * in place and copies every row across as already-claimed.
    *
    * A paddock became one computer of several rather than *the* computer, which
    * is the opposite kind of change: nothing about an existing row became
@@ -200,10 +286,90 @@ export class Db {
     }
     this.sql.exec("DROP INDEX IF EXISTS paddocks_owner");
 
+    this.claimable();
+
     this.sql.exec(SCHEMA);
+    this.sql.exec(INDEXES);
     // A row from before computers had names is somebody's only machine, so it
     // gets the name a first machine is given.
     this.sql.query("UPDATE paddocks SET name = $name WHERE name = ''").run({ name: FIRST_NAME });
+  }
+
+  /**
+   * Make room for a computer that has no owner yet (issue #14).
+   *
+   * Two constraints have to go, and neither is alterable in SQLite: paddocks
+   * declared `owner_email NOT NULL`, and sessions declared that exactly one of
+   * email and guest_id was set. So both tables are rebuilt by the documented
+   * new-table/copy/drop/rename dance, with foreign keys off for the duration
+   * because the children of `paddocks` point at it by name and would see it
+   * vanish mid-swap.
+   *
+   * Every existing row copies across as **claimed**, owned by exactly whoever
+   * owned it, with a null `compute_key_enc` so it keeps running on its owner's
+   * `users.key_enc` as it always has. Nothing about an existing computer, its
+   * people, its links or its sessions changes; the only thing that moves is
+   * what the table will *permit* from here on.
+   */
+  private claimable(): void {
+    const has = (table: string, column: string) =>
+      (this.sql.query(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column);
+    const exists = (table: string) =>
+      !!this.sql.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = $t").get({ t: table });
+
+    const paddocksStale = exists("paddocks") && !has("paddocks", "claim_status");
+    const sessionsStale = exists("sessions") && !has("sessions", "starter_paddock_id");
+    if (!paddocksStale && !sessionsStale) return;
+
+    // Off for the rebuild, on again after: a `DROP TABLE paddocks` with them
+    // enforced would either fail or cascade away every membership on it.
+    this.sql.exec("PRAGMA foreign_keys = OFF");
+    try {
+      this.sql.transaction(() => {
+        if (paddocksStale) {
+          this.sql.exec(`
+            CREATE TABLE paddocks_new (
+              id           TEXT PRIMARY KEY,
+              owner_email  TEXT REFERENCES users(email),
+              name         TEXT NOT NULL DEFAULT '',
+              created_at   TEXT NOT NULL,
+              fountain_principal_id TEXT,
+              claimable_user_id     TEXT,
+              claim_token_enc       TEXT,
+              claim_status          TEXT NOT NULL DEFAULT 'claimed',
+              claim_expires_at      TEXT,
+              compute_key_enc       TEXT,
+              CHECK (claim_status IN ('unclaimed', 'claimed')),
+              CHECK ((owner_email IS NULL) = (claim_status = 'unclaimed'))
+            );
+            INSERT INTO paddocks_new (id, owner_email, name, created_at, claim_status)
+              SELECT id, owner_email, name, created_at, 'claimed' FROM paddocks;
+            DROP TABLE paddocks;
+            ALTER TABLE paddocks_new RENAME TO paddocks;
+          `);
+        }
+        if (sessionsStale) {
+          this.sql.exec(`
+            CREATE TABLE sessions_new (
+              token_hash TEXT PRIMARY KEY,
+              email      TEXT REFERENCES users(email),
+              guest_id   TEXT,
+              starter_paddock_id TEXT,
+              created_at TEXT NOT NULL,
+              CHECK (
+                (email IS NOT NULL) + (guest_id IS NOT NULL) + (starter_paddock_id IS NOT NULL) = 1
+              )
+            );
+            INSERT INTO sessions_new (token_hash, email, guest_id, starter_paddock_id, created_at)
+              SELECT token_hash, email, guest_id, NULL, created_at FROM sessions;
+            DROP TABLE sessions;
+            ALTER TABLE sessions_new RENAME TO sessions;
+          `);
+        }
+      })();
+    } finally {
+      this.sql.exec("PRAGMA foreign_keys = ON");
+    }
   }
 
   // ── users ───────────────────────────────────────────────────────────────
@@ -224,11 +390,22 @@ export class Db {
   // ── sessions ────────────────────────────────────────────────────────────
 
   createUserSession(tokenHash: string, email: string): void {
-    this.sql.query("INSERT INTO sessions (token_hash, email, guest_id, created_at) VALUES ($t, $e, NULL, $at)").run({ t: tokenHash, e: email, at: now() });
+    this.sql
+      .query("INSERT INTO sessions (token_hash, email, guest_id, starter_paddock_id, created_at) VALUES ($t, $e, NULL, NULL, $at)")
+      .run({ t: tokenHash, e: email, at: now() });
   }
 
   createGuestSession(tokenHash: string, guestId: string): void {
-    this.sql.query("INSERT INTO sessions (token_hash, email, guest_id, created_at) VALUES ($t, NULL, $g, $at)").run({ t: tokenHash, g: guestId, at: now() });
+    this.sql
+      .query("INSERT INTO sessions (token_hash, email, guest_id, starter_paddock_id, created_at) VALUES ($t, NULL, $g, NULL, $at)")
+      .run({ t: tokenHash, g: guestId, at: now() });
+  }
+
+  /** The browser that started an unclaimed computer, and owns it until it is claimed. */
+  createStarterSession(tokenHash: string, paddockId: string): void {
+    this.sql
+      .query("INSERT INTO sessions (token_hash, email, guest_id, starter_paddock_id, created_at) VALUES ($t, NULL, NULL, $p, $at)")
+      .run({ t: tokenHash, p: paddockId, at: now() });
   }
 
   session(tokenHash: string): SessionRow | null {
@@ -258,12 +435,79 @@ export class Db {
     return this.paddocksOf(ownerEmail)[0] ?? this.createPaddock(id, ownerEmail, FIRST_NAME);
   }
 
+  /** The unclaimed computer one browser started, if its session still names a live one. */
+  unclaimedPaddock(id: string | null): PaddockRow | null {
+    if (!id) return null;
+    const row = this.getPaddock(id);
+    return row?.claim_status === "unclaimed" ? row : null;
+  }
+
   createPaddock(id: string, ownerEmail: string, name: string): PaddockRow {
     this.sql
       .query("INSERT INTO paddocks (id, owner_email, name, created_at) VALUES ($id, $o, $n, $at)")
       .run({ id, o: ownerEmail, n: name, at: now() });
     return this.getPaddock(id)!;
   }
+
+  /**
+   * A computer with no owner yet, on a claimable Fountain principal.
+   *
+   * Everything that identifies the machine is written in one statement,
+   * because a row that named a principal it had no claim token for would be a
+   * live tenant this server could neither claim nor release — the one state
+   * the cleanup job cannot get out of.
+   */
+  createUnclaimedPaddock(row: {
+    id: string;
+    name: string;
+    principalId: string;
+    claimableUserId: string;
+    claimTokenEnc: string;
+    computeKeyEnc: string;
+    expiresAt: string | null;
+  }): PaddockRow {
+    this.sql
+      .query(
+        `INSERT INTO paddocks (id, owner_email, name, created_at, fountain_principal_id, claimable_user_id,
+                               claim_token_enc, claim_status, claim_expires_at, compute_key_enc)
+         VALUES ($id, NULL, $n, $at, $pid, $cid, $tok, 'unclaimed', $exp, $key)`,
+      )
+      .run({ id: row.id, n: row.name, at: now(), pid: row.principalId, cid: row.claimableUserId, tok: row.claimTokenEnc, exp: row.expiresAt, key: row.computeKeyEnc });
+    return this.getPaddock(row.id)!;
+  }
+
+  /**
+   * Attach an owner to an unclaimed computer, in one statement.
+   *
+   * One statement rather than four, and the `WHERE claim_status = 'unclaimed'`
+   * is the whole concurrency story: two browsers finishing the same claim race
+   * to this line, the loser changes no rows, and `changes` says which one it
+   * was. Nothing about the machine moves — the principal id, the agent, the
+   * disk and every conversation id are the same afterwards. What changes is
+   * who is behind the tenant, and which credential this server runs it on.
+   *
+   * The claim token is dropped: it has been spent, and a capability nobody can
+   * use any more is a capability worth not keeping.
+   */
+  claimPaddock(id: string, ownerEmail: string, computeKeyEnc: string): boolean {
+    const res = this.sql
+      .query(
+        `UPDATE paddocks
+            SET owner_email = $o, compute_key_enc = $key, claim_status = 'claimed',
+                claim_token_enc = NULL, claim_expires_at = NULL
+          WHERE id = $id AND claim_status = 'unclaimed'`,
+      )
+      .run({ id, o: ownerEmail, key: computeKeyEnc });
+    return res.changes > 0;
+  }
+
+  /** Unclaimed computers whose grant Fountain has expired. The cleanup job's list. */
+  expiredUnclaimed(asOf: string): PaddockRow[] {
+    return this.sql
+      .query("SELECT * FROM paddocks WHERE claim_status = 'unclaimed' AND claim_expires_at IS NOT NULL AND claim_expires_at < $t ORDER BY claim_expires_at")
+      .all({ t: asOf }) as PaddockRow[];
+  }
+
 
   getPaddock(id: string): PaddockRow | null {
     return this.sql.query("SELECT * FROM paddocks WHERE id = $id").get({ id }) as PaddockRow | null;
@@ -285,6 +529,21 @@ export class Db {
    */
   paddocksOf(ownerEmail: string): PaddockRow[] {
     return this.sql.query("SELECT * FROM paddocks WHERE owner_email = $o ORDER BY created_at, rowid").all({ o: ownerEmail }) as PaddockRow[];
+  }
+
+  /**
+   * The account's oldest computer, and so the one that owns every tab whose
+   * channel names no computer at all (`tabs.belongsTo`).
+   *
+   * An unclaimed computer is always its own original: its anonymous owner has
+   * exactly one, by construction — `/api/start` refuses to open a second — so
+   * there is nothing older for it to be behind. Asking the row order instead
+   * would ask for the oldest computer owned by nobody, which is a different
+   * question with a wrong answer.
+   */
+  isOriginal(paddock: PaddockRow): boolean {
+    if (!paddock.owner_email) return true;
+    return this.paddocksOf(paddock.owner_email)[0]?.id === paddock.id;
   }
 
   renamePaddock(id: string, name: string): void {
@@ -345,7 +604,7 @@ export class Db {
       )
       .all({ e: email }) as { id: string; name: string; owner_email: string }[];
     return [
-      ...own.map((p, i) => ({ id: p.id, name: p.name, ownerEmail: p.owner_email, role: "owner" as Role, original: i === 0 })),
+      ...own.map((p, i) => ({ id: p.id, name: p.name, ownerEmail: email, role: "owner" as Role, original: i === 0 })),
       ...shared.map((r) => ({ id: r.id, name: r.name, ownerEmail: r.owner_email, role: "member" as Role, original: false })),
     ];
   }

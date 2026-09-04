@@ -4,7 +4,9 @@
  *   GET    /healthz
  *   GET    /api/config                        which Fountain this server signs in with
  *   GET    /api/me                            who the session is
- *   POST   /api/auth/session                  sign in with a Fountain key
+ *   POST   /api/start                         start a computer with no account
+ *   POST   /api/auth/session                  sign in with a Fountain key — and,
+ *                                             from an unclaimed computer, claim it
  *   DELETE /api/auth/session                  sign out
  *   POST   /api/join/:token                   follow an invite link (no account needed)
  *
@@ -38,6 +40,7 @@ import * as computers from "./computers";
 import * as lifecycle from "./lifecycle";
 import * as people from "./people";
 import * as skills from "./skills";
+import * as starter from "./starter";
 import { handleProxy } from "./proxy";
 import { errorResponse, HttpError, json } from "./http";
 
@@ -58,6 +61,10 @@ export function buildRouter(ctx: AppContext): (req: Request) => Promise<Response
   on("GET", "/healthz", () => new Response("ok\n", { headers: { "content-type": "text/plain" } }));
   on("GET", "/api/config", () => auth.config(ctx));
   on("GET", "/api/me", (req) => auth.me(ctx, req));
+  // Deliberately before the sign-in routes and deliberately unauthenticated:
+  // this is the door for somebody who has nothing at all. It is idempotent, so
+  // a refresh and a double-invoked effect find the same computer.
+  on("POST", "/api/start", (req) => starter.start(ctx, req));
   on("POST", "/api/auth/session", (req) => auth.signIn(ctx, req));
   on("DELETE", "/api/auth/session", (req) => auth.signOut(ctx, req));
   on("POST", "/api/join/:token", (req, p) => auth.join(ctx, req, p.token!));
