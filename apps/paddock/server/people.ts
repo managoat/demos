@@ -28,6 +28,8 @@ import { HttpError, isEmail, json, normalizeEmail, readJson, str } from "./http"
 
 export interface PaddockDto {
   id: string;
+  /** The owner's name for this computer. Blank for a guest, who is not told. */
+  name: string;
   role: Role;
   ownerEmail: string;
   /** Null for the owner: every tab is theirs. Otherwise the tabs they may reach. */
@@ -46,7 +48,16 @@ export interface TabPeopleDto {
 
 function paddockDto(ctx: AppContext, paddockId: string, role: Role, tabs: string[] | null): PaddockDto {
   const paddock = ctx.db.getPaddock(paddockId)!;
-  return { id: paddock.id, role, ownerEmail: paddock.owner_email, tabs, here: hub.present(paddock.id) };
+  return {
+    id: paddock.id,
+    // A guest was lent one terminal, not shown around the account: what the
+    // owner calls their machine is not part of the loan.
+    name: role === "guest" ? "" : paddock.name,
+    role,
+    ownerEmail: paddock.owner_email,
+    tabs,
+    here: hub.present(paddock.id),
+  };
 }
 
 function tabDto(ctx: AppContext, paddockId: string, conversationId: string, role: Role): TabPeopleDto {

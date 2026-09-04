@@ -11,6 +11,9 @@
  *   GET    /api/skills/search                 the skills.sh index, for the Machine panel
  *
  *   GET    /api/paddock                       the caller's machine and its people
+ *   POST   /api/paddocks                      another computer of their own
+ *   PATCH  /api/paddock/:id                   owner: rename it
+ *   DELETE /api/paddock/:id                   owner: retire it and forget it
  *   GET    /api/paddock/:id/tabs/:c/people    who is in one tab
  *   POST   /api/paddock/:id/tabs/:c/members   owner: invite by email, to that tab
  *   DELETE /api/paddock/:id/tabs/:c/members/:email  owner, or leave
@@ -31,6 +34,7 @@
  */
 import { authenticate, type AppContext } from "./context";
 import * as auth from "./auth";
+import * as computers from "./computers";
 import * as lifecycle from "./lifecycle";
 import * as people from "./people";
 import * as skills from "./skills";
@@ -67,7 +71,10 @@ export function buildRouter(ctx: AppContext): (req: Request) => Promise<Response
   });
 
   on("GET", "/api/paddock", (req) => people.show(ctx, req));
+  on("POST", "/api/paddocks", (req) => computers.create(ctx, req));
   on("GET", "/api/paddock/:id", (req, p) => people.showOne(ctx, req, p.id!));
+  on("PATCH", "/api/paddock/:id", (req, p) => computers.rename(ctx, req, p.id!));
+  on("DELETE", "/api/paddock/:id", (req, p) => computers.remove(ctx, req, p.id!));
   on("GET", "/api/paddock/:id/tabs/:c/people", (req, p) => people.tabPeople(ctx, req, p.id!, p.c!));
   on("POST", "/api/paddock/:id/tabs/:c/members", (req, p) => people.addMember(ctx, req, p.id!, p.c!));
   on("DELETE", "/api/paddock/:id/tabs/:c/members/:email", (req, p) => people.removeMember(ctx, req, p.id!, p.c!, p.email!));

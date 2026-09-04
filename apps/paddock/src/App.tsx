@@ -21,11 +21,11 @@ import { Upgrade } from "./components/Upgrade";
 import { Tabs } from "./components/Tabs";
 import { Terminal } from "./components/Terminal";
 import { Workspaces } from "./components/Workspaces";
-import { defaultChoice, ensureIdentity, type BootStep, type Identity } from "./lib/identity";
+import { defaultChoice, ensureIdentity, isPaddockAgent, type BootStep, type Identity } from "./lib/identity";
 import { boxDrift, applyKeep, applyTodo, configRev, desiredItems, primaryRepoPath, withRev } from "./lib/machine";
 import { parseReceipt, decodeFile, type Receipt } from "./lib/protocol";
 import { completeLoginIfCallback } from "./lib/oauth";
-import { describePaddockError, paddock, type Me, type PaddockDto, type TabPeopleDto } from "./api/paddock";
+import { describePaddockError, paddock, type Me, type PaddockDto, type Reachable, type TabPeopleDto } from "./api/paddock";
 import { applyPrompt, bootstrapPrompt, reconcilePrompt, welcomePrompt, RECEIPT_PATH, WORK_ROOT } from "../shared/spec";
 import { canPrompt, channelFor, findBox, holder, nextSlug, opsTab, OPS_SLUG, staleTabs, tabsOf, visibleTabs } from "../shared/tabs";
 
@@ -151,11 +151,44 @@ export function App() {
     <Paddock
       key={`${me.label}:${selectedId ?? "new"}`}
       me={selectedMe}
+      /**
+       * The computer being opened. A brand-new one has no machine yet, and
+       * `Paddock` builds it exactly as it built the first — which is why this
+       * component is keyed on the id: switching computers is a remount, not a
+       * reconciliation, and every ref that says "boot has run" goes with it.
+       */
+      place={selected ?? null}
       onMe={(next) => {
         setMe(next);
         selectWorkspace(next.paddockId);
       }}
       onSelectWorkspace={selectWorkspace}
+      /**
+       * A new computer lands you on it. There is nothing to see anywhere else
+       * — the machine is built on arrival — and being left behind on the old
+       * one is the button appearing not to have worked.
+       */
+      onAddComputer={async () => {
+        const made = await paddock.addComputer();
+        setMe(await paddock.me());
+        selectWorkspace(made.id);
+      }}
+      onRenameComputer={async (id, name) => {
+        await paddock.renameComputer(id, name);
+        setMe(await paddock.me());
+      }}
+      /**
+       * Removing the computer somebody is standing on. The reload is the same
+       * decision `replaceMachine` makes and for the same reason: everything in
+       * this tree describes a machine that no longer exists, and the one path
+       * already known to work is arriving somewhere fresh.
+       */
+      onRemoveComputer={async (id) => {
+        await paddock.removeComputer(id);
+        const next = await paddock.me();
+        rememberWorkspace(next.paddocks.find((p) => p.role === "owner" && p.id !== id)?.id ?? next.paddockId);
+        window.location.reload();
+      }}
       onSignOut={() => void signOut()}
     />
   );
@@ -195,13 +228,21 @@ function joinTokenFromHash(): string | null {
 
 function Paddock({
   me,
+  place,
   onMe,
   onSelectWorkspace,
+  onAddComputer,
+  onRenameComputer,
+  onRemoveComputer,
   onSignOut,
 }: {
   me: Me;
+  place: Reachable | null;
   onMe: (m: Me) => void;
   onSelectWorkspace: (id: string) => void;
+  onAddComputer: () => Promise<void>;
+  onRenameComputer: (id: string, name: string) => Promise<void>;
+  onRemoveComputer: (id: string) => Promise<void>;
   onSignOut: () => void;
 }) {
   // Every Fountain call goes through this machine's own proxy, on the owner's
@@ -275,8 +316,17 @@ function Paddock({
   const rev = identity ? configRev(identity.agent) : 0;
 
   const tabs = useMemo(
-    () => (agentId && boxId ? tabsOf(conversations, { sandboxId: boxId, agentId, rev, workRoot: WORK_ROOT }) : []),
-    [conversations, agentId, boxId, rev],
+    () =>
+      agentId && boxId && paddockId && place
+        ? tabsOf(conversations, {
+            paddock: { id: paddockId, original: place.original },
+            sandboxId: boxId,
+            agentId,
+            rev,
+            workRoot: WORK_ROOT,
+          })
+        : [],
+    [conversations, agentId, boxId, rev, paddockId, place],
   );
   const strip = useMemo(() => visibleTabs(tabs), [tabs]);
   const active = strip.find((t) => t.slug === activeSlug) ?? strip[0] ?? null;
@@ -298,7 +348,7 @@ function Paddock({
     bootedRef.current = paddockId;
     void (async () => {
       try {
-        if (!paddockId) return;
+        if (!paddockId || !place) return;
         setPeople(await paddock.showOne(paddockId).catch(() => null));
         if (!isOwner) return;
 
@@ -313,22 +363,24 @@ function Paddock({
         setConnections(conns);
         setProviders(provs);
         setFountainUrl(cfg?.fountainUrl ?? null);
-        const mine = agents.find((a) => {
-          const meta = (a.metadata ?? {})["paddock"];
-          return !!meta && typeof meta === "object" && !Array.isArray(meta) && (meta as { identity?: unknown }).identity === true;
-        });
+        // What a *second* computer runs is what the first one runs. Reading
+        // the choice off any paddock agent, rather than this computer's, is
+        // deliberate: a new machine should match the ones this person already
+        // has instead of quietly reverting to the app's default the day the
+        // default moves.
+        const mine = agents.find(isPaddockAgent);
         // First run provisions rather than asking. The one choice that was
         // ever on that form — the runtime — is the same answer for everybody,
         // and the Machine panel says what was picked and what changing it costs.
         const choice = mine ? { runtime: mine.runtime, model: mine.model } : defaultChoice(cat);
-        setIdentity(await ensureIdentity(client, choice, setStep));
+        setIdentity(await ensureIdentity(client, choice, { paddockId, original: place.original }, setStep));
       } catch (err) {
         setFatal(describeError(err));
       } finally {
         setBooting(false);
       }
     })();
-  }, [client, paddockId, isOwner]);
+  }, [client, paddockId, isOwner, place]);
 
   // No agent filter and no identity gate: the proxy already returns exactly
   // this machine's tabs, to everybody in the paddock.
@@ -385,7 +437,7 @@ function Paddock({
         prompt: (welcome ? welcomePrompt : bootstrapPrompt)({ slug: "t1", repoPath: primaryRepoPath(id.environment) }),
         agentDefaultMode: id.agent.sandbox_mode ?? null,
         title: "Terminal 1",
-        channel_id: channelFor("t1", configRev(id.agent)),
+        channel_id: channelFor(paddockId!, "t1", configRev(id.agent)),
         ...(id.environment ? { environment_id: id.environment.id } : {}),
         ...(id.vault ? { vault_id: id.vault.id } : {}),
       });
@@ -446,9 +498,10 @@ function Paddock({
 
   /** The retry behind the Try again button. Everything here is idempotent. */
   async function retryBoot() {
+    if (!paddockId || !place) return;
     setFatal(null);
     try {
-      const id = await ensureIdentity(client, defaultChoice(catalog), setStep);
+      const id = await ensureIdentity(client, defaultChoice(catalog), { paddockId, original: place.original }, setStep);
       setIdentity(id);
       startedRef.current = true;
       await startBox(id, conversations.length === 0);
@@ -661,10 +714,13 @@ function Paddock({
           }
           return;
         }
-        // Somebody opened a tab, took a turn, or was invited: re-read rather
-        // than trying to patch state from another browser's event.
+        // Somebody opened a tab, took a turn, was invited, or renamed the
+        // machine: re-read rather than trying to patch state from another
+        // browser's event.
         void refreshConversations();
-        if (msg.event === "people") void paddock.showOne(paddockId).then(setPeople).catch(() => undefined);
+        if (msg.event === "people" || msg.event === "computer") {
+          void paddock.showOne(paddockId).then(setPeople).catch(() => undefined);
+        }
       },
       onClose: () => undefined,
     });
@@ -719,7 +775,7 @@ function Paddock({
         agent_id: identity.agent.id,
         sandbox_id: boxId,
         title: `Terminal ${slug.slice(1)}`,
-        channel_id: channelFor(slug, rev),
+        channel_id: channelFor(paddockId!, slug, rev),
       });
       setActiveSlug(slug);
       await client.sendPrompt(conv.id, bootstrapPrompt({ slug, repoPath: primaryRepoPath(identity.environment) })).catch(() => undefined);
@@ -754,7 +810,7 @@ function Paddock({
           agent_id: identity.agent.id,
           sandbox_id: boxId!,
           title: `Terminal ${fresh.slice(1)}`,
-          channel_id: channelFor(fresh, rev),
+          channel_id: channelFor(paddockId!, fresh, rev),
         });
         setActiveSlug(fresh);
         await refreshConversations();
@@ -773,7 +829,7 @@ function Paddock({
       agent_id: identity.agent.id,
       sandbox_id: boxId,
       title: "Machine",
-      channel_id: channelFor(OPS_SLUG, rev),
+      channel_id: channelFor(paddockId!, OPS_SLUG, rev),
     });
     await refreshConversations();
     return conv.id;
@@ -884,7 +940,15 @@ function Paddock({
   // The owner watches their machine get built; anybody else is only waiting
   // for somebody else's, and has nothing to retry.
   if (isOwner && (!identity || !boxId || strip.length === 0)) {
-    return <Starting step={step} error={fatal} onRetry={() => void retryBoot()} />;
+    return (
+      <Starting
+        step={step}
+        name={place?.name ?? ""}
+        another={!!place && !place.original}
+        error={fatal}
+        onRetry={() => void retryBoot()}
+      />
+    );
   }
   if (fatal && !boxId) return <Splash line={fatal} error />;
   if (!boxId || strip.length === 0) return <Splash line="This machine is not running yet." />;
@@ -898,6 +962,8 @@ function Paddock({
         me={me.label}
         guest={me.kind === "guest"}
         onSelect={onSelectWorkspace}
+        onAdd={onAddComputer}
+        onRename={onRenameComputer}
         onSignOut={onSignOut}
       />
 
@@ -1016,6 +1082,8 @@ function Paddock({
                   onSaveAgent={saveAgent}
                   onRebuild={() => replaceMachine("rebuild")}
                   onReset={() => replaceMachine("reset")}
+                  onRemove={paddockId && me.paddocks.filter((p) => p.role === "owner").length > 1 ? () => onRemoveComputer(paddockId) : null}
+                  computerName={place?.name ?? ""}
                   role={role ?? "guest"}
                 />
               )

@@ -69,6 +69,12 @@ export interface Access {
   paddock: PaddockRow;
   role: Role;
   /**
+   * The owner's oldest computer, and so the one that owns every tab whose
+   * channel names no computer at all. Decided here, once, from the row order
+   * — see `db.paddocksOf` and `tabs.belongsTo`.
+   */
+  original: boolean;
+  /**
    * The tabs this caller may reach, or `null` for the owner, who may reach
    * every tab on their own machine.
    *
@@ -82,16 +88,19 @@ export interface Access {
 export function paddockAccess(ctx: AppContext, id: Identity, paddockId: string): Access {
   const paddock = ctx.db.getPaddock(paddockId);
   if (!paddock) throw new HttpError(404, "not_found", "No such paddock.");
+  // A property of the machine rather than of the caller, so a guest's view of
+  // which tabs are on it is the same as the owner's.
+  const original = ctx.db.paddocksOf(paddock.owner_email)[0]?.id === paddock.id;
 
   if (id.kind === "guest") {
     if (id.guest.paddock_id !== paddock.id) throw new HttpError(404, "not_found", "No such paddock.");
     // Exactly one, by construction: the guest row was made when they followed
     // that tab's link, so there is no lookup here to get wrong.
-    return { paddock, role: "guest", tabs: [id.guest.conversation_id] };
+    return { paddock, role: "guest", original, tabs: [id.guest.conversation_id] };
   }
-  if (paddock.owner_email === id.user.email) return { paddock, role: "owner", tabs: null };
+  if (paddock.owner_email === id.user.email) return { paddock, role: "owner", original, tabs: null };
   const tabs = ctx.db.memberTabs(paddock.id, id.user.email);
-  if (tabs.length) return { paddock, role: "member", tabs };
+  if (tabs.length) return { paddock, role: "member", original, tabs };
   throw new HttpError(404, "not_found", "No such paddock.");
 }
 

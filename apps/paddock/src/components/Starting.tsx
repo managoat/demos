@@ -28,7 +28,21 @@ const ASIDES = [
   "Nothing you add later will take this box away from you.",
 ];
 
-export function Starting({ step, error, onRetry }: { step: BootStep; error: string | null; onRetry: () => void }) {
+export function Starting({
+  step,
+  name,
+  another,
+  error,
+  onRetry,
+}: {
+  step: BootStep;
+  /** What the owner calls the computer being built. */
+  name: string;
+  /** Not the account's first. The steps are the same; the sentence is not. */
+  another: boolean;
+  error: string | null;
+  onRetry: () => void;
+}) {
   const [aside, setAside] = useState(0);
 
   useEffect(() => {
@@ -43,9 +57,13 @@ export function Starting({ step, error, onRetry }: { step: BootStep; error: stri
     <div className="connect">
       <div className="connect-card">
         <h1>
-          <span className="glyph">🐐</span> Building your machine
+          <span className="glyph">🐐</span> Building {another && name ? name : "your machine"}
         </h1>
-        <p className="lede">One computer, yours, that stays up between visits. This happens once.</p>
+        <p className="lede">
+          {another
+            ? "A machine of its own: its own disk, its own packages, its own secrets. Your other computers are untouched, and this happens once per machine."
+            : "One computer, yours, that stays up between visits. This happens once."}
+        </p>
 
         <ul className="rows steps">
           {STEPS.map((s, i) => {

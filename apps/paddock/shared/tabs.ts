@@ -9,8 +9,14 @@
  * same derivation, for teammates rather than tabs, is in
  * `apps/fountain-team/src/lib/threads.ts`.
  *
- * Two things ride in the `channel_id`, as `paddock:<slug>@r<rev>`:
+ * Three things ride in the `channel_id`, as `paddock:<computer>/<slug>@r<rev>`:
  *
+ *   - the **computer** is the paddock this tab belongs to. One account can own
+ *     several machines, and the only thing that tells them apart from outside
+ *     is which agent they are on — which the server would have to ask Fountain
+ *     for. Writing it into the channel keeps the answer derivable from the
+ *     conversation list alone, which is the property everything else here is
+ *     built on;
  *   - the **slug** names the tab's working directory under `~/work`, so the
  *     directory survives a reload and a different browser;
  *   - the **rev** is the config revision current when the tab opened, which is
@@ -44,30 +50,58 @@ export function isLive(c: Pick<Conversation, "status">): boolean {
 }
 
 export interface ChannelParts {
+  /**
+   * Which computer this tab is on, or `null` for a channel written before an
+   * account could have more than one. An unnamed tab is not homeless — see
+   * `belongsTo`, which gives it to the account's original machine.
+   */
+  paddock: string | null;
   slug: string;
   rev: number;
 }
 
-/** `paddock:t2@r7`. */
-export function channelFor(slug: string, rev: number): string {
-  return `${CHANNEL_PREFIX}:${slug}@r${rev}`;
+/** `paddock:kZ3q…/t2@r7`. */
+export function channelFor(paddockId: string, slug: string, rev: number): string {
+  return `${CHANNEL_PREFIX}:${paddockId}/${slug}@r${rev}`;
 }
 
 /**
- * The slug and rev out of a channel id, or null when it is not one of ours.
- * A channel without an `@r…` is one of ours from before revisions existed and
- * reads as rev 0 — which correctly marks it behind everything.
+ * The computer, slug and rev out of a channel id, or null when it is not one
+ * of ours.
+ *
+ * Two older shapes still parse, because tabs opened under them are still open:
+ * a channel with no `/` names no computer, and a channel with no `@r…` reads
+ * as rev 0 — which correctly marks it behind everything.
  */
 export function parseChannel(channel: string | null | undefined): ChannelParts | null {
   if (!channel || !channel.startsWith(`${CHANNEL_PREFIX}:`)) return null;
-  const rest = channel.slice(CHANNEL_PREFIX.length + 1);
-  if (!rest) return null;
+  const body = channel.slice(CHANNEL_PREFIX.length + 1);
+  if (!body) return null;
+  const slash = body.indexOf("/");
+  const paddock = slash === -1 ? null : body.slice(0, slash);
+  const rest = slash === -1 ? body : body.slice(slash + 1);
+  if (!rest || (slash !== -1 && !paddock)) return null;
   const at = rest.lastIndexOf("@r");
-  if (at === -1) return { slug: rest, rev: 0 };
+  if (at === -1) return { paddock, slug: rest, rev: 0 };
   const slug = rest.slice(0, at);
   const rev = Number(rest.slice(at + 2));
   if (!slug || !Number.isFinite(rev) || rev < 0) return null;
-  return { slug, rev: Math.floor(rev) };
+  return { paddock, slug, rev: Math.floor(rev) };
+}
+
+/**
+ * Is this conversation a tab on that computer?
+ *
+ * `original` is the one concession to history: an account that had a machine
+ * before it could have two has tabs whose channel names no computer, and they
+ * belong to the machine it already had. Only the account's oldest paddock ever
+ * passes that flag, so an unnamed tab can be claimed by exactly one computer
+ * and never migrates to another.
+ */
+export function belongsTo(channel: string | null | undefined, paddockId: string, original: boolean): boolean {
+  const parts = parseChannel(channel);
+  if (!parts) return false;
+  return parts.paddock === paddockId || (parts.paddock === null && original);
 }
 
 export interface Tab {
@@ -87,6 +121,17 @@ export interface Tab {
 }
 
 export interface TabsInput {
+  /**
+   * The computer these are tabs on, and whether it may claim a tab whose
+   * channel names none (`belongsTo`).
+   *
+   * Not redundant with the agent below, and the day it looked redundant it was
+   * a bug: a box and an agent identify a *machine*, and two paddocks that
+   * somehow ended up on one machine — recycled ids, a hand-edited agent —
+   * would then show each other's terminals. The computer is the narrower
+   * question and the one the invitations are written against, so it is asked.
+   */
+  paddock: { id: string; original: boolean };
   /** The machine every tab must be on. */
   sandboxId: string;
   agentId: string;
@@ -97,9 +142,10 @@ export interface TabsInput {
 }
 
 /**
- * Every live tab on the box, oldest first so the strip does not reorder itself.
- * Conversations on the same machine that are not paddock's — a tab opened by
- * some other app on the same agent — are left out rather than adopted.
+ * Every live tab on this computer's box, oldest first so the strip does not
+ * reorder itself. Conversations on the same machine that are not paddock's — a
+ * tab opened by some other app on the same agent, or a tab on another one of
+ * your computers — are left out rather than adopted.
  */
 export function tabsOf(all: readonly Conversation[], input: TabsInput): Tab[] {
   const out: Tab[] = [];
@@ -107,6 +153,7 @@ export function tabsOf(all: readonly Conversation[], input: TabsInput): Tab[] {
     if (c.sandbox_id !== input.sandboxId) continue;
     if (c.agent_id !== input.agentId) continue;
     if (!isLive(c)) continue;
+    if (!belongsTo(c.channel_id, input.paddock.id, input.paddock.original)) continue;
     const parts = parseChannel(c.channel_id);
     if (!parts) continue;
     out.push({

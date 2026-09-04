@@ -44,11 +44,35 @@ const state = {
   vaults: [] as Record<string, unknown>[],
   secrets: new Map<string, Map<string, string>>(), // `${parent}:${id}` → key → value
   conversations: [] as Conv[],
-  sandbox: null as null | Record<string, unknown>,
-  /** The box's disk, as far as anything here is concerned. */
-  files: new Map<string, string>(),
+  /**
+   * One box per identity, because that is what Fountain does: the disk is
+   * built for `(user, agent, environment, vault)`, so a second agent is a
+   * second machine. An account with two paddocks has two entries here, and the
+   * mock is only a useful fake of a multi-computer Fountain if it keeps them
+   * apart — including their disks.
+   */
+  sandboxes: new Map<string, Record<string, unknown>>(),
+  /** Each box's disk, keyed by sandbox id. */
+  files: new Map<string, Map<string, string>>(),
   events: new Map<string, unknown[]>(),
 };
+
+/** The identity a disk is built for, as one comparable string. */
+function identityKey(b: { agent_id?: string | null; environment_id?: string | null; vault_id?: string | null }): string {
+  return `${b.agent_id ?? ""}|${b.environment_id ?? ""}|${b.vault_id ?? ""}`;
+}
+
+function boxFor(key: string): Record<string, unknown> | null {
+  for (const box of state.sandboxes.values()) if (identityKey(box as Record<string, string | null>) === key) return box;
+  return null;
+}
+
+/** A box's disk, made on demand so no caller has to check whether it exists. */
+function diskOf(sandboxId: string): Map<string, string> {
+  const disk = state.files.get(sandboxId) ?? new Map<string, string>();
+  state.files.set(sandboxId, disk);
+  return disk;
+}
 
 /**
  * A subscriber is scoped: `conversationId: null` is the account-wide stream,
@@ -201,7 +225,9 @@ async function runTurn(conv: Conv, prompt: string) {
       push(conv.id, { kind: "output", stream: "acp", data: toolDone(id, "ok") });
     }
     const items = [...new Set([...keep, ...done])];
-    state.files.set(
+    // Onto *this* box's disk. A receipt written to a disk shared by every
+    // machine would make one computer's apply show up as applied on another.
+    diskOf(conv.sandbox_id ?? "").set(
       RECEIPT_PATH,
       JSON.stringify({ rev: Number(/"rev":\s*(\d+)/.exec(prompt)?.[1] ?? 1), runtime: conv.runtime, applied_at: now(), items, failed: [] }, null, 2),
     );
@@ -515,13 +541,30 @@ Bun.serve({
 
     // ── conversations ─────────────────────────────────────────────────────
     if (p === "/api/conversations" && method === "GET") {
-      const withSandbox = state.conversations.map((c) => ({ ...c, sandbox: c.sandbox_id ? state.sandbox : null }));
+      const withSandbox = state.conversations.map((c) => ({ ...c, sandbox: c.sandbox_id ? (state.sandboxes.get(c.sandbox_id) ?? null) : null }));
       return json({ data: withSandbox });
     }
     if (p === "/api/conversations" && method === "POST") {
       const b = body as Record<string, string | undefined>;
-      if (!state.sandbox) {
-        state.sandbox = { id: "sb-mock-1", sprite_name: "paddock-mock", status: "ready", provider: "mock", mode: "persistent", agent_id: b.agent_id, environment_id: b.environment_id ?? null, vault_id: b.vault_id ?? null, url: null };
+      // The box this identity already has, if it has one. A second agent is a
+      // second identity is a second machine — which is exactly what a second
+      // computer in paddock is, so the fake has to build one rather than hand
+      // back the box it made for somebody else's agent.
+      let box = boxFor(identityKey(b));
+      if (!box) {
+        const id = `sb-mock-${state.sandboxes.size + 1}`;
+        box = {
+          id,
+          sprite_name: `paddock-mock-${state.sandboxes.size + 1}`,
+          status: "ready",
+          provider: "mock",
+          mode: "persistent",
+          agent_id: b.agent_id,
+          environment_id: b.environment_id ?? null,
+          vault_id: b.vault_id ?? null,
+          url: null,
+        };
+        state.sandboxes.set(id, box);
         // A small tree, so the file browser has something to be a file browser
         // about. A real box has a checkout here; an empty mock made the
         // explorer look broken when it was merely accurate.
@@ -530,6 +573,7 @@ Bun.serve({
         // it renames is here under its new name, the file it adds is here, and
         // the file it deletes is not. A Changes list that points at paths the
         // tree does not have is a fake disagreeing with itself.
+        const disk = diskOf(id);
         for (const [path, body] of [
           [`${WORK_ROOT}/t1/README.md`, "# Your machine\n\nThis is a mock checkout, and it has changes in it.\n\nAsk for something in the tab and this is where it shows up.\n"],
           [`${WORK_ROOT}/t1/package.json`, '{\n  "name": "example",\n  "version": "0.1.0"\n}\n'],
@@ -539,7 +583,7 @@ Bun.serve({
           [`${WORK_ROOT}/t1/src/lib/helpers.ts`, "export const answer = 42;\n"],
           [`${WORK_ROOT}/t1/test/index.test.ts`, 'import { hello } from "../src/index";\n'],
         ] as [string, string][]) {
-          state.files.set(path, body);
+          disk.set(path, body);
         }
       }
       // Attaching is identity-checked, the way Fountain checks it. The disk was
@@ -548,20 +592,18 @@ Bun.serve({
       // — is 422 sandbox_identity_mismatch. Paddock shipped an attach that sent
       // only the agent and the sandbox, and this is the rule that caught it.
       if (b.sandbox_id) {
-        const box = state.sandbox as Record<string, string | null> | null;
-        if (!box || box.id !== b.sandbox_id) return json({ error: "sandbox_not_found" }, 404);
-        const wanted = { agent_id: b.agent_id ?? null, environment_id: b.environment_id ?? null, vault_id: b.vault_id ?? null };
-        for (const key of ["agent_id", "environment_id", "vault_id"] as const) {
-          if ((box[key] ?? null) !== wanted[key]) {
-            return json({ error: "sandbox_identity_mismatch", message: "That machine was built for a different agent, environment or vault." }, 422);
-          }
+        const named = state.sandboxes.get(b.sandbox_id);
+        if (!named) return json({ error: "sandbox_not_found" }, 404);
+        if (identityKey(named as Record<string, string | null>) !== identityKey(b)) {
+          return json({ error: "sandbox_identity_mismatch", message: "That machine was built for a different agent, environment or vault." }, 422);
         }
+        box = named;
       }
       const agent = state.agents.find((a) => a.id === b.agent_id) as { runtime?: string } | undefined;
       const conv: Conv = {
         id: `c${state.conversations.length + 1}`,
         title: b.title ?? null,
-        sandbox_id: (state.sandbox as { id: string }).id,
+        sandbox_id: box.id as string,
         agent_id: b.agent_id!,
         vault_id: b.vault_id ?? null,
         environment_id: b.environment_id ?? null,
@@ -579,7 +621,7 @@ Bun.serve({
       // it. Ignoring it made a started machine look like a dead one.
       const first = typeof b.prompt === "string" ? b.prompt : "";
       if (first.trim()) void runTurn(conv, first);
-      return json({ data: { ...conv, sandbox: state.sandbox } });
+      return json({ data: { ...conv, sandbox: box } });
     }
 
     const convPrompt = /^\/api\/conversations\/([^/]+)\/prompts$/.exec(p);
@@ -612,14 +654,18 @@ Bun.serve({
     const convOne = /^\/api\/conversations\/([^/]+)$/.exec(p);
     if (convOne) {
       const conv = state.conversations.find((c) => c.id === convOne[1]);
-      return conv ? json({ data: { ...conv, sandbox: state.sandbox } }) : json({ error: "not_found" }, 404);
+      const box = conv?.sandbox_id ? (state.sandboxes.get(conv.sandbox_id) ?? null) : null;
+      return conv ? json({ data: { ...conv, sandbox: box } }) : json({ error: "not_found" }, 404);
     }
 
     // ── the box, read-only ────────────────────────────────────────────────
+    // Every one of these reads *that* box's disk. Serving one shared disk for
+    // every sandbox id would let a second computer see the first one's files
+    // and its receipt, which is the whole thing the app must not do.
     const sbFile = /^\/api\/sandboxes\/([^/]+)\/file$/.exec(p);
     if (sbFile) {
       const path = url.searchParams.get("path") ?? "";
-      const content = state.files.get(path);
+      const content = diskOf(sbFile[1]!).get(path);
       if (content === undefined) return json({ error: "not_found" }, 404);
       return json({ data: { path, size: content.length, truncated: false, encoding: "utf8", content } });
     }
@@ -627,7 +673,7 @@ Bun.serve({
     if (sbFiles) {
       const dir = (url.searchParams.get("path") ?? "/").replace(/\/+$/, "");
       const seen = new Map<string, { name: string; type: string; size: number | null }>();
-      for (const [path, content] of state.files) {
+      for (const [path, content] of diskOf(sbFiles[1]!)) {
         if (!path.startsWith(`${dir}/`)) continue;
         const rest = path.slice(dir.length + 1);
         const slash = rest.indexOf("/");
@@ -644,7 +690,10 @@ Bun.serve({
       return json({ data: { path, repo_root: `${WORK_ROOT}/t1`, staged: false, ref: "main", diff: MOCK_DIFF, truncated: false } });
     }
     const sbOne = /^\/api\/sandboxes\/([^/]+)$/.exec(p);
-    if (sbOne) return state.sandbox ? json({ data: state.sandbox }) : json({ error: "not_found" }, 404);
+    if (sbOne) {
+      const box = state.sandboxes.get(sbOne[1]!);
+      return box ? json({ data: box }) : json({ error: "not_found" }, 404);
+    }
 
     // ── stream ────────────────────────────────────────────────────────────
     if (p === "/api/events/stream") return sse(null);
