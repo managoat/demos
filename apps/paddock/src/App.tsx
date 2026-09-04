@@ -962,7 +962,6 @@ function Paddock({
               people && active ? (
                 <People
                   tab={tabPeople}
-                  tabTitle={active.title}
                   role={role ?? "guest"}
                   meLabel={me.label}
                   ownerEmail={people.ownerEmail}

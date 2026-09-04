@@ -12,6 +12,17 @@
  *   new machine    the runtime is baked in. This one really cannot be done to
  *                  a machine you are already using.
  *
+ * The explanations live behind the (i) next to each heading. There are a lot
+ * of them — three tiers, two kinds of secret, what Fountain's "verified" claim
+ * about an MCP server does and does not cover, what skills.sh is and is not,
+ * two ways to replace a box — and a panel that said all of it at once buried
+ * the rows and the buttons that are the point of it. Nothing was deleted; it
+ * is one click away, next to the thing it is about.
+ *
+ * What stays on screen unasked is state, and the one disclosure that is about
+ * an action in progress: tick "private repository" and the panel says, then and
+ * there, where that token ends up and who can read it.
+ *
  * The panel never says "applied" on trust. Tier-`box` rows are `applied` only
  * because the machine itself wrote the id into its receipt, read back over the
  * read-only sandbox routes; when the receipt cannot be read the panel says the
@@ -125,7 +136,7 @@ export function Machine(props: MachineProps) {
 
         {drift.extra.length > 0 && (
           <p className="fine">
-            Also on the box, no longer declared: {drift.extra.join(", ")}. Harmless — nothing removes them.
+            Also on the box, no longer declared: {drift.extra.join(", ")}. Nothing removes them.
           </p>
         )}
 
@@ -209,7 +220,6 @@ export function Machine(props: MachineProps) {
           <li className="row">
             <span className="state locked">baked in</span>
             <span className="row-label">{props.agent.runtime}</span>
-            <span className="dim">changing this means starting a new box, and losing what is on this one</span>
           </li>
         </ul>
         {isOwner && <Replace onRebuild={props.onRebuild} onReset={props.onReset} busy={!!props.busy} />}
@@ -219,13 +229,36 @@ export function Machine(props: MachineProps) {
 }
 
 function SectionHead({ title, when, note }: { title: string; when: string; note: string }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="section-head">
-      <h3>
-        {title} <span className="dim">— {when}</span>
-      </h3>
-      <p className="fine">{note}</p>
-    </div>
+    <>
+      <div className="section-head">
+        <h3>
+          {title} <span className="dim">— {when}</span>
+        </h3>
+        <InfoButton open={open} about={title} onToggle={() => setOpen(!open)} />
+      </div>
+      {open && <p className="fine info-note">{note}</p>}
+    </>
+  );
+}
+
+/**
+ * The (i). It is a toggle rather than a tooltip because the thing it opens is
+ * a sentence or three that somebody may want to read twice, and a hover
+ * bubble is not readable on a touchscreen or by a keyboard at all.
+ */
+function InfoButton({ open, about, onToggle }: { open: boolean; about: string; onToggle: () => void }) {
+  return (
+    <button
+      className={`info${open ? " on" : ""}`}
+      onClick={onToggle}
+      aria-expanded={open}
+      aria-label={`${open ? "Hide" : "What"} ${about.toLowerCase()} means`}
+      title={open ? "hide" : `about ${about.toLowerCase()}`}
+    >
+      i
+    </button>
   );
 }
 
@@ -350,7 +383,16 @@ function Repositories({
   }
 
   return (
-    <Editor title="Repositories">
+    <Editor
+      title="Repositories"
+      info={
+        <>
+          Fountain clones over <code>https://</code> only. A private one needs a token: tick <em>private repository</em> and
+          paste one, and it is kept as a secret named <code>{CLONE_SECRET}</code>. Where more than one is listed, a new tab
+          branches from the first and the rest are cloned and left alone.
+        </>
+      }
+    >
       {repos.map((r, i) => (
         <div className="editor-row" key={`${r.url}-${i}`}>
           <code>{shortRepo(r.url)}</code>
@@ -428,12 +470,6 @@ function Repositories({
 
       {error && <p className="fine error">{error}</p>}
 
-      {repos.length > 1 && (
-        <p className="fine">
-          A new tab branches from <code>{shortRepo(repos[0]!.url)}</code>, the first one here. The rest are cloned and left
-          alone.
-        </p>
-      )}
     </Editor>
   );
 }
@@ -536,7 +572,15 @@ function SetupScript({ environment, onSave }: { environment: Environment; onSave
   const dirty = text !== saved;
 
   return (
-    <Editor title="Setup script" right={<button className="ghost" onClick={() => setOpen(!open)}>{open ? "hide" : "edit"}</button>}>
+    <Editor
+      title="Setup script"
+      info="Saving changes what a new box is built from. Applying runs it on this one."
+      right={
+        <button className="ghost" onClick={() => setOpen(!open)}>
+          {open ? "hide" : "edit"}
+        </button>
+      }
+    >
       {!open ? (
         <p className="fine">{saved.trim() ? `${saved.trim().split("\n").length} lines` : "none"}</p>
       ) : (
@@ -546,7 +590,6 @@ function SetupScript({ environment, onSave }: { environment: Environment; onSave
             <button onClick={() => void onSave({ setup_script: text })} disabled={!dirty}>
               Save
             </button>
-            {dirty && <span className="fine">Saving changes what a new box is built from; applying runs it on this one.</span>}
           </div>
         </>
       )}
@@ -579,18 +622,22 @@ function Secrets({
   }
 
   return (
-    <Editor title="Secrets">
-      <p className="fine">
-        Two different things. An <strong>environment</strong> secret is put into the machine as an environment variable — the
-        agent can read it. A <strong>vault</strong> secret never touches the machine: the egress broker substitutes it into
-        outbound requests, so the agent uses it without ever holding it.
-      </p>
-
-      <KeyList label="environment · in the box" keys={envKeys} onRemove={(k) => onRemove("env", k)} />
+    <Editor
+      title="Secrets"
+      info={
+        <>
+          Two different things. An <strong>environment</strong> secret is put into the machine as an environment variable — the
+          agent can read it. A <strong>vault</strong> secret never touches the machine: the egress broker substitutes it into
+          outbound requests, so the agent uses it without ever holding it. Either way the value goes straight to Fountain —
+          Paddock does not keep it, and cannot read it back.
+        </>
+      }
+    >
+      <KeyList label="environment" hint="in the box" keys={envKeys} onRemove={(k) => onRemove("env", k)} />
       {hasVault ? (
-        <KeyList label="vault · never on the box" keys={vaultKeys} onRemove={(k) => onRemove("vault", k)} />
+        <KeyList label="vault" hint="never on the box" keys={vaultKeys} onRemove={(k) => onRemove("vault", k)} />
       ) : (
-        <p className="fine">This Fountain has no vault for you, so broker-held secrets are not available.</p>
+        <p className="fine">No vault on this Fountain, so vault secrets are not available.</p>
       )}
 
       <div className="editor-row">
@@ -604,15 +651,16 @@ function Secrets({
           add
         </button>
       </div>
-      <p className="fine">The value goes straight to Fountain. Paddock does not keep it, and cannot read it back.</p>
     </Editor>
   );
 }
 
-function KeyList({ label, keys, onRemove }: { label: string; keys: string[]; onRemove: (k: string) => void }) {
+function KeyList({ label, hint, keys, onRemove }: { label: string; hint: string; keys: string[]; onRemove: (k: string) => void }) {
   return (
     <div className="editor-row">
-      <span className="dim narrow">{label}</span>
+      <span className="dim narrow" title={hint}>
+        {label}
+      </span>
       <div className="chips">
         {keys.map((k) => (
           <span className="chip" key={k}>
@@ -694,7 +742,19 @@ function McpServers({
   }
 
   return (
-    <Editor title="MCP servers">
+    <Editor
+      title="MCP servers"
+      info={
+        <>
+          The list is Fountain&apos;s catalog. <em>Verified{entries[0]?.verified_on ? ` ${entries[0].verified_on}` : ""}</em>{" "}
+          means the authorization chain completed against each URL on that date, by a script — not an endorsement, and nothing
+          was checked about the tools they offer.{" "}
+          {brokered
+            ? "A connection is made at Fountain, in a browser signed in as you. Paddock cannot do it here: connecting is not an API operation."
+            : "This Fountain has no credential broker for you, so a remote server added here carries no credential of its own."}
+        </>
+      }
+    >
       {Object.keys(servers).length === 0 && <p className="fine">none</p>}
       {Object.entries(servers).map(([key, cfg]) => {
         const connection = connectionOf(cfg);
@@ -766,15 +826,6 @@ function McpServers({
               );
             })}
           </div>
-          <p className="fine">
-            Verified {entries[0]?.verified_on ?? ""} — the authorization chain completed against each URL on that date, by a
-            script. Not an endorsement, and nothing was checked about the tools they offer.
-          </p>
-          <p className="fine">
-            {brokered
-              ? "A connection is made at Fountain, in a browser signed in as you. Paddock cannot do it here: connecting is not an API operation."
-              : "This Fountain has no credential broker for you, so a remote server added here carries no credential of its own."}
-          </p>
         </>
       )}
 
@@ -820,7 +871,18 @@ function Skills({ agent, onSave }: { agent: Agent; onSave: MachineProps["onSaveA
   }
 
   return (
-    <Editor title="Skills">
+    <Editor
+      title="Skills"
+      info={
+        <>
+          Search is skills.sh, not Fountain — Fountain curates no list of skills, so nothing here is verified by anyone, and
+          adding one runs its installer on your machine. A repository can hold many skills; naming one installs only that one.
+          Without a ref, Fountain resolves the default branch <em>when a tab opens</em>, so two tabs a week apart can get
+          different code — pin anything you depend on. <em>Write it here</em> runs no installer: Fountain writes what you type
+          to the machine as <code>SKILL.md</code>.
+        </>
+      }
+    >
       <div className="chips">
         {entries.map((entry, i) => (
           <span className="chip" key={`${skillKey(entry)}-${i}`}>
@@ -837,10 +899,6 @@ function Skills({ agent, onSave }: { agent: Agent; onSave: MachineProps["onSaveA
       <SkillByHand onAdd={add} onError={setError} />
 
       {error && <p className="fine error">{error}</p>}
-      <p className="fine">
-        Search is skills.sh, not Fountain — Fountain curates no list of skills, so nothing here is verified by anyone. Adding one
-        runs its installer on your machine.
-      </p>
     </Editor>
   );
 }
@@ -971,23 +1029,15 @@ function SkillByHand({ onAdd, onError }: { onAdd: (entry: SkillEntry) => Promise
         </button>
       </div>
 
-      {kind === "inline" ? (
-        <>
-          <textarea
-            className="script"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            rows={6}
-            spellCheck={false}
-            placeholder={"---\nname: house-style\ndescription: Our commit and PR conventions.\n---\n\n# House style"}
-          />
-          <p className="fine">Fountain writes this to the machine as SKILL.md. No installer runs.</p>
-        </>
-      ) : (
-        <p className="fine">
-          A repository can hold many skills; naming one installs only that one. Without a ref, Fountain resolves the default
-          branch <em>when a tab opens</em>, so two tabs a week apart can get different code — pin anything you depend on.
-        </p>
+      {kind === "inline" && (
+        <textarea
+          className="script"
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          rows={6}
+          spellCheck={false}
+          placeholder={"---\nname: house-style\ndescription: Our commit and PR conventions.\n---\n\n# House style"}
+        />
       )}
     </>
   );
@@ -1072,28 +1122,48 @@ function Replace({ onRebuild, onReset, busy }: { onRebuild: () => Promise<void>;
   }
 
   return (
-    <div className="editor">
+    <Editor
+      title="Replace"
+      info={
+        <>
+          <strong>Build a new machine</strong> keeps everything declared above and starts you on a fresh disk — useful when
+          this one is in a state you would rather not unpick. <strong>Start over</strong> deletes the machine and the
+          settings with it, secrets included.
+        </>
+      }
+    >
       <div className="editor-row">
         <button onClick={() => setAsking("rebuild")}>Build a new machine</button>
-        <span className="fine">Keeps everything above. Useful when the disk is in a state you would rather not unpick.</span>
-      </div>
-      <div className="editor-row">
         <button className="ghost danger-text" onClick={() => setAsking("reset")}>
           Start over
         </button>
-        <span className="fine">Deletes the machine and the settings, secrets included.</span>
       </div>
-    </div>
+    </Editor>
   );
 }
 
-function Editor({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
+function Editor({
+  title,
+  info,
+  right,
+  children,
+}: {
+  title: string;
+  /** The explanation, if this editor needs one. Folded behind the (i). */
+  info?: React.ReactNode;
+  right?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
   return (
     <div className="editor">
       <div className="editor-head">
         <h4>{title}</h4>
+        {info && <InfoButton open={open} about={title} onToggle={() => setOpen(!open)} />}
+        <span className="spacer" />
         {right}
       </div>
+      {info && open && <p className="fine info-note">{info}</p>}
       {children}
     </div>
   );
