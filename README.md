@@ -1,6 +1,6 @@
 # managoat/demos
 
-The Fountain demo suite. Sixteen apps, one per directory under `apps/`, each
+The Fountain demo suite. Seventeen apps, one per directory under `apps/`, each
 served at `<name>.demo.managoat.com` and indexed at
 [demo.managoat.com](https://demo.managoat.com).
 
@@ -14,6 +14,7 @@ what they do is an ordinary web app with no privileged access.
 | [arena](apps/arena) | arena.demo.managoat.com | One prompt to several model brains, side by side, blind until you vote. |
 | [briefing-room](apps/briefing-room) | briefing-room.demo.managoat.com | Commissioned research briefs with real sources. |
 | [dns-desk](apps/dns-desk) | dns-desk.demo.managoat.com | The shape every other app here was cloned from. |
+| [drydock](apps/drydock) | drydock.demo.managoat.com | Conductor for cloud machines: a thread is a repo clone on a machine of its own, with a real terminal. |
 | [fountain-conversations](apps/fountain-conversations) | fountain-conversations.demo.managoat.com | A client for the conversations surface: chat, timeline and raw views. |
 | [fountain-demos](apps/fountain-demos) | demo.managoat.com | The suite's own index, at the parent of every host it lists. |
 | [fountain-team](apps/fountain-team) | fountain-team.demo.managoat.com | Your agents as teammates in a messaging app. |
