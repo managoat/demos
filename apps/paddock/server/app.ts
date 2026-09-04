@@ -8,7 +8,7 @@
  *   DELETE /api/auth/session                  sign out
  *   POST   /api/join/:token                   follow an invite link (no account needed)
  *
- *   GET    /api/skills/search                 the skills.sh index, for the Machine panel
+ *   GET    /api/skills/search                 the skills.sh index, for the Setup panel
  *
  *   GET    /api/paddock                       the caller's machine and its people
  *   POST   /api/paddocks                      another computer of their own

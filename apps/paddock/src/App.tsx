@@ -15,7 +15,8 @@ import type { Agent, Catalog, Connection, ConnectionProvider, Conversation, Envi
 import { Starting } from "./components/Starting";
 import { Connect } from "./components/Connect";
 import { Files } from "./components/Files";
-import { Machine } from "./components/Machine";
+import { Details } from "./components/Details";
+import { Setup } from "./components/Setup";
 import { People } from "./components/People";
 import { Upgrade } from "./components/Upgrade";
 import { Tabs } from "./components/Tabs";
@@ -33,7 +34,12 @@ const STREAMS = ["acp", "stdout", "stderr", "stage"];
 /** The tab list carries status; a short poll keeps "who holds the machine" honest. */
 const POLL_MS = 4000;
 
-type Side = "machine" | "files" | "people" | "account";
+/**
+ * Which panel the inspector is showing. `setup` is the owner's only — it is
+ * never in the tab strip for anybody else, and the branch that renders it
+ * checks again, because a `side` can outlive the role that chose it.
+ */
+type Side = "details" | "setup" | "files" | "people" | "account";
 
 export function App() {
   const [me, setMe] = useState<Me | null>(null);
@@ -286,7 +292,7 @@ function Paddock({
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
   const [queued, setQueued] = useState<Record<string, string>>({});
   const [opening, setOpening] = useState(false);
-  const [side, setSide] = useState<Side>("machine");
+  const [side, setSide] = useState<Side>("details");
 
   const [envSecretKeys, setEnvSecretKeys] = useState<string[]>([]);
   const [vaultSecretKeys, setVaultSecretKeys] = useState<string[]>([]);
@@ -371,7 +377,7 @@ function Paddock({
         const mine = agents.find(isPaddockAgent);
         // First run provisions rather than asking. The one choice that was
         // ever on that form — the runtime — is the same answer for everybody,
-        // and the Machine panel says what was picked and what changing it costs.
+        // and Details says what was picked, Setup what changing it costs.
         const choice = mine ? { runtime: mine.runtime, model: mine.model } : defaultChoice(cat);
         setIdentity(await ensureIdentity(client, choice, { paddockId, original: place.original }, setStep));
       } catch (err) {
@@ -531,7 +537,7 @@ function Paddock({
         setIdentity({ agent, environment, vault: source.vault_id ? { id: source.vault_id, name: "" } : null });
       } catch {
         // A machine we can use but not describe: the terminal still works,
-        // and the Machine panel says it has nothing to show.
+        // and the Details panel says it has nothing to show.
       }
     })();
   }, [isOwner, identity, conversations, client]);
@@ -846,8 +852,8 @@ function Paddock({
         ops,
         applyPrompt({ rev, todo: applyTodo(drift), keep: applyKeep(drift), runtime: identity.agent.runtime }),
       );
-      setSide("machine");
-      setNotice("Applying on the box — watch the Machine tab.");
+      setSide("details");
+      setNotice("Applying on the box — watch the Details tab.");
       await refreshConversations();
     } catch (err) {
       setNotice(describeError(err));
@@ -883,7 +889,7 @@ function Paddock({
     if (!identity) return;
     try {
       // Same environment id, new contents: the box keeps running, and the
-      // Machine panel starts showing the gap.
+      // Details panel starts showing the gap.
       const env: Environment = await client.updateEnvironment(identity.environment.id, patch);
       setIdentity((cur) => (cur ? { ...cur, environment: env } : cur));
     } catch (err) {
@@ -1002,20 +1008,29 @@ function Paddock({
 
           <aside className="inspector-panel">
             {/*
-              These three switch the panel, so they belong to the panel. In the
-              top bar they read as application-wide navigation, which is what
-              they looked like and never were.
+              These switch the panel, so they belong to the panel. In the top
+              bar they read as application-wide navigation, which is what they
+              looked like and never were.
+
+              **Setup** is here only for the owner. It used to be the bottom
+              half of the Machine panel, gated the same way — so a guest loses
+              nothing by its absence, and gains a strip that offers only what
+              they can actually do.
             */}
             <nav className="panel-tabs">
-              {(["machine", "files", "people"] as const).map((which) => (
-                <button key={which} className={side === which ? "on" : ""} onClick={() => setSide(which)}>
-                  {which === "machine"
-                    ? "Machine"
-                    : which === "files"
-                      ? "Files"
-                      : `People${people && people.here.length > 1 ? ` (${people.here.length})` : ""}`}
-                </button>
-              ))}
+              {(["details", "setup", "files", "people"] as const)
+                .filter((which) => which !== "setup" || role === "owner")
+                .map((which) => (
+                  <button key={which} className={side === which ? "on" : ""} onClick={() => setSide(which)}>
+                    {which === "details"
+                      ? "Details"
+                      : which === "setup"
+                        ? "Setup"
+                        : which === "files"
+                          ? "Files"
+                          : `People${people && people.here.length > 1 ? ` (${people.here.length})` : ""}`}
+                  </button>
+                ))}
               {me.kind === "guest" && (
                 <button className={`upgrade-tab ${side === "account" ? "on" : ""}`} onClick={() => setSide("account")}>
                   Sign in
@@ -1050,14 +1065,17 @@ function Paddock({
                   <p className="fine">Nobody is sharing this machine.</p>
                 </div>
               )
-            ) : side === "machine" ? (
-              !identity ? (
+            ) : side === "setup" ? (
+              // The tab is not offered to a guest, and the panel is not built
+              // for one either — `side` is state, and a role can change under
+              // it (a guest signing in, an owner removing somebody) without
+              // the strip having been clicked since.
+              !identity || role !== "owner" ? (
                 <div className="panel">
-                  <p className="fine">Nothing to show about this machine.</p>
+                  <p className="fine">Only the owner changes what this machine is made of.</p>
                 </div>
               ) : (
-                <Machine
-                  sandbox={sandbox}
+                <Setup
                   agent={identity.agent}
                   environment={identity.environment}
                   vault={identity.vault}
@@ -1065,17 +1083,10 @@ function Paddock({
                   connections={connections}
                   providers={providers}
                   fountainUrl={fountainUrl}
-                  rev={rev}
-                  desired={desired}
-                  drift={drift}
                   envSecretKeys={envSecretKeys}
                   vaultSecretKeys={vaultSecretKeys}
-                  stale={staleTabs(tabs)}
-                  applying={applying}
+                  drift={drift}
                   busy={machineHolder?.title ?? null}
-                  onApply={() => void apply()}
-                  onReconcile={() => void reconcile()}
-                  onOpenTab={() => void openTab()}
                   onSaveEnvironment={saveEnvironment}
                   onAddSecret={addSecret}
                   onRemoveSecret={removeSecret}
@@ -1084,6 +1095,28 @@ function Paddock({
                   onReset={() => replaceMachine("reset")}
                   onRemove={paddockId && me.paddocks.filter((p) => p.role === "owner").length > 1 ? () => onRemoveComputer(paddockId) : null}
                   computerName={place?.name ?? ""}
+                  onDetails={() => setSide("details")}
+                />
+              )
+            ) : side === "details" ? (
+              !identity ? (
+                <div className="panel">
+                  <p className="fine">Nothing to show about this machine.</p>
+                </div>
+              ) : (
+                <Details
+                  sandbox={sandbox}
+                  agent={identity.agent}
+                  rev={rev}
+                  desired={desired}
+                  drift={drift}
+                  stale={staleTabs(tabs)}
+                  applying={applying}
+                  busy={machineHolder?.title ?? null}
+                  onApply={() => void apply()}
+                  onReconcile={() => void reconcile()}
+                  onOpenTab={() => void openTab()}
+                  onSetup={role === "owner" ? () => setSide("setup") : null}
                   role={role ?? "guest"}
                 />
               )

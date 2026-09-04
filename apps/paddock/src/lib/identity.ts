@@ -37,7 +37,7 @@ export const IDENTITY_NAME = "Paddock";
  * Not a question the app asks. Runtime is the one thing baked into the disk,
  * so it looked like it deserved a form — but a form on first run is a form
  * between somebody and the thing they came for, answered identically by
- * everyone. Paddock picks, and the Machine panel says what was picked and what
+ * everyone. Paddock picks, and the Details panel says what was picked and what
  * changing it would cost.
  */
 export const DEFAULT_RUNTIME = "claude";
@@ -199,7 +199,7 @@ async function ensureEnvironment(client: FountainClient, place: Place): Promise<
   const found = (await client.listEnvironments()).find((e) => e.name === name);
   if (found) return found;
   // Deliberately empty: a first box is a bare machine, and everything on it
-  // afterwards arrives through the Machine panel where it can be seen.
+  // afterwards arrives through the Setup panel where it can be seen.
   return client.createEnvironment({ name, repositories: [], packages: {}, setup_script: "" });
 }
 
@@ -210,7 +210,7 @@ async function ensureVault(client: FountainClient, place: Place): Promise<Vault 
     return found ?? (await client.createVault({ name }));
   } catch (err) {
     // A Fountain without vaults, or a key without the scope. Not fatal: the
-    // machine works, and the Machine panel says vault secrets are unavailable.
+    // machine works, and the Setup panel says vault secrets are unavailable.
     if (err instanceof ApiError && (err.status === 403 || err.status === 404 || err.status === 501)) return null;
     throw err;
   }

@@ -262,7 +262,7 @@ describe("the welcome turn", () => {
 
   test("names what a person can actually do here, so the first turn orients them", () => {
     const welcome = welcomePrompt({ slug: "t1", repoPath: null });
-    for (const subject of ["persists", "tab", "one tab runs a turn at a time", "Machine panel", "applied", "People"]) {
+    for (const subject of ["persists", "tab", "one tab runs a turn at a time", "Setup", "Details", "applied", "People"]) {
       expect(welcome).toContain(subject);
     }
   });

@@ -56,7 +56,7 @@ function tabAllowed(method: string, sub: string, role: Role): boolean {
 /**
  * Reading the machine's configuration: everyone in the paddock.
  *
- * A guest sees the Machine panel read-only, which means they see repository
+ * A guest sees the Details panel and no Setup, which means they see repository
  * URLs, package names and secret *key names* — never a value, because Fountain
  * does not serve values back to anyone. That is a deliberate call rather than
  * an oversight: a guest who can prompt the agent can already have it print
@@ -75,7 +75,7 @@ const READ_PATHS: { method: string; re: RegExp }[] = [
  * owner alone.
  *
  * Deliberately a list of shapes rather than "anything under /api". These are
- * the calls the Machine panel and first-run make, and no others — forwarding
+ * the calls the Details and Setup panels and first-run make, and no others — forwarding
  * arbitrary paths for the owner would hand their whole Fountain account to
  * anything that could script their browser. Nothing here deletes an agent, an
  * environment or a vault; losing those loses the machine.

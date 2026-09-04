@@ -58,7 +58,7 @@ export type SecretParent = "environments" | "vaults";
  * The distinction is load-bearing and an earlier version of this lost it. "The
  * broker is off for this account, so connections do not exist" and "the broker
  * is on and you have not connected anything" are different facts, and the
- * Machine panel says a different — and differently *true* — thing about
+ * Details panel says a different — and differently *true* — thing about
  * credentials in each. Collapsing both to `[]` made the panel guess.
  *
  * Only for reads whose absence is a real deployment state, never for a write:

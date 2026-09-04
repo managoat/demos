@@ -8,7 +8,7 @@
  *   inline   {name, content}          Fountain writes `<skills_root>/<name>/SKILL.md`
  *   github   {source, ref?, name?}    the skills.sh CLI installs it on the box
  *
- * The Machine panel used to append a bare string, which Fountain refuses at
+ * The Skills editor used to append a bare string, which Fountain refuses at
  * cast time (`entry 0: must be an object`). It went unnoticed for as long as it
  * did because `mock/server.ts` validated nothing and simply stored whatever it
  * was handed — so the whole loop worked offline and only ever failed against a
@@ -188,7 +188,7 @@ export function skillLabel(entry: SkillEntry): string {
 }
 
 /**
- * The id the Machine panel keys a skill row on.
+ * The id the Skills editor keys a skill row on.
  *
  * Content-addressed like every other id in `lib/machine.ts`: pinning a ref or
  * picking a different skill out of the same repository reads as a new row

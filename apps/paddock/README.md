@@ -91,10 +91,38 @@ when it genuinely takes effect, and never says "applied" on trust.
 | **Next tab** | secrets, MCP servers, skills, the prompt | opening a tab | a revision stamped on each tab |
 | **New machine** | the runtime | a rebuild | it is baked into the disk |
 
+### Details and Setup — the same three tiers, twice
+
+Those tiers were one panel for a long time, with the forms for each sitting
+directly under its rows. It read as a settings page that happened to print some
+state, and it had that backwards. The state is the thing worth leaving open
+beside a terminal — it is the only place the box gets to speak — and the forms
+are somewhere you go, fill in, and leave.
+
+So there are two panels. **Details** is the machine as it is: what the receipt
+says, what the next tab will get, what is baked in, and the three buttons that
+answer something on the page — apply what is pending, ask a silent box what it
+has, open a tab that is not behind. **Setup** is the machine as it was asked
+for: every editor, under the same three headings in the same order.
+
+Splitting them is also the role boundary made visible. Every editor was already
+owner-only, so a guest was reading the top halves of three sections and being
+shown nothing underneath; now they get a strip with no Setup tab in it. The
+headings and their "how it lands" line are declared once, in
+`components/Panel.tsx`, because two panels about one subject must not drift.
+
+Nothing in Setup applies anything. Saving declares, and the panel says so: when
+something is waiting it hands over to Details rather than growing a second
+Apply button, because two buttons that apply would be two places to learn what
+"applied" means. It asks the same question Details does — is there an Apply
+over there — rather than counting rows, which got it wrong in exactly the state
+it mattered most: an unreadable receipt made the count zero, so Setup went
+quiet at the moment somebody had just declared something that went nowhere.
+
 ### On the box — verified, not assumed
 
 The environment builds the disk, so editing it does nothing to a running
-machine. The panel shows those rows as `pending` and offers **Apply**, which
+machine. Details shows those rows as `pending` and offers **Apply**, which
 sends one turn to a hidden ops tab: do these things, then write
 `~/.paddock/applied.json` with the ids you finished. You watch it happen.
 
@@ -221,7 +249,7 @@ is see your *other* conversations. No permission model closes the rest, because
 the agent is the thing holding the shell — so the invite dialog says so where
 the decision is being made rather than in this file.
 
-The one real mitigation is the distinction the Machine panel already draws: an
+The one real mitigation is the distinction the Secrets editor already draws: an
 **environment** secret is an env var inside the box and a guest can read it; a
 **vault** secret never touches the box at all, because the egress broker
 substitutes it in flight. Once other people are in your paddock, that is where
@@ -233,7 +261,7 @@ and `GH_TOKEN` — and a secret under one of those names is brokered with no
 binding and no configuration at all. The sandbox holds `__github_token__`, the
 clone URL is written with that placeholder, and the broker attaches git's real
 `x-access-token` basic auth on the way out. So marking a repository **private**
-in the Machine panel stores a `GITHUB_TOKEN`, names it in the repository's
+in Setup stores a `GITHUB_TOKEN`, names it in the repository’s
 `secret_key`, and the clone works with the token never on the machine — where
 somebody you invited could have printed it.
 

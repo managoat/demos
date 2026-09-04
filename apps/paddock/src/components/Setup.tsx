@@ -1,51 +1,30 @@
 /**
- * The Machine panel: what you have asked for, what the box actually has, and
- * the one button that closes the gap.
+ * The Setup panel: everything this machine is declared to be made of.
  *
- * Every row carries its tier, because the tier is the honest answer to "when
- * does this take effect?" and there are three different answers:
+ * The forms live apart from the rows they produce, on purpose. [Details](./Details.tsx)
+ * is the machine as it is — a thing to keep open beside a terminal and glance
+ * at — and this is the machine as it was asked for. Mixing them made one long
+ * page where the state you wanted to watch was pushed under the forms you had
+ * finished with, and made "pending" look like a property of a form rather than
+ * a fact about a box.
  *
- *   on the box     the environment builds the disk. Changing it does nothing to
- *                  a running machine until an apply turn does the work.
- *   next tab       the agent and the secrets are injected when a session
- *                  starts. Already-open tabs kept what they started with.
- *   new machine    the runtime is baked in. This one really cannot be done to
- *                  a machine you are already using.
+ * The tiers are the same three, in the same order, under the same headings,
+ * because the point of splitting is not to have two layouts. `TIER` in
+ * [Panel](./Panel.tsx) is what keeps them from drifting.
  *
- * The explanations live behind the (i) next to each heading. There are a lot
- * of them — three tiers, two kinds of secret, what Fountain's "verified" claim
- * about an MCP server does and does not cover, what skills.sh is and is not,
- * two ways to replace a box — and a panel that said all of it at once buried
- * the rows and the buttons that are the point of it. Nothing was deleted; it
- * is one click away, next to the thing it is about.
- *
- * What stays on screen unasked is state, and the one disclosure that is about
- * an action in progress: tick "private repository" and the panel says, then and
- * there, where that token ends up and who can read it.
- *
- * The panel never says "applied" on trust. Tier-`box` rows are `applied` only
- * because the machine itself wrote the id into its receipt, read back over the
- * read-only sandbox routes; when the receipt cannot be read the panel says the
- * box has not reported rather than guessing.
+ * Nothing here is rendered for anybody but the owner — App does not mount this
+ * panel or its tab otherwise, so the guest case is an absence rather than a
+ * disabled form. And nothing here applies anything: saving declares, and what
+ * declaring costs is the sentence under each heading.
  */
 import { useState } from "react";
-import type { Agent, Catalog, Connection, ConnectionProvider, Environment, Repository, Sandbox, Vault } from "../api/types";
-import { paddock, type Role } from "../api/paddock";
-import type { BoxDrift, DesiredItem, ItemStatus } from "../lib/machine";
+import type { Agent, Catalog, Connection, ConnectionProvider, Environment, Repository, Vault } from "../api/types";
+import type { BoxDrift } from "../lib/machine";
 import { needsApply, packageEntries, shortRepo } from "../lib/machine";
-import type { SkillEntry, SkillHit } from "../lib/skills";
-import { githubSkill, hitToSkill, inlineSkill, parseSource, readSkills, skillKey, skillLabel } from "../lib/skills";
-import type { Tab } from "../../shared/tabs";
+import { SectionHead, Editor, TIER } from "./Panel";
+import { Skills } from "./Skills";
 
-export interface MachineProps {
-  /**
-   * Everyone in the paddock sees this panel; only the owner can act on it.
-   * Editors and Apply are rendered *absent* for anybody else rather than
-   * disabled — a greyed-out secrets box invites somebody to wonder what they
-   * would have to do to use it, and the answer is "own this machine".
-   */
-  role: Role;
-  sandbox: Sandbox | null;
+export interface SetupProps {
   agent: Agent;
   environment: Environment;
   vault: Vault | null;
@@ -62,17 +41,20 @@ export interface MachineProps {
   providers: ConnectionProvider[] | null;
   /** Where to send somebody to connect one. Null before `/api/config` answers. */
   fountainUrl: string | null;
-  rev: number;
-  desired: DesiredItem[];
-  drift: BoxDrift;
   envSecretKeys: string[];
   vaultSecretKeys: string[];
-  stale: Tab[];
-  applying: boolean;
+  /**
+   * The same drift Details renders, for the line that hands over to it.
+   *
+   * It is the whole object rather than a count because the handover has to
+   * agree with what is actually on the other panel, and "is there an Apply
+   * button over there" is `needsApply(drift) && drift.known` — two facts. A
+   * count alone got this wrong in exactly the state it mattered most: an
+   * unreadable receipt zeroed it, so Setup went quiet at the moment somebody
+   * had just declared something that went nowhere.
+   */
+  drift: BoxDrift;
   busy: string | null;
-  onApply: () => void;
-  onReconcile: () => void;
-  onOpenTab: () => void;
   onSaveEnvironment: (patch: { repositories?: Repository[]; packages?: Record<string, string[]>; setup_script?: string }) => Promise<void>;
   onAddSecret: (where: "env" | "vault", key: string, value: string) => Promise<void>;
   onRemoveSecret: (where: "env" | "vault", key: string) => Promise<void>;
@@ -90,208 +72,101 @@ export interface MachineProps {
   onRemove: (() => Promise<void>) | null;
   /** What the owner calls this computer, for the sentence that removes it. */
   computerName: string;
+  /** Back to the rows these forms produce, and to the button that applies them. */
+  onDetails: () => void;
 }
 
-export function Machine(props: MachineProps) {
-  const { drift, desired, sandbox, stale } = props;
-  const isOwner = props.role === "owner";
-  const pending = drift.statuses.filter((s) => s.state !== "applied");
-  const session = desired.filter((i) => i.tier === "session");
+export function Setup(props: SetupProps) {
+  const { drift } = props;
+  const pending = drift.statuses.filter((s) => s.state !== "applied").length;
+  /** Whether there is an Apply button waiting on the other panel. */
+  const appliable = needsApply(drift) && drift.known;
 
   return (
-    <div className="panel machine">
+    <div className="panel machine setup">
       <header className="panel-head">
         <div>
-          <h2>The machine</h2>
-          <p className="dim">
-            {sandbox ? (
-              <>
-                <code>{sandbox.id}</code> · {sandbox.status}
-                {sandbox.mode ? ` · ${sandbox.mode}` : ""}
-                {sandbox.provider ? ` · ${sandbox.provider}` : ""}
-              </>
-            ) : (
-              "no machine yet"
-            )}
-          </p>
+          <h2>Setup</h2>
+          <p className="dim">what this machine is declared to be</p>
         </div>
-        {isOwner && needsApply(drift) && drift.known && (
-          <button className="primary" onClick={props.onApply} disabled={props.applying || !!props.busy}>
-            {props.applying ? "applying…" : `Apply ${pending.length} to the box`}
-          </button>
-        )}
       </header>
 
-      {props.busy && !props.applying && <p className="note">{props.busy} is mid-turn — an apply has to wait for the box.</p>}
+      {/*
+        Saving here does not touch the running box, and the only honest place
+        to see that is the other panel — so when something is waiting, this one
+        says so and hands over rather than growing a second Apply button. Two
+        buttons that apply would be two places to learn what "applied" means.
+
+        An unreadable receipt gets its own sentence rather than silence. It is
+        the state where a save has most obviously gone nowhere, and the thing
+        waiting on Details is then "ask the box what it has" — so the line says
+        that instead of promising an Apply that is not rendered.
+      */}
+      {pending > 0 && (
+        <p className={`note${drift.known ? "" : " warn"}`}>
+          {pending === 1 ? "1 thing is" : `${pending} things are`} declared and not on the box.{" "}
+          {drift.known ? "Applying it is one turn on this machine." : "The box has not reported what it already has."}
+          <button className="ghost" onClick={props.onDetails}>
+            {appliable ? "Review and apply" : "Open Details"}
+          </button>
+        </p>
+      )}
 
       {/* ── tier: box ─────────────────────────────────────────────────── */}
       <section>
         <SectionHead
-          title="On the box"
-          when="applied by a turn on this machine"
+          {...TIER.box}
           note="The environment builds the disk, so changing it here does nothing to the machine you are running until it is applied."
         />
-
-        {!drift.known && isOwner && (
-          <p className="note warn">
-            The box has not reported what is on it — there is no readable receipt at <code>~/.paddock/applied.json</code>.
-            <button className="ghost" onClick={props.onReconcile} disabled={props.applying || !!props.busy}>
-              Ask the box what it has
-            </button>
-          </p>
-        )}
-
-        <Rows statuses={drift.statuses} known={drift.known} />
-
-        {drift.extra.length > 0 && (
-          <p className="fine">
-            Also on the box, no longer declared: {drift.extra.join(", ")}. Nothing removes them.
-          </p>
-        )}
-
-        {isOwner && (
-          <>
-            <Repositories
-              environment={props.environment}
-              envSecretKeys={props.envSecretKeys}
-              vaultSecretKeys={props.vaultSecretKeys}
-              hasVault={!!props.vault}
-              brokered={props.providers !== null}
-              onSave={props.onSaveEnvironment}
-              onAddSecret={props.onAddSecret}
-            />
-            <Packages environment={props.environment} catalog={props.catalog} onSave={props.onSaveEnvironment} />
-            <SetupScript environment={props.environment} onSave={props.onSaveEnvironment} />
-          </>
-        )}
+        <Repositories
+          environment={props.environment}
+          envSecretKeys={props.envSecretKeys}
+          vaultSecretKeys={props.vaultSecretKeys}
+          hasVault={!!props.vault}
+          brokered={props.providers !== null}
+          onSave={props.onSaveEnvironment}
+          onAddSecret={props.onAddSecret}
+        />
+        <Packages environment={props.environment} catalog={props.catalog} onSave={props.onSaveEnvironment} />
+        <SetupScript environment={props.environment} onSave={props.onSaveEnvironment} />
       </section>
 
       {/* ── tier: session ─────────────────────────────────────────────── */}
       <section>
         <SectionHead
-          title="Next tab"
-          when="injected when a session starts"
-          note="Fountain writes these into the machine as a tab opens. Tabs already running kept what they started with."
+          {...TIER.session}
+          note="Fountain writes these into the machine as a tab opens. Tabs already running kept what they started with, so a save reaches the next tab and not this one."
         />
-
-        {isOwner && stale.length > 0 && (
-          <p className="note warn">
-            {stale.length === 1 ? `${stale[0]!.title} started` : `${stale.map((t) => t.title).join(", ")} started`} before the
-            current settings (revision {props.rev}).
-            <button className="ghost" onClick={props.onOpenTab}>
-              Open a fresh tab
-            </button>
-          </p>
-        )}
-
-        {session.length === 0 ? (
-          <p className="fine">Nothing yet — no skills, MCP servers or secrets.</p>
-        ) : (
-          <ul className="rows">
-            {session.map((item) => (
-              <li key={item.id} className="row">
-                <span className="state next" title="Active in tabs opened from now on">
-                  next tab
-                </span>
-                <span className="row-label">{item.label}</span>
-                <span className="dim">{item.detail}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {isOwner && (
-          <>
-            <Secrets
-              envKeys={props.envSecretKeys}
-              vaultKeys={props.vaultSecretKeys}
-              hasVault={!!props.vault}
-              onAdd={props.onAddSecret}
-              onRemove={props.onRemoveSecret}
-            />
-            <McpServers
-              agent={props.agent}
-              catalog={props.catalog}
-              connections={props.connections}
-              providers={props.providers}
-              fountainUrl={props.fountainUrl}
-              onSave={props.onSaveAgent}
-            />
-            <Skills agent={props.agent} onSave={props.onSaveAgent} />
-          </>
-        )}
+        <Secrets
+          envKeys={props.envSecretKeys}
+          vaultKeys={props.vaultSecretKeys}
+          hasVault={!!props.vault}
+          onAdd={props.onAddSecret}
+          onRemove={props.onRemoveSecret}
+        />
+        <McpServers
+          agent={props.agent}
+          catalog={props.catalog}
+          connections={props.connections}
+          providers={props.providers}
+          fountainUrl={props.fountainUrl}
+          onSave={props.onSaveAgent}
+        />
+        <Skills agent={props.agent} onSave={props.onSaveAgent} />
       </section>
 
       {/* ── tier: machine ─────────────────────────────────────────────── */}
       <section>
-        <SectionHead title="New machine" when="only by replacing this one" note="The runtime is baked into the disk when the box is built." />
-        <ul className="rows">
-          <li className="row">
-            <span className="state locked">baked in</span>
-            <span className="row-label">{props.agent.runtime}</span>
-          </li>
-        </ul>
-        {isOwner && (
-          <Replace
-            onRebuild={props.onRebuild}
-            onReset={props.onReset}
-            onRemove={props.onRemove}
-            computerName={props.computerName}
-            busy={!!props.busy}
-          />
-        )}
+        <SectionHead {...TIER.machine} note="The runtime is baked into the disk when the box is built, so this tier has no settings — only a way to get a different disk." />
+        <Replace
+          onRebuild={props.onRebuild}
+          onReset={props.onReset}
+          onRemove={props.onRemove}
+          computerName={props.computerName}
+          busy={!!props.busy}
+        />
       </section>
     </div>
-  );
-}
-
-function SectionHead({ title, when, note }: { title: string; when: string; note: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <div className="section-head">
-        <h3>
-          {title} <span className="dim">— {when}</span>
-        </h3>
-        <InfoButton open={open} about={title} onToggle={() => setOpen(!open)} />
-      </div>
-      {open && <p className="fine info-note">{note}</p>}
-    </>
-  );
-}
-
-/**
- * The (i). It is a toggle rather than a tooltip because the thing it opens is
- * a sentence or three that somebody may want to read twice, and a hover
- * bubble is not readable on a touchscreen or by a keyboard at all.
- */
-function InfoButton({ open, about, onToggle }: { open: boolean; about: string; onToggle: () => void }) {
-  return (
-    <button
-      className={`info${open ? " on" : ""}`}
-      onClick={onToggle}
-      aria-expanded={open}
-      aria-label={`${open ? "Hide" : "What"} ${about.toLowerCase()} means`}
-      title={open ? "hide" : `about ${about.toLowerCase()}`}
-    >
-      i
-    </button>
-  );
-}
-
-function Rows({ statuses, known }: { statuses: ItemStatus[]; known: boolean }) {
-  if (statuses.length === 0) return <p className="fine">Nothing declared — this is a bare machine.</p>;
-  return (
-    <ul className="rows">
-      {statuses.map((s) => (
-        <li key={s.item.id} className="row">
-          <span className={`state ${known ? s.state : "unknown"}`}>{known ? s.state : "unknown"}</span>
-          <span className="row-label">{s.item.label}</span>
-          <span className="dim">{s.item.detail}</span>
-          {s.why && <span className="why">{s.why}</span>}
-        </li>
-      ))}
-    </ul>
   );
 }
 
@@ -345,8 +220,8 @@ function Repositories({
   hasVault: boolean;
   /** Whether this account has the egress broker — which is what protects the token. */
   brokered: boolean;
-  onSave: MachineProps["onSaveEnvironment"];
-  onAddSecret: MachineProps["onAddSecret"];
+  onSave: SetupProps["onSaveEnvironment"];
+  onAddSecret: SetupProps["onAddSecret"];
 }) {
   const [url, setUrl] = useState("");
   const [ref, setRef] = useState("");
@@ -513,7 +388,7 @@ function Packages({
 }: {
   environment: Environment;
   catalog: Catalog | null;
-  onSave: MachineProps["onSaveEnvironment"];
+  onSave: SetupProps["onSaveEnvironment"];
 }) {
   const managers = catalog?.package_managers?.length ? catalog.package_managers : PACKAGE_MANAGERS;
   const [name, setName] = useState("");
@@ -582,7 +457,7 @@ function Packages({
   );
 }
 
-function SetupScript({ environment, onSave }: { environment: Environment; onSave: MachineProps["onSaveEnvironment"] }) {
+function SetupScript({ environment, onSave }: { environment: Environment; onSave: SetupProps["onSaveEnvironment"] }) {
   const saved = environment.setup_script ?? "";
   const [text, setText] = useState(saved);
   const [open, setOpen] = useState(false);
@@ -624,8 +499,8 @@ function Secrets({
   envKeys: string[];
   vaultKeys: string[];
   hasVault: boolean;
-  onAdd: MachineProps["onAddSecret"];
-  onRemove: MachineProps["onRemoveSecret"];
+  onAdd: SetupProps["onAddSecret"];
+  onRemove: SetupProps["onRemoveSecret"];
 }) {
   const [where, setWhere] = useState<"env" | "vault">("env");
   const [key, setKey] = useState("");
@@ -727,7 +602,7 @@ function McpServers({
   connections: Connection[] | null;
   providers: ConnectionProvider[] | null;
   fountainUrl: string | null;
-  onSave: MachineProps["onSaveAgent"];
+  onSave: SetupProps["onSaveAgent"];
 }) {
   const servers = agent.mcp_servers ?? {};
   const [name, setName] = useState("");
@@ -856,217 +731,6 @@ function McpServers({
     </Editor>
   );
 }
-
-/**
- * Skills: the skills.sh index, then the two shapes by hand.
- *
- * This editor used to append a bare string, which Fountain refuses outright —
- * `skills` is an array of objects and always has been. See `lib/skills.ts` for
- * the shapes and for why the bug survived as long as it did.
- *
- * The index is skills.sh and the panel says so, because the MCP section two
- * blocks up looks similar and is not the same kind of list: those entries are
- * dated claims Fountain checked, and these are whatever the ecosystem uploaded.
- * A github skill is `npx skills add owner/repo` run on the machine, from a
- * repository nobody here vouches for, and the person clicking `+` is the only
- * one in a position to judge that.
- */
-function Skills({ agent, onSave }: { agent: Agent; onSave: MachineProps["onSaveAgent"] }) {
-  const entries = readSkills(agent.skills);
-  const [error, setError] = useState<string | null>(null);
-
-  function save(next: SkillEntry[]) {
-    setError(null);
-    return onSave({ skills: next });
-  }
-
-  const have = new Set(entries.map(skillKey));
-
-  async function add(entry: SkillEntry) {
-    if (have.has(skillKey(entry))) return;
-    await save([...entries, entry]);
-  }
-
-  return (
-    <Editor
-      title="Skills"
-      info={
-        <>
-          Search is skills.sh, not Fountain — Fountain curates no list of skills, so nothing here is verified by anyone, and
-          adding one runs its installer on your machine. A repository can hold many skills; naming one installs only that one.
-          Without a ref, Fountain resolves the default branch <em>when a tab opens</em>, so two tabs a week apart can get
-          different code — pin anything you depend on. <em>Write it here</em> runs no installer: Fountain writes what you type
-          to the machine as <code>SKILL.md</code>.
-        </>
-      }
-    >
-      <div className="chips">
-        {entries.map((entry, i) => (
-          <span className="chip" key={`${skillKey(entry)}-${i}`}>
-            {skillLabel(entry)}
-            <button className="x" onClick={() => void save(entries.filter((_, j) => j !== i))} title="remove">
-              ×
-            </button>
-          </span>
-        ))}
-        {entries.length === 0 && <span className="fine">none</span>}
-      </div>
-
-      <SkillSearch have={have} onAdd={add} />
-      <SkillByHand onAdd={add} onError={setError} />
-
-      {error && <p className="fine error">{error}</p>}
-    </Editor>
-  );
-}
-
-/**
- * The index, through paddock's own server.
- *
- * It has to be: skills.sh sends no CORS header, so this browser cannot read it
- * directly. `server/skills.ts` carries the rest of that note.
- *
- * Search being unavailable is a normal state, not an error — the form below
- * still works and somebody who knows the `owner/repo` should not be stopped by
- * a search box.
- */
-function SkillSearch({ have, onAdd }: { have: Set<string>; onAdd: (entry: SkillEntry) => Promise<void> }) {
-  const [q, setQ] = useState("");
-  const [hits, setHits] = useState<SkillHit[] | null>(null);
-  const [state, setState] = useState<"idle" | "searching" | "unavailable">("idle");
-
-  async function run() {
-    const query = q.trim();
-    if (query.length < 2) return;
-    setState("searching");
-    try {
-      const res = await paddock.searchSkills(query);
-      setHits(res.data);
-      setState(res.unavailable ? "unavailable" : "idle");
-    } catch {
-      setHits([]);
-      setState("unavailable");
-    }
-  }
-
-  return (
-    <>
-      <div className="editor-row">
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="search skills.sh — pdf, postgres, code review"
-          spellCheck={false}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void run();
-          }}
-        />
-        <button onClick={() => void run()} disabled={q.trim().length < 2 || state === "searching"}>
-          {state === "searching" ? "…" : "search"}
-        </button>
-      </div>
-
-      {/* skills.sh answers in two to eight seconds when it answers at all, so
-          the wait is said out loud rather than left as a spinner somebody
-          assumes is broken. `server/skills.ts` has the measurements. */}
-      {state === "searching" && <p className="fine">Asking skills.sh — it can take a few seconds.</p>}
-      {state === "unavailable" && <p className="fine">skills.sh did not answer. Add an owner/repo below instead.</p>}
-      {state === "idle" && hits?.length === 0 && <p className="fine">Nothing found.</p>}
-
-      {hits && hits.length > 0 && (
-        <ul className="rows hits">
-          {hits.map((hit) => {
-            const entry = hitToSkill(hit);
-            const already = have.has(skillKey(entry));
-            return (
-              <li className="row" key={`${hit.source}#${hit.skill}`}>
-                <span className="row-label">{hit.label}</span>
-                <code className="dim">{hit.source}</code>
-                <span className="fine">{installs(hit.installs)}</span>
-                <button className="ghost" onClick={() => void onAdd(entry)} disabled={already} title={already ? "already added" : `add ${hit.skill}`}>
-                  {already ? "added" : "add"}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </>
-  );
-}
-
-/** Both shapes, typed out. Everything the index can offer, and everything it cannot. */
-function SkillByHand({ onAdd, onError }: { onAdd: (entry: SkillEntry) => Promise<void>; onError: (why: string | null) => void }) {
-  const [kind, setKind] = useState<"github" | "inline">("github");
-  const [source, setSource] = useState("");
-  const [ref, setRef] = useState("");
-  const [pick, setPick] = useState("");
-  const [name, setName] = useState("");
-  const [content, setContent] = useState("");
-
-  async function submit() {
-    onError(null);
-    if (kind === "inline") {
-      const made = inlineSkill({ name, content });
-      if ("error" in made) return onError(made.error);
-      await onAdd(made.entry);
-      setName("");
-      setContent("");
-      return;
-    }
-    // A pasted GitHub URL or an `owner/repo@ref` is obviously the same intent
-    // as the two fields, so it is read rather than refused.
-    const parsed = parseSource(source);
-    const made = githubSkill({ source: parsed.source, ref: ref.trim() || parsed.ref, name: pick });
-    if ("error" in made) return onError(made.error);
-    await onAdd(made.entry);
-    setSource("");
-    setRef("");
-    setPick("");
-  }
-
-  return (
-    <>
-      <div className="editor-row">
-        <select className="narrow" value={kind} onChange={(e) => setKind(e.target.value as "github" | "inline")}>
-          <option value="github">from GitHub</option>
-          <option value="inline">write it here</option>
-        </select>
-        {kind === "github" ? (
-          <>
-            <input value={source} onChange={(e) => setSource(e.target.value)} placeholder="anthropics/skills" spellCheck={false} />
-            <input className="narrow" value={pick} onChange={(e) => setPick(e.target.value)} placeholder="skill (optional)" spellCheck={false} />
-            <input className="narrow" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="ref (optional)" spellCheck={false} />
-          </>
-        ) : (
-          <input className="narrow" value={name} onChange={(e) => setName(e.target.value)} placeholder="house-style" spellCheck={false} />
-        )}
-        <button onClick={() => void submit()} disabled={kind === "github" ? !source.trim() : !name.trim() || !content.trim()}>
-          add
-        </button>
-      </div>
-
-      {kind === "inline" && (
-        <textarea
-          className="script"
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          rows={6}
-          spellCheck={false}
-          placeholder={"---\nname: house-style\ndescription: Our commit and PR conventions.\n---\n\n# House style"}
-        />
-      )}
-    </>
-  );
-}
-
-/** `190279` → `190k`. A rough sense of scale is the whole value of the number. */
-function installs(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M ↓`;
-  if (n >= 1_000) return `${Math.round(n / 1_000)}k ↓`;
-  return `${n} ↓`;
-}
-
 /**
  * Replacing the machine.
  *
@@ -1211,34 +875,6 @@ function Replace({
     </Editor>
   );
 }
-
-function Editor({
-  title,
-  info,
-  right,
-  children,
-}: {
-  title: string;
-  /** The explanation, if this editor needs one. Folded behind the (i). */
-  info?: React.ReactNode;
-  right?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="editor">
-      <div className="editor-head">
-        <h4>{title}</h4>
-        {info && <InfoButton open={open} about={title} onToggle={() => setOpen(!open)} />}
-        <span className="spacer" />
-        {right}
-      </div>
-      {info && open && <p className="fine info-note">{info}</p>}
-      {children}
-    </div>
-  );
-}
-
 function urlOf(cfg: unknown): string {
   if (cfg && typeof cfg === "object" && !Array.isArray(cfg)) {
     const url = (cfg as { url?: unknown }).url;
