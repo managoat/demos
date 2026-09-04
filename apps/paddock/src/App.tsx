@@ -1096,6 +1096,7 @@ function Paddock({
                   onRemove={paddockId && me.paddocks.filter((p) => p.role === "owner").length > 1 ? () => onRemoveComputer(paddockId) : null}
                   computerName={place?.name ?? ""}
                   onDetails={() => setSide("details")}
+                  onOpenTab={() => void openTab()}
                 />
               )
             ) : side === "details" ? (

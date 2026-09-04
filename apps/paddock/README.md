@@ -103,7 +103,10 @@ So there are two panels. **Details** is the machine as it is: what the receipt
 says, what the next tab will get, what is baked in, and the three buttons that
 answer something on the page — apply what is pending, ask a silent box what it
 has, open a tab that is not behind. **Setup** is the machine as it was asked
-for: every editor, under the same three headings in the same order.
+for: every editor, under the same three headings in the same order. The sandbox
+id used to lead Details' first line, twenty-odd characters in front of the two
+words somebody opens the panel to read; nobody types a sandbox id, so it is now
+a chip at the end that hands over the whole thing on a click.
 
 Splitting them is also the role boundary made visible. Every editor was already
 owner-only, so a guest was reading the top halves of three sections and being
@@ -118,6 +121,22 @@ Apply button, because two buttons that apply would be two places to learn what
 over there — rather than counting rows, which got it wrong in exactly the state
 it mattered most: an unreadable receipt made the count zero, so Setup went
 quiet at the moment somebody had just declared something that went nowhere.
+
+Six editors open at once were a wall — three add-forms, a nine-chip catalog, a
+search box and a textarea, all competing before you had decided which one you
+came for. Each is folded to a line now: its name, and what it currently
+declares. The shut state is the declaration and the open state is the form, so
+the panel reads as a list of six answers rather than six questions, and the
+three tier headings are on screen together, which is the only arrangement in
+which they mean anything.
+
+Those headings say what *you* have to do rather than what Fountain does —
+*lands when you apply*, *lands when you open a tab*, *lands when you rebuild*.
+They used to describe the mechanism ("injected when a session starts"), which
+is true and answers a question nobody asks at a heading. The middle one carries
+the gesture as a button beside it, because "open a new tab" was a sentence
+somebody had to translate into the `+` in the tab strip, and a button does not
+need translating.
 
 ### On the box — verified, not assumed
 

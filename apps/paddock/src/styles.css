@@ -240,6 +240,19 @@ h4 { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spaci
 .panel-head button.primary { white-space: nowrap; }
 .panel section { margin-bottom: 22px; }
 .section-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+/* The gesture a tier is named after, beside the name. Small: it is an offer,
+   not the point of the section. */
+.section-head button.ghost { flex: none; padding: 2px 8px; font-size: 12px; color: var(--dim); }
+.section-head button.ghost:hover:not(:disabled) { color: var(--ink); }
+
+/* The sandbox id, demoted to a chip you click to copy. */
+.copy-id {
+  display: inline-flex; align-items: center; gap: 4px; padding: 0 5px;
+  background: none; border: 1px solid var(--line); border-radius: 999px;
+  color: var(--dim); font-size: 11px; vertical-align: baseline;
+}
+.copy-id code { color: inherit; font-size: 11px; }
+.copy-id:hover:not(:disabled) { color: var(--ink); background: var(--surface-hover); }
 .note { margin: 8px 0; padding: 6px 8px; border-radius: 5px; background: var(--surface); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .note.warn { border-left: 2px solid var(--warn); }
 .row-actions { display: flex; gap: 4px; }
@@ -265,6 +278,30 @@ h4 { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spaci
 
 .editor { margin: 12px 0; padding-top: 8px; border-top: 1px dashed var(--line); }
 .editor-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.editor-head h4 { flex: 1; min-width: 0; }
+
+/* Shut, an editor is one line: a caret, its name, and what it currently
+   declares. The whole line is the target — a caret alone is a 12px thing to
+   hit, and the summary is the part the eye is already on. */
+.editor-toggle {
+  display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0;
+  padding: 2px 0; background: none; border: none; border-radius: 0;
+  font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; text-align: left;
+}
+.editor-toggle:hover:not(:disabled) { background: none; border-color: transparent; }
+.editor-toggle:hover .editor-title { color: var(--ink); }
+/* The mono face has no triangles, so this one glyph borrows the system font
+   rather than falling back to whatever the browser has lying around. */
+.editor-toggle .caret { flex: none; width: 10px; color: var(--dim); font: 10px/1 system-ui, sans-serif; }
+.editor.open .editor-toggle .caret { color: var(--ink); }
+.editor-title { flex: none; }
+.editor.open .editor-title { color: var(--ink); }
+/* The declaration itself, in the panel's ordinary voice — not the heading's
+   uppercase — so the line reads "REPOSITORIES  you/thing, you/other". */
+.editor-summary {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--dim); font-weight: 400; font-size: 12px; text-transform: none; letter-spacing: 0;
+}
 
 /* Explanation, one click away. The (i) sits next to the heading it explains
    and unfolds the paragraph that used to live under it — Details and Setup
