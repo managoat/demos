@@ -30,7 +30,7 @@ export function Tabs({
   return (
     <div className="tabs">
       {tabs.map((t) => (
-        <div key={t.slug} className={`tab ${t.slug === active ? "active" : ""}`} onClick={() => onSelect(t.slug)}>
+        <div key={t.conversation.id} className={`tab ${t.slug === active ? "active" : ""}`} onClick={() => onSelect(t.slug)}>
           <span className={`dot ${t.busy ? "busy" : ""}`} />
           <span className="tab-title">{t.title}</span>
           {t.stale && <span className="tab-flag" title="Started before the current settings">·</span>}

@@ -117,6 +117,24 @@ describe("tabsOf", () => {
   });
 });
 
+describe("two tabs claiming one slug", () => {
+  test("both stay in the strip, and the newer one is told apart", () => {
+    // Happens when a tab is opened out of band, or two browsers race
+    // nextSlug. Hiding one would make somebody's open tab vanish.
+    const tabs = tabsOf(
+      [
+        conv({ id: "first", channel_id: channelFor("t1", 3), inserted_at: "2026-09-04T10:00:00Z" }),
+        conv({ id: "second", channel_id: channelFor("t1", 3), inserted_at: "2026-09-04T11:00:00Z" }),
+      ],
+      input,
+    );
+    expect(tabs).toHaveLength(2);
+    expect(tabs.map((t) => t.title)).toEqual(["Terminal 1", "Terminal 1 (2)"]);
+    // The conversation id is what identifies a tab; the slug is only a name.
+    expect(new Set(tabs.map((t) => t.conversation.id)).size).toBe(2);
+  });
+});
+
 describe("one turn at a time", () => {
   test("a running tab holds the machine and the others queue behind it", () => {
     const tabs = tabsOf(

@@ -120,7 +120,19 @@ export function tabsOf(all: readonly Conversation[], input: TabsInput): Tab[] {
       cwd: `${input.workRoot}/${parts.slug}`,
     });
   }
-  return out.sort((a, b) => a.conversation.inserted_at.localeCompare(b.conversation.inserted_at));
+  out.sort((a, b) => a.conversation.inserted_at.localeCompare(b.conversation.inserted_at));
+
+  // Two conversations can end up claiming one slug — a tab opened out of band,
+  // or two browsers racing `nextSlug`. They would then share a working
+  // directory, and the strip would show two identically named tabs. The older
+  // one keeps the slug; the newer is disambiguated rather than hidden, because
+  // a tab somebody is typing into must not silently vanish from the strip.
+  const seen = new Map<string, number>();
+  return out.map((tab) => {
+    const n = (seen.get(tab.slug) ?? 0) + 1;
+    seen.set(tab.slug, n);
+    return n === 1 ? tab : { ...tab, title: `${tab.title} (${n})` };
+  });
 }
 
 /** The tabs the strip shows: everything but ops. */
