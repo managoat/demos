@@ -31,9 +31,16 @@ export interface PaddockDto {
   id: string;
   role: Role;
   ownerEmail: string;
+  /** Null for the owner: every tab is theirs. Otherwise the tabs they may reach. */
+  tabs: string[] | null;
+  here: Present[];
+}
+
+/** Who is in one tab. Invitations name a tab, never the machine. */
+export interface TabPeopleDto {
+  conversationId: string;
   members: { email: string; addedAt: string }[];
   guests: { handle: string; seenAt: string }[];
-  here: Present[];
   /** The owner only. A link is a credential, so nobody else is shown it. */
   inviteUrl?: string | null;
 }
@@ -58,11 +65,13 @@ export const paddock = {
   show: () => call<{ data: PaddockDto }>("GET", "/api/paddock").then((r) => r.data),
   claim: () => call<{ data: PaddockDto }>("POST", "/api/paddock").then((r) => r.data),
 
-  addMember: (id: string, email: string) => call<{ data: PaddockDto }>("POST", `/api/paddock/${id}/members`, { email }).then((r) => r.data),
-  removeMember: (id: string, email: string) =>
-    call<{ data: PaddockDto }>("DELETE", `/api/paddock/${id}/members/${encodeURIComponent(email)}`).then((r) => r.data),
-  mintInvite: (id: string) => call<{ data: PaddockDto; evicted: number }>("POST", `/api/paddock/${id}/invite`),
-  closeInvite: (id: string) => call<{ data: PaddockDto; evicted: number }>("DELETE", `/api/paddock/${id}/invite`),
+  tabPeople: (id: string, conv: string) => call<{ data: TabPeopleDto }>("GET", `/api/paddock/${id}/tabs/${conv}/people`).then((r) => r.data),
+  addMember: (id: string, conv: string, email: string) =>
+    call<{ data: TabPeopleDto }>("POST", `/api/paddock/${id}/tabs/${conv}/members`, { email }).then((r) => r.data),
+  removeMember: (id: string, conv: string, email: string) =>
+    call<{ data: TabPeopleDto }>("DELETE", `/api/paddock/${id}/tabs/${conv}/members/${encodeURIComponent(email)}`).then((r) => r.data),
+  mintInvite: (id: string, conv: string) => call<{ data: TabPeopleDto; evicted: number }>("POST", `/api/paddock/${id}/tabs/${conv}/invite`),
+  closeInvite: (id: string, conv: string) => call<{ data: TabPeopleDto; evicted: number }>("DELETE", `/api/paddock/${id}/tabs/${conv}/invite`),
 
   /**
    * A new machine, keeping everything you declared. Fountain cannot delete a

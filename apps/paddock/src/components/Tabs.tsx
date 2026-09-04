@@ -13,6 +13,7 @@ export function Tabs({
   onClose,
   opening,
   canClose,
+  canOpen,
 }: {
   tabs: Tab[];
   active: string | null;
@@ -21,11 +22,18 @@ export function Tabs({
   onClose: (slug: string) => void;
   opening: boolean;
   /**
-   * Closing a tab ends it for everybody on the machine, so it is the owner's
-   * alone. The × is hidden rather than disabled for the others: an affordance
-   * that only ever answers "no" is worse than no affordance.
+   * Closing a tab ends it for everybody in it — including anyone invited to
+   * that terminal — so it is the owner's alone. The × is hidden rather than
+   * disabled for the others: an affordance that only ever answers "no" is
+   * worse than no affordance.
    */
   canClose: boolean;
+  /**
+   * Whose machine gets another terminal is the owner's call. Somebody invited
+   * to one tab has no business creating a second, so the + is not rendered
+   * for them at all.
+   */
+  canOpen: boolean;
 }) {
   return (
     <div className="tabs">
@@ -34,7 +42,7 @@ export function Tabs({
           <span className={`dot ${t.busy ? "busy" : ""}`} />
           <span className="tab-title">{t.title}</span>
           {t.stale && <span className="tab-flag" title="Started before the current settings">·</span>}
-          {canClose && tabs.length > 1 && (
+          {canClose && (
             <button
               className="x"
               title={`Close ${t.title}`}
@@ -48,9 +56,11 @@ export function Tabs({
           )}
         </div>
       ))}
-      <button className="tab add" onClick={onOpen} disabled={opening} title="New terminal on the same machine">
-        {opening ? "…" : "+"}
-      </button>
+      {canOpen && (
+        <button className="tab add" onClick={onOpen} disabled={opening} title="New terminal on the same machine">
+          {opening ? "…" : "+"}
+        </button>
+      )}
     </div>
   );
 }

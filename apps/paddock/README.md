@@ -110,21 +110,24 @@ when the box frees up.
 anyone who opens it is in, with no account, no sign-in and nothing to install.
 Either way the turns run on your key and you pay for them.
 
-A guest can read and prompt any tab, open their own, browse the files, and see
-the Machine panel. Only you can change what is on the machine — the editors and
-Apply are not rendered for anyone else, and the routes behind them are not
-reachable. Closing a tab ends it for everybody, so that is yours too.
+**An invitation is to a terminal, not to the machine.** Somebody let into
+Terminal 2 gets Terminal 2: they do not see your other terminals, cannot open
+one, and cannot change what is installed. Each terminal has its own link, and
+closing one leaves the others alone.
 
 The link is the credential, so **a new link is the revoke**: minting one evicts
-every guest who came in on the old one, mid-session, and closing it leaves no
-anonymous way in at all.
+every guest who came in on the old one, mid-session, from that terminal only.
+Closing a terminal ends it for everybody in it — which is the other way to take
+an invitation back, and why only you can do it.
 
 ### What sharing actually costs
 
-Anyone who can type into a tab can ask the agent to print your environment
-secrets, your repositories, anything on the disk. No permission model prevents
-that, because the agent is the thing holding the shell — so the invite dialog
-says so where the decision is being made rather than in this file.
+Per-terminal invitations narrow what you hand out, but not to nothing: a
+terminal is a shell on the machine, so anyone who can type into one can ask the
+agent to print your environment secrets or read the disk. What they cannot do
+is see your *other* conversations. No permission model closes the rest, because
+the agent is the thing holding the shell — so the invite dialog says so where
+the decision is being made rather than in this file.
 
 The one real mitigation is the distinction the Machine panel already draws: an
 **environment** secret is an env var inside the box and a guest can read it; a
@@ -178,8 +181,8 @@ branches at once.
 
 ## Files, and what is not there
 
-The Files panel browses the machine and shows `git diff`, over the same
-read-only routes. There is no write, and there will not be one: to change
+The Files panel is a file tree — expand directories in place, click a file to
+read it, `git diff` beside it — over the same read-only routes. There is no write, and there will not be one: to change
 something, ask for it in the tab. The panel says so rather than leaving people
 hunting for an edit button that does not exist.
 

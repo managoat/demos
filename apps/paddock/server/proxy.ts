@@ -89,7 +89,7 @@ const OWNER_PATHS: { method: string; re: RegExp }[] = [
 ];
 
 export async function handleProxy(ctx: AppContext, req: Request, paddockId: string, path: string, id: Identity): Promise<Response> {
-  const { paddock, role } = paddockAccess(ctx, id, paddockId);
+  const { paddock, role, tabs: allowed } = paddockAccess(ctx, id, paddockId);
   const client = await ownerClient(ctx, paddock);
   const method = req.method.toUpperCase();
   const url = new URL(req.url);
@@ -98,18 +98,25 @@ export async function handleProxy(ctx: AppContext, req: Request, paddockId: stri
   // Filtered, always. The owner's raw conversation list would show a guest
   // every other conversation on the account, which is nobody's business here.
   if (method === "GET" && path === "/api/conversations") {
-    const tabs = await visibleTabs(client);
+    const tabs = await visibleTabs(client, allowed);
     return jsonRes({ data: tabs.map((t) => t.conversation) });
   }
 
-  if (method === "POST" && path === "/api/conversations") return newConversation(ctx, req, paddock, client, id, role);
+  if (method === "POST" && path === "/api/conversations") {
+    // Whose machine gets another terminal on it is the owner's call. An
+    // invitation names one tab, so somebody holding one has no business
+    // creating a second — and a guest making tabs on a stranger's box is
+    // exactly the thing an anonymous link should not buy.
+    if (role !== "owner") throw new HttpError(403, "owner_only", "Only the owner of this machine can open a tab on it.");
+    return newConversation(ctx, req, paddock, client, id);
+  }
 
   // ── one tab ─────────────────────────────────────────────────────────────
   const m = /^\/api\/conversations\/([^/]+)(\/.*)?$/.exec(path);
   if (m) {
     const conversationId = decodeURIComponent(m[1]!);
     const sub = m[2] ?? "";
-    const tabs = await visibleTabs(client);
+    const tabs = await visibleTabs(client, allowed);
     const tab = tabs.find((t) => t.conversation.id === conversationId);
     if (!tab) throw new HttpError(404, "not_found", "No such tab on this machine.");
     if (!tabAllowed(method, sub, role)) throw new HttpError(404, "not_found");
@@ -171,8 +178,12 @@ async function machineOf(
     : null;
 }
 
-/** The tabs of this machine, as everyone in the paddock may see them: ops excluded. */
-async function visibleTabs(client: FountainClient): Promise<Tab[]> {
+/**
+ * The tabs this caller may see. Ops is excluded from everyone, and anybody
+ * who is not the owner sees only the tabs they were invited to — `allowed`
+ * comes from `paddockAccess`, which is the one place that decides it.
+ */
+async function visibleTabs(client: FountainClient, allowed: string[] | null): Promise<Tab[]> {
   const machine = await machineOf(client);
   if (!machine) return [];
   const conversations = machine.all as unknown as Parameters<typeof tabsOf>[0];
@@ -181,7 +192,7 @@ async function visibleTabs(client: FountainClient): Promise<Tab[]> {
   // number nothing here reads.
   const tabs = tabsOf(conversations, { sandboxId: machine.sandboxId, agentId: machine.agentId, rev: 0, workRoot: WORK_ROOT });
   const ops = opsTab(tabs);
-  return tabs.filter((t) => t !== ops);
+  return tabs.filter((t) => t !== ops && (allowed === null || allowed.includes(t.conversation.id)));
 }
 
 // ── turns ─────────────────────────────────────────────────────────────────
@@ -201,7 +212,10 @@ async function prompt(ctx: AppContext, req: Request, paddock: PaddockRow, client
   const text = str(body.prompt, 100_000);
   if (!text.trim()) throw new HttpError(422, "empty_prompt", "Say something.");
 
-  const alone = ctx.db.members(paddock.id).length === 0 && ctx.db.guests(paddock.id).length === 0;
+  // Whether to name the sender is a question about *this tab*: a machine with
+  // somebody in Terminal 2 does not need Terminal 1 labelling its own turns.
+  const alone =
+    ctx.db.members(paddock.id, tab.conversation.id).length === 0 && ctx.db.guests(paddock.id, tab.conversation.id).length === 0;
   const outgoing = alone ? text : withAuthor(actorLabel(id), text);
 
   return withPromptLock(paddock.id, async () => {
@@ -220,21 +234,13 @@ async function prompt(ctx: AppContext, req: Request, paddock: PaddockRow, client
  * guest attaching a tab to a box that is not this paddock's. Only the owner
  * may take the other branch, because it spends money.
  */
-async function newConversation(
-  ctx: AppContext,
-  req: Request,
-  paddock: PaddockRow,
-  client: FountainClient,
-  id: Identity,
-  role: Role,
-): Promise<Response> {
+async function newConversation(ctx: AppContext, req: Request, paddock: PaddockRow, client: FountainClient, id: Identity): Promise<Response> {
   const body = await readJson(req);
   const channel = str(body.channel_id, 200);
   if (!channel.startsWith("paddock:")) throw new HttpError(422, "bad_channel", "A tab needs a paddock channel id.");
   const machine = await machineOf(client);
 
   if (!machine) {
-    if (role !== "owner") throw new HttpError(409, "no_machine", "This machine is not running, and only its owner can start it.");
     // First run: forwarded as the client built it, so the persistent-mode and
     // environment/vault choices stay in one place (shared/spec + identity).
     return forward(client, req, "POST", "/api/conversations", JSON.stringify(body));

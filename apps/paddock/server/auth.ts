@@ -84,8 +84,11 @@ export async function signIn(ctx: AppContext, req: Request): Promise<Response> {
  * should not silently downgrade the owner of the machine to a guest on it.
  */
 export async function join(ctx: AppContext, req: Request, token: string): Promise<Response> {
-  const paddock = ctx.db.paddockByInvite(token);
-  if (!paddock) throw new HttpError(404, "bad_invite", "That invite link is not valid any more.");
+  // A link names one tab. Whoever follows it gets that tab and nothing else
+  // on the machine — see `paddockAccess`.
+  const invite = ctx.db.invite(token);
+  const paddock = invite ? ctx.db.getPaddock(invite.paddock_id) : null;
+  if (!invite || !paddock) throw new HttpError(404, "bad_invite", "That invite link is not valid any more.");
 
   const existing = cookieValue(req, SESSION_COOKIE);
   if (existing) {
@@ -94,13 +97,13 @@ export async function join(ctx: AppContext, req: Request, token: string): Promis
       const user = ctx.db.getUser(session.email);
       if (user) {
         const role: Role = paddock.owner_email === user.email ? "owner" : "member";
-        if (role === "member") ctx.db.addMember(paddock.id, user.email, `link:${paddock.owner_email}`);
+        if (role === "member") ctx.db.addMember(paddock.id, invite.conversation_id, user.email, `link:${paddock.owner_email}`);
         return json(meDto({ kind: "user", user }, role, paddock.id));
       }
     }
   }
 
-  const guest = ctx.db.createGuest(randomToken(9), paddock.id, guestHandle());
+  const guest = ctx.db.createGuest(randomToken(9), paddock.id, invite.conversation_id, guestHandle());
   const sessionToken = randomToken();
   ctx.db.createGuestSession(await sha256(sessionToken), guest.id);
   return json(meDto({ kind: "guest", guest }, "guest", paddock.id), 200, {

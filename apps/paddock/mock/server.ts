@@ -329,7 +329,18 @@ Bun.serve({
       const b = body as Record<string, string | undefined>;
       if (!state.sandbox) {
         state.sandbox = { id: "sb-mock-1", sprite_name: "paddock-mock", status: "ready", provider: "mock", mode: "persistent", agent_id: b.agent_id, environment_id: b.environment_id ?? null, vault_id: b.vault_id ?? null, url: null };
-        state.files.set(`${WORK_ROOT}/.keep`, "");
+        // A small tree, so the file browser has something to be a file browser
+        // about. A real box has a checkout here; an empty mock made the
+        // explorer look broken when it was merely accurate.
+        for (const [path, body] of [
+          [`${WORK_ROOT}/t1/README.md`, "# Your machine\n\nThis is a mock checkout.\n"],
+          [`${WORK_ROOT}/t1/package.json`, '{\n  "name": "example",\n  "version": "0.1.0"\n}\n'],
+          [`${WORK_ROOT}/t1/src/index.ts`, 'export function hello(): string {\n  return "hello";\n}\n'],
+          [`${WORK_ROOT}/t1/src/lib/util.ts`, "export const answer = 42;\n"],
+          [`${WORK_ROOT}/t1/test/index.test.ts`, 'import { hello } from "../src/index";\n'],
+        ] as [string, string][]) {
+          state.files.set(path, body);
+        }
       }
       // Attaching is identity-checked, the way Fountain checks it. The disk was
       // built for one (agent, environment, vault) and a launch that names a

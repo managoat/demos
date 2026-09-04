@@ -84,7 +84,7 @@ h4 { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spaci
 .brand { font-weight: 600; }
 .notice { padding: 6px 12px; background: #1e2a3d; border-bottom: 1px solid var(--line); cursor: pointer; }
 
-.split { flex: 1; display: grid; grid-template-columns: 1fr 460px; min-height: 0; }
+.split { flex: 1; display: grid; grid-template-columns: 1fr 540px; min-height: 0; }
 .split > main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .split > aside { border-left: 1px solid var(--line); overflow-y: auto; background: var(--panel); min-height: 0; }
 
@@ -186,3 +186,32 @@ textarea.script { font-size: 12px; }
 button.danger { border-color: #5a2f2f; background: #341f1f; color: #f0c8c2; }
 button.danger:hover:not(:disabled) { border-color: var(--bad); }
 button.danger-text { color: var(--bad); }
+
+/* ── the side panel's own tabs ─────────────────────────────────────────── */
+.panel-tabs { display: flex; gap: 2px; padding: 8px 10px 0; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.panel-tabs button { background: none; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; color: var(--dim); padding: 5px 10px; }
+.panel-tabs button.on { background: var(--bg); border-color: var(--line); color: var(--ink); }
+
+/* ── file explorer ─────────────────────────────────────────────────────── */
+/* Tree at a fixed width so the file gets the rest — the panel is narrow
+   enough that a percentage split starves whichever side you are reading. */
+.explorer { display: grid; grid-template-columns: 170px 1fr; gap: 10px; align-items: start; min-height: 0; }
+.tree { overflow: auto; max-height: 55vh; border: 1px solid var(--line); border-radius: 6px; padding: 4px 0; background: #0a0c0f; }
+.node { display: flex; align-items: center; gap: 5px; width: 100%; text-align: left; background: none; border: none;
+        border-radius: 0; padding: 2px 6px; color: var(--dim); white-space: nowrap; }
+.node:hover { background: #14171c; }
+.node .caret { width: 10px; color: var(--dim); }
+.node-name { overflow: hidden; text-overflow: ellipsis; }
+.node.dir .node-name { color: var(--ink); }
+.node.file.selected { background: #1e2a3d; }
+.node.file.selected .node-name { color: var(--accent); }
+.node.empty { color: var(--dim); font-size: 12px; padding: 2px 6px; }
+.viewer { min-width: 0; }
+.viewer-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 6px; overflow: hidden; }
+.viewer-head .dim { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.viewer .code { max-height: 55vh; }
+
+@media (max-width: 1100px) {
+  .explorer { grid-template-columns: 1fr; }
+  .tree { max-height: 30vh; }
+}

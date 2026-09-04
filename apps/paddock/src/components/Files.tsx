@@ -1,15 +1,19 @@
 /**
- * The box's filesystem, over the read-only sandbox routes.
+ * The box's filesystem, as an editor shows one: a tree on the left that you
+ * expand in place, and the file you picked on the right.
+ *
+ * The first version walked one directory at a time and replaced the listing on
+ * every step, which meant you could never see where you were — the thing a
+ * file tree is for. Directories now stay open, siblings stay visible, and the
+ * path you are looking at is the one that is highlighted.
  *
  * `GET /api/sandboxes/:id/{files,file,diff}` is the whole of it. Those calls
- * cost nothing, work whatever the tab is doing, and — importantly — do not
- * wake a parked machine, which is why this panel can be opened on a sleeping
- * box without starting it up.
+ * cost nothing, work whatever the tabs are doing, and do not wake a parked
+ * machine — which is why a tree that fetches a directory per expansion is
+ * affordable.
  *
- * There is no write here and there will not be one, because Fountain offers no
- * way to change a machine from outside. To change something, say so in the
- * tab; the panel says as much rather than leaving people hunting for an edit
- * button that does not exist.
+ * There is no write here and there will not be one: Fountain offers no way to
+ * change a machine from outside. To change something, say so in the tab.
  */
 import { useCallback, useEffect, useState } from "react";
 import type { FountainClient } from "../api/client";
@@ -17,66 +21,93 @@ import { describeError } from "../api/client";
 import type { SandboxListing } from "../api/types";
 import { decodeFile } from "../lib/protocol";
 
+interface Entry {
+  name: string;
+  type: string;
+  size: number | null;
+}
+
+interface Loaded {
+  entries: Entry[];
+  truncated: boolean;
+}
+
+type Open = Record<string, boolean>;
+type Cache = Record<string, Loaded>;
+
 export function Files({ client, sandboxId, root }: { client: FountainClient; sandboxId: string; root: string }) {
-  const [path, setPath] = useState(root);
-  const [listing, setListing] = useState<SandboxListing | null>(null);
+  const [cache, setCache] = useState<Cache>({});
+  const [open, setOpen] = useState<Open>({});
+  const [loading, setLoading] = useState<Record<string, boolean>>({});
+  const [selected, setSelected] = useState<string | null>(null);
   const [file, setFile] = useState<{ path: string; text: string; truncated: boolean } | null>(null);
   const [diff, setDiff] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
 
-  const open = useCallback(
-    async (next: string) => {
-      setLoading(true);
+  const load = useCallback(
+    async (path: string) => {
+      setLoading((m) => ({ ...m, [path]: true }));
       setError(null);
-      setFile(null);
-      setDiff(null);
       try {
-        setListing(await client.listFiles(sandboxId, next));
-        setPath(next);
+        const listing: SandboxListing = await client.listFiles(sandboxId, path);
+        setCache((m) => ({ ...m, [path]: { entries: sortEntries(listing.entries), truncated: listing.truncated } }));
       } catch (err) {
         setError(describeError(err));
       } finally {
-        setLoading(false);
+        setLoading((m) => ({ ...m, [path]: false }));
       }
     },
     [client, sandboxId],
   );
 
+  // The tab's working directory is the root, and it starts open: a tree that
+  // opens closed makes you click once before it has told you anything.
   useEffect(() => {
-    void open(root);
-  }, [open, root]);
+    setCache({});
+    setOpen({ [root]: true });
+    setSelected(null);
+    setFile(null);
+    setDiff(null);
+    void load(root);
+  }, [root, load]);
 
-  async function show(name: string) {
-    setLoading(true);
+  function toggle(path: string) {
+    const next = !open[path];
+    setOpen((m) => ({ ...m, [path]: next }));
+    if (next && !cache[path]) void load(path);
+  }
+
+  async function show(path: string) {
+    setSelected(path);
+    setDiff(null);
     setError(null);
     try {
-      const full = `${path.replace(/\/+$/, "")}/${name}`;
-      const f = await client.readFile(sandboxId, full);
-      setFile({ path: full, text: decodeFile(f), truncated: f.truncated });
-      setDiff(null);
+      const f = await client.readFile(sandboxId, path);
+      setFile({ path, text: decodeFile(f), truncated: f.truncated });
     } catch (err) {
+      setFile(null);
       setError(describeError(err));
-    } finally {
-      setLoading(false);
     }
   }
 
   async function showDiff() {
-    setLoading(true);
     setError(null);
     try {
-      const d = await client.diff(sandboxId, path);
+      const d = await client.diff(sandboxId, root);
       setDiff(d.diff.trim() ? d.diff : "(no changes against the base)");
       setFile(null);
+      setSelected(null);
     } catch (err) {
       setError(describeError(err));
-    } finally {
-      setLoading(false);
     }
   }
 
-  const parent = path.replace(/\/+$/, "").split("/").slice(0, -1).join("/") || "/";
+  function refresh() {
+    const paths = Object.keys(open).filter((p) => open[p]);
+    setCache({});
+    for (const p of paths) void load(p);
+    if (file) void show(file.path);
+  }
 
   return (
     <div className="panel files">
@@ -84,69 +115,66 @@ export function Files({ client, sandboxId, root }: { client: FountainClient; san
         <div>
           <h2>Files</h2>
           <p className="dim">
-            <code>{path}</code>
+            <code>{root}</code>
           </p>
         </div>
         <div className="row-actions">
-          <button className="ghost" onClick={() => void open(parent)} disabled={path === "/"}>
-            up
-          </button>
-          <button className="ghost" onClick={() => void open(path)}>
+          <button className="ghost" onClick={refresh}>
             refresh
           </button>
-          <button className="ghost" onClick={showDiff}>
+          <button className="ghost" onClick={() => void showDiff()}>
             diff
           </button>
         </div>
       </header>
 
       {error && <p className="error">{error}</p>}
-      {loading && <p className="dim">reading…</p>}
 
-      {file ? (
-        <>
-          <div className="editor-head">
-            <h4>{file.path}</h4>
-            <button className="ghost" onClick={() => setFile(null)}>
-              back
-            </button>
-          </div>
-          <pre className="code">{file.text}</pre>
-          {file.truncated && <p className="fine">Truncated by the server.</p>}
-        </>
-      ) : diff !== null ? (
-        <>
-          <div className="editor-head">
-            <h4>git diff</h4>
-            <button className="ghost" onClick={() => setDiff(null)}>
-              back
-            </button>
-          </div>
-          <pre className="code diff">
-            {diff.split("\n").map((line, i) => (
-              <span key={i} className={diffClass(line)}>
-                {line}
-                {"\n"}
-              </span>
-            ))}
-          </pre>
-        </>
-      ) : (
-        <ul className="rows">
-          {listing?.entries.map((e) => (
-            <li className="row file-row" key={e.name}>
-              <span className="dim narrow">{e.type === "dir" ? "dir" : "file"}</span>
-              <button className="linkish" onClick={() => (e.type === "dir" ? void open(`${path.replace(/\/+$/, "")}/${e.name}`) : void show(e.name))}>
-                {e.name}
-                {e.type === "dir" ? "/" : ""}
-              </button>
-              <span className="dim">{e.size === null ? "" : bytes(e.size)}</span>
-            </li>
-          ))}
-          {listing && listing.entries.length === 0 && <li className="fine">empty</li>}
-          {listing?.truncated && <li className="fine">Listing truncated by the server.</li>}
-        </ul>
-      )}
+      <div className="explorer">
+        <div className="tree">
+          <Node
+            path={root}
+            name={root.split("/").filter(Boolean).pop() ?? "/"}
+            depth={0}
+            cache={cache}
+            open={open}
+            loading={loading}
+            selected={selected}
+            onToggle={toggle}
+            onOpenFile={(p) => void show(p)}
+          />
+        </div>
+
+        <div className="viewer">
+          {diff !== null ? (
+            <>
+              <div className="viewer-head">
+                <span className="row-label">git diff</span>
+                <span className="dim">{root}</span>
+              </div>
+              <pre className="code diff">
+                {diff.split("\n").map((line, i) => (
+                  <span key={i} className={diffClass(line)}>
+                    {line}
+                    {"\n"}
+                  </span>
+                ))}
+              </pre>
+            </>
+          ) : file ? (
+            <>
+              <div className="viewer-head">
+                <span className="row-label">{file.path.split("/").pop()}</span>
+                <span className="dim">{file.path}</span>
+              </div>
+              <pre className="code">{file.text}</pre>
+              {file.truncated && <p className="fine">Truncated by the server.</p>}
+            </>
+          ) : (
+            <p className="fine">Pick a file.</p>
+          )}
+        </div>
+      </div>
 
       <p className="fine">
         Read-only, on purpose: Fountain offers no way to run a command on a machine from outside. To change something here, ask
@@ -154,6 +182,88 @@ export function Files({ client, sandboxId, root }: { client: FountainClient; san
       </p>
     </div>
   );
+}
+
+function Node({
+  path,
+  name,
+  depth,
+  cache,
+  open,
+  loading,
+  selected,
+  onToggle,
+  onOpenFile,
+}: {
+  path: string;
+  name: string;
+  depth: number;
+  cache: Cache;
+  open: Open;
+  loading: Record<string, boolean>;
+  selected: string | null;
+  onToggle: (path: string) => void;
+  onOpenFile: (path: string) => void;
+}) {
+  const isOpen = !!open[path];
+  const loaded = cache[path];
+
+  return (
+    <>
+      <button className={`node dir ${isOpen ? "open" : ""}`} style={{ paddingLeft: depth * 12 + 6 }} onClick={() => onToggle(path)}>
+        <span className="caret">{isOpen ? "▾" : "▸"}</span>
+        <span className="node-name">{name}</span>
+        {loading[path] && <span className="dim">…</span>}
+      </button>
+      {isOpen &&
+        loaded &&
+        loaded.entries.map((e) => {
+          const child = `${path.replace(/\/+$/, "")}/${e.name}`;
+          return e.type === "dir" ? (
+            <Node
+              key={child}
+              path={child}
+              name={e.name}
+              depth={depth + 1}
+              cache={cache}
+              open={open}
+              loading={loading}
+              selected={selected}
+              onToggle={onToggle}
+              onOpenFile={onOpenFile}
+            />
+          ) : (
+            <button
+              key={child}
+              className={`node file ${selected === child ? "selected" : ""}`}
+              style={{ paddingLeft: (depth + 1) * 12 + 18 }}
+              onClick={() => onOpenFile(child)}
+            >
+              <span className="node-name">{e.name}</span>
+              <span className="dim">{e.size === null ? "" : bytes(e.size)}</span>
+            </button>
+          );
+        })}
+      {isOpen && loaded && loaded.entries.length === 0 && (
+        <div className="node empty" style={{ paddingLeft: (depth + 1) * 12 + 18 }}>
+          empty
+        </div>
+      )}
+      {isOpen && loaded?.truncated && (
+        <div className="node empty" style={{ paddingLeft: (depth + 1) * 12 + 18 }}>
+          … truncated by the server
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Directories first, then files, each alphabetical — the order every editor uses. */
+function sortEntries(entries: Entry[]): Entry[] {
+  return [...entries].sort((a, b) => {
+    if ((a.type === "dir") !== (b.type === "dir")) return a.type === "dir" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
 }
 
 function diffClass(line: string): string {

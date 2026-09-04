@@ -10,10 +10,11 @@
  *
  *   GET    /api/paddock                       the caller's machine and its people
  *   POST   /api/paddock                       owner: claim it
- *   POST   /api/paddock/:id/members           owner: invite by email
- *   DELETE /api/paddock/:id/members/:email    owner, or leave
- *   POST   /api/paddock/:id/invite            owner: mint the link (evicts old guests)
- *   DELETE /api/paddock/:id/invite            owner: close the link
+ *   GET    /api/paddock/:id/tabs/:c/people    who is in one tab
+ *   POST   /api/paddock/:id/tabs/:c/members   owner: invite by email, to that tab
+ *   DELETE /api/paddock/:id/tabs/:c/members/:email  owner, or leave
+ *   POST   /api/paddock/:id/tabs/:c/invite    owner: mint that tab's link
+ *   DELETE /api/paddock/:id/tabs/:c/invite    owner: close it, evicting its guests
  *   POST   /api/paddock/:id/presence          heartbeat
  *   GET    /api/paddock/:id/stream            presence, tabs, turns
  *   POST   /api/paddock/:id/rebuild           owner: new machine, same settings
@@ -57,10 +58,11 @@ export function buildRouter(ctx: AppContext): (req: Request) => Promise<Response
 
   on("GET", "/api/paddock", (req) => people.show(ctx, req));
   on("POST", "/api/paddock", (req) => people.claim(ctx, req));
-  on("POST", "/api/paddock/:id/members", (req, p) => people.addMember(ctx, req, p.id!));
-  on("DELETE", "/api/paddock/:id/members/:email", (req, p) => people.removeMember(ctx, req, p.id!, p.email!));
-  on("POST", "/api/paddock/:id/invite", (req, p) => people.mintInvite(ctx, req, p.id!));
-  on("DELETE", "/api/paddock/:id/invite", (req, p) => people.closeInvite(ctx, req, p.id!));
+  on("GET", "/api/paddock/:id/tabs/:c/people", (req, p) => people.tabPeople(ctx, req, p.id!, p.c!));
+  on("POST", "/api/paddock/:id/tabs/:c/members", (req, p) => people.addMember(ctx, req, p.id!, p.c!));
+  on("DELETE", "/api/paddock/:id/tabs/:c/members/:email", (req, p) => people.removeMember(ctx, req, p.id!, p.c!, p.email!));
+  on("POST", "/api/paddock/:id/tabs/:c/invite", (req, p) => people.mintInvite(ctx, req, p.id!, p.c!));
+  on("DELETE", "/api/paddock/:id/tabs/:c/invite", (req, p) => people.closeInvite(ctx, req, p.id!, p.c!));
   on("POST", "/api/paddock/:id/presence", (req, p) => people.presence(ctx, req, p.id!));
   on("GET", "/api/paddock/:id/stream", (req, p) => people.stream(ctx, req, p.id!));
   on("POST", "/api/paddock/:id/rebuild", (req, p) => lifecycle.rebuild(ctx, req, p.id!));

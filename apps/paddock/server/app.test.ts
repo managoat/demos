@@ -107,8 +107,9 @@ async function signIn(email: string): Promise<string> {
   return `paddock_session=${encodeURIComponent(token)}`;
 }
 
-async function guestSession(paddockId: string): Promise<string> {
-  const guest = ctx.db.createGuest(randomToken(9), paddockId, "guest-7f3a");
+/** A guest of one tab — the only kind there is. Defaults to Terminal 1. */
+async function guestSession(paddockId: string, conversationId = "c1"): Promise<string> {
+  const guest = ctx.db.createGuest(randomToken(9), paddockId, conversationId, "guest-7f3a");
   const token = randomToken();
   ctx.db.createGuestSession(await sha256(token), guest.id);
   return `paddock_session=${encodeURIComponent(token)}`;
@@ -157,7 +158,8 @@ describe("what a guest may do", () => {
     expect((await call(guest, "GET", `/f/${owner.id}/api/conversations/c1`)).status).toBe(200);
     expect((await call(guest, "GET", `/f/${owner.id}/api/conversations/c1/events`)).status).toBe(200);
     expect((await call(guest, "POST", `/f/${owner.id}/api/conversations/c1/prompts`, { prompt: "hi" })).status).toBe(200);
-    expect((await call(guest, "POST", `/f/${owner.id}/api/conversations`, { channel_id: channelFor("t3", 1) })).status).toBe(200);
+    // Opening a tab is not among them any more — see "only the owner opens tabs".
+    expect((await call(guest, "POST", `/f/${owner.id}/api/conversations`, { channel_id: channelFor("t3", 1) })).status).toBe(403);
   });
 
   test("but not terminate a tab — that ends it for everybody", async () => {
@@ -208,8 +210,8 @@ describe("what a guest may do", () => {
   test("and cannot invite anyone or mint a link", async () => {
     const owner = await paddockFor(OWNER);
     const guest = await guestSession(owner.id);
-    expect((await call(guest, "POST", `/api/paddock/${owner.id}/members`, { email: "x@example.com" })).status).toBe(403);
-    expect((await call(guest, "POST", `/api/paddock/${owner.id}/invite`)).status).toBe(403);
+    expect((await call(guest, "POST", `/api/paddock/${owner.id}/tabs/c1/members`, { email: "x@example.com" })).status).toBe(403);
+    expect((await call(guest, "POST", `/api/paddock/${owner.id}/tabs/c1/invite`)).status).toBe(403);
   });
 });
 
@@ -233,18 +235,18 @@ describe("a guest is not a member", () => {
   test("a member may not change the machine's people either — only the owner", async () => {
     const owner = await paddockFor(OWNER);
     const memberCookie = await signIn(OTHER);
-    ctx.db.addMember(owner.id, OTHER, OWNER);
-    expect((await call(memberCookie, "POST", `/api/paddock/${owner.id}/members`, { email: "x@example.com" })).status).toBe(403);
+    ctx.db.addMember(owner.id, "c1", OTHER, OWNER);
+    expect((await call(memberCookie, "POST", `/api/paddock/${owner.id}/tabs/c1/members`, { email: "x@example.com" })).status).toBe(403);
     // But they can leave.
-    expect((await call(memberCookie, "DELETE", `/api/paddock/${owner.id}/members/${encodeURIComponent(OTHER)}`)).status).toBe(200);
+    expect((await call(memberCookie, "DELETE", `/api/paddock/${owner.id}/tabs/c1/members/${encodeURIComponent(OTHER)}`)).status).toBe(200);
   });
 });
 
 describe("invite links", () => {
   test("re-minting evicts everyone who came in on the old one", async () => {
     const owner = await paddockFor(OWNER);
-    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/invite`);
-    const token = ctx.db.getPaddock(owner.id)!.invite_token!;
+    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/tabs/c1/invite`);
+    const token = ctx.db.inviteFor(owner.id, "c1")?.token ?? null!;
 
     const joined = await call(null, "POST", `/api/join/${token}`);
     expect(joined.status).toBe(200);
@@ -252,36 +254,36 @@ describe("invite links", () => {
     expect((await call(cookie, "GET", `/f/${owner.id}/api/conversations/c1`)).status).toBe(200);
 
     // Re-mint. The guest's session must die with the link, not outlive it.
-    const reminted = await call(owner.cookie, "POST", `/api/paddock/${owner.id}/invite`);
+    const reminted = await call(owner.cookie, "POST", `/api/paddock/${owner.id}/tabs/c1/invite`);
     expect(((await reminted.json()) as { evicted: number }).evicted).toBe(1);
 
     const after = await call(cookie, "GET", `/f/${owner.id}/api/conversations/c1`);
     expect(after.status).toBe(401);
     expect(((await after.json()) as { error: string }).error).toBe("invite_revoked");
-    expect(ctx.db.getPaddock(owner.id)!.invite_token).not.toBe(token);
+    expect(ctx.db.inviteFor(owner.id, "c1")?.token ?? null).not.toBe(token);
   });
 
   test("an old token stops naming a paddock once it is replaced", async () => {
     const owner = await paddockFor(OWNER);
-    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/invite`);
-    const first = ctx.db.getPaddock(owner.id)!.invite_token!;
-    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/invite`);
+    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/tabs/c1/invite`);
+    const first = ctx.db.inviteFor(owner.id, "c1")?.token ?? null!;
+    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/tabs/c1/invite`);
     expect((await call(null, "POST", `/api/join/${first}`)).status).toBe(404);
   });
 
   test("closing the link leaves no way in at all", async () => {
     const owner = await paddockFor(OWNER);
-    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/invite`);
-    const token = ctx.db.getPaddock(owner.id)!.invite_token!;
-    await call(owner.cookie, "DELETE", `/api/paddock/${owner.id}/invite`);
+    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/tabs/c1/invite`);
+    const token = ctx.db.inviteFor(owner.id, "c1")?.token ?? null!;
+    await call(owner.cookie, "DELETE", `/api/paddock/${owner.id}/tabs/c1/invite`);
     expect((await call(null, "POST", `/api/join/${token}`)).status).toBe(404);
-    expect(ctx.db.getPaddock(owner.id)!.invite_token).toBeNull();
+    expect(ctx.db.inviteFor(owner.id, "c1")?.token ?? null).toBeNull();
   });
 
   test("following a link while signed in keeps your identity rather than demoting you", async () => {
     const owner = await paddockFor(OWNER);
-    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/invite`);
-    const token = ctx.db.getPaddock(owner.id)!.invite_token!;
+    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/tabs/c1/invite`);
+    const token = ctx.db.inviteFor(owner.id, "c1")?.token ?? null!;
 
     // The owner opening their own link stays the owner.
     const asOwner = await call(owner.cookie, "POST", `/api/join/${token}`);
@@ -292,7 +294,7 @@ describe("invite links", () => {
     const asUser = await call(otherCookie, "POST", `/api/join/${token}`);
     const body = (await asUser.json()) as { role: string; kind: string; email: string };
     expect(body).toMatchObject({ role: "member", kind: "user", email: OTHER });
-    expect(ctx.db.isMember(owner.id, OTHER)).toBe(true);
+    expect(ctx.db.memberTabs(owner.id, OTHER).includes("c1")).toBe(true);
   });
 });
 
@@ -364,28 +366,28 @@ describe("replacing the machine", () => {
 
   test("reset closes the way in: the link dies and its guests with it", async () => {
     const owner = await paddockFor(OWNER);
-    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/invite`);
-    const token = ctx.db.getPaddock(owner.id)!.invite_token!;
+    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/tabs/c1/invite`);
+    const token = ctx.db.inviteFor(owner.id, "c1")?.token ?? null!;
     const joined = await call(null, "POST", `/api/join/${token}`);
     const guestCookie = joined.headers.get("set-cookie")!.split(";")[0]!;
 
     await call(owner.cookie, "POST", `/api/paddock/${owner.id}/reset`);
 
-    expect(ctx.db.getPaddock(owner.id)!.invite_token).toBeNull();
+    expect(ctx.db.inviteFor(owner.id, "c1")?.token ?? null).toBeNull();
     expect((await call(null, "POST", `/api/join/${token}`)).status).toBe(404);
     expect((await call(guestCookie, "GET", "/api/me")).status).toBe(401);
   });
 
   test("a rebuild leaves an invited guest in place for the machine that replaces it", async () => {
     const owner = await paddockFor(OWNER);
-    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/invite`);
-    const token = ctx.db.getPaddock(owner.id)!.invite_token!;
+    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/tabs/c1/invite`);
+    const token = ctx.db.inviteFor(owner.id, "c1")?.token ?? null!;
     const joined = await call(null, "POST", `/api/join/${token}`);
     const guestCookie = joined.headers.get("set-cookie")!.split(";")[0]!;
 
     await call(owner.cookie, "POST", `/api/paddock/${owner.id}/rebuild`);
 
-    expect(ctx.db.getPaddock(owner.id)!.invite_token).toBe(token);
+    expect(ctx.db.inviteFor(owner.id, "c1")?.token ?? null).toBe(token);
     expect((await call(guestCookie, "GET", "/api/me")).status).toBe(200);
   });
 
@@ -393,7 +395,7 @@ describe("replacing the machine", () => {
     const owner = await paddockFor(OWNER);
     const guest = await guestSession(owner.id);
     const memberCookie = await signIn(OTHER);
-    ctx.db.addMember(owner.id, OTHER, OWNER);
+    ctx.db.addMember(owner.id, "c1", OTHER, OWNER);
 
     upstream = [];
     for (const cookie of [guest, memberCookie]) {
@@ -454,17 +456,115 @@ describe("opening a tab on an existing machine", () => {
     expect(res.status).toBe(200);
   });
 
-  test("a guest opening a tab gets the same identity, and cannot name another", async () => {
+  test("the owner's attach is built from their own machine, whatever the body asks for", async () => {
     const owner = await paddockFor(OWNER);
-    const guest = await guestSession(owner.id);
-    // Even asked for a different box and agent, the attach is built from the
-    // machine this paddock actually has.
-    const res = await call(guest, "POST", `/f/${owner.id}/api/conversations`, {
+    const res = await call(owner.cookie, "POST", `/f/${owner.id}/api/conversations`, {
       channel_id: channelFor("t4", 1),
       agent_id: "somebody-elses-agent",
       sandbox_id: "somebody-elses-box",
       environment_id: "nope",
     });
     expect(res.status).toBe(200);
+  });
+});
+
+describe("an invitation is to a tab, not to the machine", () => {
+  test("a guest of Terminal 1 cannot see, read or prompt Terminal 2", async () => {
+    const owner = await paddockFor(OWNER);
+    const guest = await guestSession(owner.id, "c1");
+
+    // The strip they get is one tab long.
+    const strip = (await (await call(guest, "GET", `/f/${owner.id}/api/conversations`)).json()) as { data: { id: string }[] };
+    expect(strip.data.map((c) => c.id)).toEqual(["c1"]);
+
+    // Their own tab works.
+    expect((await call(guest, "GET", `/f/${owner.id}/api/conversations/c1`)).status).toBe(200);
+    expect((await call(guest, "POST", `/f/${owner.id}/api/conversations/c1/prompts`, { prompt: "hi" })).status).toBe(200);
+
+    // The other one does not exist as far as they are concerned.
+    upstream = [];
+    for (const sub of ["", "/events", "/stream", "/turns"]) {
+      expect((await call(guest, "GET", `/f/${owner.id}/api/conversations/c2${sub}`)).status).toBe(404);
+    }
+    expect((await call(guest, "POST", `/f/${owner.id}/api/conversations/c2/prompts`, { prompt: "hi" })).status).toBe(404);
+    expect(upstream.some((u) => u.path.includes("c2"))).toBe(false);
+  });
+
+  test("nor can they learn who else is in a tab they are not in", async () => {
+    const owner = await paddockFor(OWNER);
+    const guest = await guestSession(owner.id, "c1");
+    expect((await call(guest, "GET", `/api/paddock/${owner.id}/tabs/c1/people`)).status).toBe(200);
+    expect((await call(guest, "GET", `/api/paddock/${owner.id}/tabs/c2/people`)).status).toBe(404);
+  });
+
+  test("a member invited to one tab is a member of that tab only", async () => {
+    const owner = await paddockFor(OWNER);
+    const memberCookie = await signIn(OTHER);
+    ctx.db.addMember(owner.id, "c2", OTHER, OWNER);
+
+    const strip = (await (await call(memberCookie, "GET", `/f/${owner.id}/api/conversations`)).json()) as { data: { id: string }[] };
+    expect(strip.data.map((c) => c.id)).toEqual(["c2"]);
+    expect((await call(memberCookie, "GET", `/f/${owner.id}/api/conversations/c1`)).status).toBe(404);
+    expect((await call(memberCookie, "GET", `/f/${owner.id}/api/conversations/c2`)).status).toBe(200);
+  });
+
+  test("two links, two tabs: closing one leaves the other alone", async () => {
+    const owner = await paddockFor(OWNER);
+    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/tabs/c1/invite`);
+    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/tabs/c2/invite`);
+    const first = ctx.db.inviteFor(owner.id, "c1")!.token;
+    const second = ctx.db.inviteFor(owner.id, "c2")!.token;
+    expect(first).not.toBe(second);
+
+    const inOne = await call(null, "POST", `/api/join/${first}`);
+    const inTwo = await call(null, "POST", `/api/join/${second}`);
+    const cookieOne = inOne.headers.get("set-cookie")!.split(";")[0]!;
+    const cookieTwo = inTwo.headers.get("set-cookie")!.split(";")[0]!;
+
+    // Re-minting Terminal 1's link evicts its guest and nobody else's.
+    const reminted = await call(owner.cookie, "POST", `/api/paddock/${owner.id}/tabs/c1/invite`);
+    expect(((await reminted.json()) as { evicted: number }).evicted).toBe(1);
+    expect((await call(cookieOne, "GET", "/api/me")).status).toBe(401);
+    expect((await call(cookieTwo, "GET", "/api/me")).status).toBe(200);
+    expect(ctx.db.inviteFor(owner.id, "c2")!.token).toBe(second);
+  });
+
+  test("a link drops you into the tab it was made for", async () => {
+    const owner = await paddockFor(OWNER);
+    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/tabs/c2/invite`);
+    const token = ctx.db.inviteFor(owner.id, "c2")!.token;
+    const joined = await call(null, "POST", `/api/join/${token}`);
+    const cookie = joined.headers.get("set-cookie")!.split(";")[0]!;
+
+    const strip = (await (await call(cookie, "GET", `/f/${owner.id}/api/conversations`)).json()) as { data: { id: string }[] };
+    expect(strip.data.map((c) => c.id)).toEqual(["c2"]);
+  });
+
+  test("following a tab's link while signed in makes you a member of that tab", async () => {
+    const owner = await paddockFor(OWNER);
+    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/tabs/c2/invite`);
+    const token = ctx.db.inviteFor(owner.id, "c2")!.token;
+    const otherCookie = await signIn(OTHER);
+    await call(otherCookie, "POST", `/api/join/${token}`);
+    expect(ctx.db.memberTabs(owner.id, OTHER)).toEqual(["c2"]);
+  });
+});
+
+describe("only the owner opens tabs", () => {
+  test("a guest and a member are both refused, and nothing reaches Fountain", async () => {
+    const owner = await paddockFor(OWNER);
+    const guest = await guestSession(owner.id, "c1");
+    const memberCookie = await signIn(OTHER);
+    ctx.db.addMember(owner.id, "c1", OTHER, OWNER);
+
+    upstream = [];
+    for (const cookie of [guest, memberCookie]) {
+      const res = await call(cookie, "POST", `/f/${owner.id}/api/conversations`, { channel_id: channelFor("t9", 1) });
+      expect(res.status).toBe(403);
+    }
+    expect(upstream.some((u) => u.method === "POST" && u.path === "/api/conversations")).toBe(false);
+
+    // And the owner still can.
+    expect((await call(owner.cookie, "POST", `/f/${owner.id}/api/conversations`, { channel_id: channelFor("t9", 1) })).status).toBe(200);
   });
 });

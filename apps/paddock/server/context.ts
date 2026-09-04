@@ -65,16 +65,33 @@ export async function authenticate(ctx: AppContext, req: Request): Promise<Ident
  * A guest is bound to one paddock by construction: the row was created when
  * they followed that paddock's link, so there is no lookup to get wrong.
  */
-export function paddockAccess(ctx: AppContext, id: Identity, paddockId: string): { paddock: PaddockRow; role: Role } {
+export interface Access {
+  paddock: PaddockRow;
+  role: Role;
+  /**
+   * The tabs this caller may reach, or `null` for the owner, who may reach
+   * every tab on their own machine.
+   *
+   * Invitations name a tab, not a machine — somebody invited to Terminal 2
+   * gets Terminal 2 and no view of the rest of the box. Returning the allowed
+   * set here, once, is what stops every later check having to remember that.
+   */
+  tabs: string[] | null;
+}
+
+export function paddockAccess(ctx: AppContext, id: Identity, paddockId: string): Access {
   const paddock = ctx.db.getPaddock(paddockId);
   if (!paddock) throw new HttpError(404, "not_found", "No such paddock.");
 
   if (id.kind === "guest") {
     if (id.guest.paddock_id !== paddock.id) throw new HttpError(404, "not_found", "No such paddock.");
-    return { paddock, role: "guest" };
+    // Exactly one, by construction: the guest row was made when they followed
+    // that tab's link, so there is no lookup here to get wrong.
+    return { paddock, role: "guest", tabs: [id.guest.conversation_id] };
   }
-  if (paddock.owner_email === id.user.email) return { paddock, role: "owner" };
-  if (ctx.db.isMember(paddock.id, id.user.email)) return { paddock, role: "member" };
+  if (paddock.owner_email === id.user.email) return { paddock, role: "owner", tabs: null };
+  const tabs = ctx.db.memberTabs(paddock.id, id.user.email);
+  if (tabs.length) return { paddock, role: "member", tabs };
   throw new HttpError(404, "not_found", "No such paddock.");
 }
 

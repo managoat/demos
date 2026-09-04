@@ -1,23 +1,30 @@
 /**
- * Who is in this machine, and how to let somebody else in.
+ * Who is in *this tab*, and how to let somebody else into it.
  *
- * The warning is the important part of this panel, not the buttons. Anyone who
- * can prompt the agent can make it read anything on the box — there is no
- * permission that prevents it, because the agent is the thing with the shell.
- * So the invite says so, in the place where somebody is deciding, rather than
- * in a README nobody opens.
+ * Invitations name a terminal, not the machine. Somebody let into Terminal 2
+ * sees Terminal 2: not the other terminals, not what is on the rest of the
+ * disk through them, and they cannot open a third. That is what the original
+ * brief asked for — people invited to a thread — and it is a much smaller
+ * thing to hand out than a whole computer.
  *
- * It also points at the one real mitigation, which the Machine panel already
- * draws: a vault secret is never on the box. Once other people are in here,
- * that is where anything sensitive belongs.
+ * The warning is still the important part of the panel, because the reduction
+ * is real but partial: a tab is a shell on the machine, so anyone who can type
+ * into one can still ask the agent to read the disk. What per-tab invites buy
+ * is that they cannot read *your other conversations*, and that revoking one
+ * terminal does not disturb the rest.
  */
 import { useState } from "react";
-import type { PaddockDto, Role } from "../api/paddock";
+import type { Role, TabPeopleDto } from "../api/paddock";
 
 export interface PeopleProps {
-  paddock: PaddockDto;
+  /** Null while the tab's people are still loading. */
+  tab: TabPeopleDto | null;
+  /** What this terminal is called, for a panel that talks about one of them. */
+  tabTitle: string;
   role: Role;
   meLabel: string;
+  ownerEmail: string;
+  here: { label: string; role: string }[];
   onInvite: (email: string) => Promise<void>;
   onRemove: (email: string) => Promise<void>;
   onMintLink: () => Promise<void>;
@@ -25,18 +32,16 @@ export interface PeopleProps {
 }
 
 /**
- * The link, as something you can actually paste.
- *
- * The server builds it from PUBLIC_URL, which is right in production and unset
- * in dev — where it would otherwise render as a bare `/#/join/…`. Resolving it
- * against the current origin here means a misconfigured PUBLIC_URL degrades to
- * "the link works from where you are" rather than to a link that goes nowhere.
+ * The link, as something you can paste. The server builds it from PUBLIC_URL,
+ * which is right in production and unset in dev; resolving it against the
+ * current origin means a misconfiguration degrades to "works from where you
+ * are" rather than to a link that goes nowhere.
  */
 function absolute(url: string): string {
   return /^https?:\/\//.test(url) ? url : `${window.location.origin}${url}`;
 }
 
-export function People({ paddock, role, meLabel, onInvite, onRemove, onMintLink, onCloseLink }: PeopleProps) {
+export function People({ tab, tabTitle, role, meLabel, ownerEmail, here, onInvite, onRemove, onMintLink, onCloseLink }: PeopleProps) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -55,37 +60,45 @@ export function People({ paddock, role, meLabel, onInvite, onRemove, onMintLink,
     <div className="panel people">
       <header className="panel-head">
         <div>
-          <h2>People</h2>
-          <p className="dim">
-            {paddock.here.length} here · {isOwner ? "your machine" : `${paddock.ownerEmail}'s machine`}
-          </p>
+          <h2>{tabTitle}</h2>
+          <p className="dim">{isOwner ? "who is in this terminal" : `${ownerEmail}'s machine`}</p>
         </div>
       </header>
 
       <section>
+        <div className="section-head">
+          <h3>
+            Here now <span className="dim">— across the machine</span>
+          </h3>
+        </div>
         <ul className="rows">
-          {paddock.here.map((p) => (
+          {here.map((p) => (
             <li className="row" key={p.label}>
               <span className="dot busy" />
               <span className="row-label">{p.label === meLabel ? `${p.label} (you)` : p.label}</span>
               <span className="dim">{p.role}</span>
             </li>
           ))}
-          {paddock.here.length === 0 && <li className="fine">nobody else right now</li>}
+          {here.length === 0 && <li className="fine">nobody else right now</li>}
         </ul>
       </section>
 
-      {isOwner && (
+      {!tab ? (
+        <p className="fine">…</p>
+      ) : isOwner ? (
         <>
           <section>
             <div className="section-head">
               <h3>
-                Invite by email <span className="dim">— they sign in with Fountain</span>
+                Invite to {tabTitle} <span className="dim">— by email</span>
               </h3>
-              <p className="fine">They find this machine waiting. Turns run on your account, so you pay for what they do.</p>
+              <p className="fine">
+                They sign in with Fountain and find this terminal waiting. Turns run on your account, so you pay for what they
+                do here.
+              </p>
             </div>
             <ul className="rows">
-              {paddock.members.map((m) => (
+              {tab.members.map((m) => (
                 <li className="row" key={m.email}>
                   <span className="row-label">{m.email}</span>
                   <button className="ghost" onClick={() => void run(() => onRemove(m.email))} disabled={busy}>
@@ -93,7 +106,7 @@ export function People({ paddock, role, meLabel, onInvite, onRemove, onMintLink,
                   </button>
                 </li>
               ))}
-              {paddock.members.length === 0 && <li className="fine">nobody yet</li>}
+              {tab.members.length === 0 && <li className="fine">nobody yet</li>}
             </ul>
             <div className="editor-row">
               <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@example.com" spellCheck={false} />
@@ -114,24 +127,25 @@ export function People({ paddock, role, meLabel, onInvite, onRemove, onMintLink,
           <section>
             <div className="section-head">
               <h3>
-                Invite by link <span className="dim">— no account needed</span>
+                Invite to {tabTitle} <span className="dim">— by link, no account needed</span>
               </h3>
-              <p className="fine">Anyone who opens it is in, with no sign-in at all. You pay for everything they do.</p>
+              <p className="fine">Anyone who opens it lands in this terminal, with no sign-in at all. You pay for what they do.</p>
             </div>
 
             <p className="note warn">
-              <strong>A guest can read this machine.</strong> Anyone who can type into a tab can ask the agent to print your
-              environment secrets, your repositories, anything on the disk. No setting here prevents that. If something must
-              stay private while other people are in, keep it as a <strong>vault</strong> secret — those never touch the box.
+              <strong>They get a shell on this machine.</strong> It is one terminal — they cannot see your other ones or open
+              another — but a terminal is still a way to ask the agent to read the disk, including your environment secrets. If
+              something must stay private while somebody is in here, keep it as a <strong>vault</strong> secret: those never
+              touch the box.
             </p>
 
-            {paddock.inviteUrl ? (
+            {tab.inviteUrl ? (
               <>
                 <div className="editor-row">
-                  <input value={absolute(paddock.inviteUrl)} readOnly spellCheck={false} onFocus={(e) => e.currentTarget.select()} />
+                  <input value={absolute(tab.inviteUrl)} readOnly spellCheck={false} onFocus={(e) => e.currentTarget.select()} />
                   <button
                     onClick={() => {
-                      void navigator.clipboard?.writeText(absolute(paddock.inviteUrl!)).then(
+                      void navigator.clipboard?.writeText(absolute(tab.inviteUrl!)).then(
                         () => {
                           setCopied(true);
                           window.setTimeout(() => setCopied(false), 1500);
@@ -150,7 +164,7 @@ export function People({ paddock, role, meLabel, onInvite, onRemove, onMintLink,
                   <button className="ghost" onClick={() => void run(onCloseLink)} disabled={busy}>
                     close the link
                   </button>
-                  <span className="fine">Either one evicts everybody who came in on the old link, mid-session.</span>
+                  <span className="fine">Either evicts whoever came in on the old one — from this terminal only.</span>
                 </div>
               </>
             ) : (
@@ -158,32 +172,31 @@ export function People({ paddock, role, meLabel, onInvite, onRemove, onMintLink,
                 <button onClick={() => void run(onMintLink)} disabled={busy}>
                   make a link
                 </button>
-                <span className="fine">No link right now, so nobody can join anonymously.</span>
+                <span className="fine">No link for this terminal, so nobody can join it anonymously.</span>
               </div>
             )}
 
-            {paddock.guests.length > 0 && (
+            {tab.guests.length > 0 && (
               <>
-                <h4>Guests on the link</h4>
+                <h4>Guests in {tabTitle}</h4>
                 <div className="chips">
-                  {paddock.guests.map((g) => (
+                  {tab.guests.map((g) => (
                     <span className="chip" key={g.handle}>
                       {g.handle}
                     </span>
                   ))}
                 </div>
-                <p className="fine">Removing one individually is not a thing — the link is the credential, so a new link is the revoke.</p>
+                <p className="fine">The link is the credential, so a new link is how you remove one.</p>
               </>
             )}
           </section>
         </>
-      )}
-
-      {!isOwner && (
+      ) : (
         <section>
           <p className="fine">
-            You are {role === "member" ? "a member of" : "a guest on"} this machine. You can use its terminals and read its
-            files; only {paddock.ownerEmail} can change what is installed on it.
+            You are {role === "member" ? "a member of" : "a guest in"} {tabTitle} on {ownerEmail}'s machine. You can use this
+            terminal and read the files it can see. The machine's other terminals, and what is installed on it, are not yours to
+            change.
           </p>
         </section>
       )}

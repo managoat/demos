@@ -128,8 +128,8 @@ async function retire(ctx: AppContext, req: Request, paddockId: string, opts: { 
   // exists. Guests came in on a link to *this* box, so a reset takes the link
   // with it; a rebuild leaves them in place for the machine that replaces it.
   if (opts.settings) {
-    ctx.db.revokeGuests(paddock.id);
-    ctx.db.setInviteToken(paddock.id, null);
+    // Every tab is gone, so every link into every tab is gone with it.
+    ctx.db.revokeAllGuests(paddock.id);
   }
   hub.publish(paddock.id, "tabs", { retired: true });
 

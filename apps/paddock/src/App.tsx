@@ -23,7 +23,7 @@ import { defaultChoice, ensureIdentity, type BootStep, type Identity } from "./l
 import { boxDrift, applyKeep, applyTodo, configRev, desiredItems, primaryRepoPath, withRev } from "./lib/machine";
 import { parseReceipt, decodeFile, type Receipt } from "./lib/protocol";
 import { completeLoginIfCallback } from "./lib/oauth";
-import { describePaddockError, paddock, type Me, type PaddockDto } from "./api/paddock";
+import { describePaddockError, paddock, type Me, type PaddockDto, type TabPeopleDto } from "./api/paddock";
 import { applyPrompt, bootstrapPrompt, reconcilePrompt, welcomePrompt, RECEIPT_PATH, WORK_ROOT } from "../shared/spec";
 import { canPrompt, channelFor, findBox, holder, nextSlug, opsTab, OPS_SLUG, staleTabs, tabsOf, visibleTabs } from "../shared/tabs";
 
@@ -139,6 +139,8 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
   const role = me.role;
   const isOwner = role === "owner";
   const [people, setPeople] = useState<PaddockDto | null>(null);
+  /** Who is in the tab being looked at. Invitations are per tab, so this is too. */
+  const [tabPeople, setTabPeople] = useState<TabPeopleDto | null>(null);
 
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -422,6 +424,28 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
   );
   const drift = useMemo(() => boxDrift(desired, receiptRead ? receipt : null), [desired, receipt, receiptRead]);
 
+  // Who is in the active tab. Reloaded on every tab change, because the
+  // answer is different for each one.
+  useEffect(() => {
+    if (!paddockId || !active) {
+      setTabPeople(null);
+      return;
+    }
+    const conv = active.conversation.id;
+    let stale = false;
+    void paddock
+      .tabPeople(paddockId, conv)
+      .then((t) => {
+        if (!stale) setTabPeople(t);
+      })
+      .catch(() => {
+        if (!stale) setTabPeople(null);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [paddockId, active]);
+
   // ── scrollback ───────────────────────────────────────────────────────────
 
   /**
@@ -600,13 +624,34 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
     }
   }
 
+  /**
+   * Close a terminal. The machine stays up — it is the identity's home, not
+   * this conversation's — and anyone invited to that tab loses their way in
+   * with it, which is the point of being able to close one.
+   *
+   * Closing the last one is allowed, and immediately replaced: a machine you
+   * cannot reach is not a state worth being able to get into, and "close this
+   * one and start a clean one" is the reason to do it.
+   */
   async function closeTab(slug: string) {
     const tab = tabs.find((t) => t.slug === slug);
     if (!tab) return;
+    const last = strip.length === 1;
     try {
-      // The machine stays up: it is the identity's home, not this conversation's.
       await client.terminate(tab.conversation.id);
+      if (activeSlug === slug) setActiveSlug(null);
       await refreshConversations();
+      if (last && identity) {
+        const fresh = nextSlug(tabs.filter((t) => t.slug !== slug));
+        await client.openTab({
+          agent_id: identity.agent.id,
+          sandbox_id: boxId!,
+          title: `Terminal ${fresh.slice(1)}`,
+          channel_id: channelFor(fresh, rev),
+        });
+        setActiveSlug(fresh);
+        await refreshConversations();
+      }
     } catch (err) {
       setNotice(describeError(err));
     }
@@ -748,15 +793,6 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
         </span>
         {!isOwner && <span className="badge">{people ? `${people.ownerEmail}'s machine` : "shared with you"}</span>}
         <span className="spacer" />
-        <button className={`ghost ${side === "machine" ? "on" : ""}`} onClick={() => setSide("machine")}>
-          Machine
-        </button>
-        <button className={`ghost ${side === "files" ? "on" : ""}`} onClick={() => setSide("files")}>
-          Files
-        </button>
-        <button className={`ghost ${side === "people" ? "on" : ""}`} onClick={() => setSide("people")}>
-          People{people && people.here.length > 1 ? ` (${people.here.length})` : ""}
-        </button>
         <button className="ghost" onClick={onSignOut}>
           {me.kind === "guest" ? "Leave" : "Sign out"}
         </button>
@@ -778,6 +814,7 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
             onClose={(slug) => void closeTab(slug)}
             opening={opening}
             canClose={isOwner}
+            canOpen={isOwner}
           />
           {active && (
             <Terminal
@@ -793,22 +830,37 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
         </main>
 
         <aside>
+          {/*
+            These three switch the panel, so they belong to the panel. In the
+            top bar they read as application-wide navigation, which is what
+            they looked like and never were.
+          */}
+          <nav className="panel-tabs">
+            {(["machine", "files", "people"] as const).map((which) => (
+              <button key={which} className={side === which ? "on" : ""} onClick={() => setSide(which)}>
+                {which === "machine" ? "Machine" : which === "files" ? "Files" : `People${people && people.here.length > 1 ? ` (${people.here.length})` : ""}`}
+              </button>
+            ))}
+          </nav>
           {side === "people" ? (
-            people ? (
+            people && active ? (
               <People
-                paddock={people}
+                tab={tabPeople}
+                tabTitle={active.title}
                 role={role ?? "guest"}
                 meLabel={me.label}
-                onInvite={async (email) => setPeople(await paddock.addMember(people.id, email))}
-                onRemove={async (email) => setPeople(await paddock.removeMember(people.id, email))}
+                ownerEmail={people.ownerEmail}
+                here={people.here}
+                onInvite={async (email) => setTabPeople(await paddock.addMember(people.id, active.conversation.id, email))}
+                onRemove={async (email) => setTabPeople(await paddock.removeMember(people.id, active.conversation.id, email))}
                 onMintLink={async () => {
-                  const r = await paddock.mintInvite(people.id);
-                  setPeople(r.data);
-                  if (r.evicted) setNotice(`New link. ${r.evicted} guest${r.evicted === 1 ? "" : "s"} on the old one ${r.evicted === 1 ? "was" : "were"} removed.`);
+                  const r = await paddock.mintInvite(people.id, active.conversation.id);
+                  setTabPeople(r.data);
+                  if (r.evicted) setNotice(`New link for ${active.title}. ${r.evicted} guest${r.evicted === 1 ? "" : "s"} removed.`);
                 }}
                 onCloseLink={async () => {
-                  const r = await paddock.closeInvite(people.id);
-                  setPeople(r.data);
+                  const r = await paddock.closeInvite(people.id, active.conversation.id);
+                  setTabPeople(r.data);
                   setNotice(r.evicted ? `Link closed. ${r.evicted} guest${r.evicted === 1 ? "" : "s"} removed.` : "Link closed.");
                 }}
               />
