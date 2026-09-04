@@ -1,0 +1,527 @@
+/* The centre column: a thread's card, its transcript and its composer.
+   Every colour here is a token from styles.css, so the three palettes carry
+   this column without it knowing they exist.
+
+   The column is a grid rather than a flex stack for one reason: the transcript
+   has to be the only thing that scrolls. A composer that drifts off the bottom
+   of a long conversation is the bug this layout exists to make impossible. */
+
+.dd-th {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  background: var(--bg);
+}
+
+/* ── the card and its lines ────────────────────────────────────────── */
+
+.dd-th-head {
+  padding: 18px 0 6px;
+}
+
+.dd-th-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.dd-th-card code {
+  color: var(--ink);
+}
+.dd-th-card-bad {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-color: var(--danger-line);
+  background: var(--bad-soft);
+}
+.dd-th-card-bad p {
+  margin: 0;
+  flex: 1;
+}
+
+.dd-th-card-skeleton {
+  height: 42px;
+}
+
+.dd-th-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 2px 2px;
+}
+
+.dd-th-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 2px;
+  color: var(--ink);
+  font-size: 12.5px;
+}
+.dd-th-line code {
+  color: var(--ink);
+}
+.dd-th-line-wait {
+  align-items: center;
+  color: var(--dim);
+}
+.dd-th-line-wait .dot {
+  margin: 0 5px;
+}
+
+.dd-th-line-skeleton {
+  height: 13px;
+  width: min(420px, 70%);
+}
+.dd-th-line-skeleton-short {
+  width: min(280px, 50%);
+}
+
+/* Icons sit on the text's baseline rather than its box, so a line of prose and
+   its glyph read as one line and not as a badge with a caption. */
+.dd-th-glyph {
+  flex: none;
+  color: var(--faint);
+  line-height: 0;
+  position: relative;
+  top: 3px;
+}
+.dd-th-glyph.error {
+  color: var(--bad);
+}
+
+.dd-th-sha {
+  margin-left: 8px;
+}
+
+.dd-th-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+}
+.dd-th-link:hover:not(:disabled) {
+  background: none;
+  border-color: transparent;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* ── the transcript ────────────────────────────────────────────────── */
+
+.dd-th-transcript {
+  position: relative;
+  min-height: 0;
+  display: flex;
+}
+
+.dd-th-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 24px 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.dd-th-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 0 4px;
+}
+
+.dd-th-item {
+  min-width: 0;
+}
+/* A turn boundary is a rule, not a heading: the conversation is continuous and
+   the separator only has to say where the last question ended. */
+.dd-th-item-turn {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+  margin-top: 6px;
+}
+
+.dd-th-quiet {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  color: var(--faint);
+  text-align: center;
+}
+.dd-th-quiet p {
+  margin: 0;
+  max-width: 340px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.dd-th-fail {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 9px 12px;
+  border: 1px solid var(--danger-line);
+  background: var(--bad-soft);
+  border-radius: 7px;
+  font-size: 12.5px;
+}
+.dd-th-fail span:nth-child(2) {
+  flex: 1;
+}
+
+.dd-th-jump {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  box-shadow: 0 4px 14px var(--shadow);
+  background: var(--surface-active);
+}
+
+/* ── what a turn is made of ────────────────────────────────────────── */
+
+.dd-th-user {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-left: auto;
+  width: fit-content;
+  max-width: min(560px, 85%);
+  color: var(--accent-ink);
+}
+.dd-th-user .dd-th-prose p {
+  margin: 0;
+}
+
+.dd-th-prose {
+  font-size: 13.5px;
+  line-height: 1.62;
+  min-width: 0;
+}
+.dd-th-prose p {
+  margin: 0 0 10px;
+  /* The agent's own line breaks are content: it wrote a list, not a paragraph. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.dd-th-prose p:last-child {
+  margin-bottom: 0;
+}
+.dd-th-prose code {
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.dd-th-pre {
+  position: relative;
+  margin: 10px 0;
+  padding: 10px 12px;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.dd-th-pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  white-space: pre;
+}
+.dd-th-lang {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-size: 10px;
+  color: var(--faint);
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+}
+
+/* thinking, folded away */
+
+.dd-th-thinking > summary,
+.dd-th-notice > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--faint);
+  font-size: 12px;
+  padding: 2px 0;
+}
+.dd-th-thinking > summary::-webkit-details-marker,
+.dd-th-notice > summary::-webkit-details-marker {
+  display: none;
+}
+.dd-th-thinking > summary:hover,
+.dd-th-notice > summary:hover {
+  color: var(--dim);
+}
+.dd-th-thinking > summary svg {
+  transition: transform 0.12s ease;
+}
+.dd-th-thinking[open] > summary svg {
+  transform: rotate(90deg);
+}
+
+.dd-th-thinking-body {
+  margin: 4px 0 0 18px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+  color: var(--dim);
+}
+.dd-th-thinking-body .dd-th-prose {
+  font-size: 12.5px;
+}
+
+.dd-th-notice > summary {
+  font-family: var(--mono);
+}
+
+/* tool calls: one line, and everything else behind it */
+
+.dd-th-tool {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.dd-th-tool-error {
+  border-color: var(--danger-line);
+}
+
+.dd-th-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 6px 10px;
+  text-align: left;
+  min-width: 0;
+}
+.dd-th-tool-row:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: transparent;
+}
+.dd-th-tool-row:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.dd-th-tool-caret {
+  color: var(--faint);
+  line-height: 0;
+  flex: none;
+  transition: transform 0.12s ease;
+}
+.dd-th-tool-caret.on {
+  transform: rotate(90deg);
+}
+
+.dd-th-tool-name {
+  color: var(--ink);
+  font-size: 12px;
+  flex: none;
+}
+.dd-th-tool-summary {
+  color: var(--dim);
+  font-size: 12px;
+  font-family: var(--mono);
+  flex: 1;
+}
+.dd-th-tool-state {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dd-th-tool-body {
+  border-top: 1px solid var(--line);
+  padding: 4px 12px 12px;
+}
+.dd-th-tool-body h4 {
+  margin: 10px 0 0;
+}
+.dd-th-tool-body .dd-th-pre {
+  margin: 6px 0 0;
+  max-height: 340px;
+  overflow: auto;
+}
+
+.dd-th-error {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 8px 11px;
+  border: 1px solid var(--danger-line);
+  background: var(--bad-soft);
+  border-radius: 7px;
+  font-size: 12.5px;
+}
+
+/* ── the composer ──────────────────────────────────────────────────── */
+
+.dd-th-reconnecting {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 0 24px 4px;
+}
+
+.dd-th-composer {
+  padding: 6px 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dd-th-starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dd-th-starter {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--dim);
+}
+.dd-th-starter:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.dd-th-hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 11px;
+  border: 1px solid var(--accent-line);
+  background: var(--notice);
+  border-radius: 7px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.dd-th-hint span {
+  flex: 1;
+}
+.dd-th-hint code {
+  color: var(--accent-ink);
+}
+
+.dd-th-composer-error {
+  margin: 0;
+}
+
+.dd-th-box {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--input);
+  padding: 8px 8px 6px;
+  transition: border-color 0.1s ease;
+}
+.dd-th-box:focus-within {
+  border-color: var(--line-strong);
+}
+.dd-th-box-off {
+  background: var(--panel);
+}
+
+.dd-th-box-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.dd-th-input {
+  /* The base stylesheet gives every textarea `width: 100%`, which in a flex row
+     beside the shortcut hint is one line too wide. */
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 4px 2px 4px 4px;
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: none;
+  overflow-y: auto;
+  min-height: 22px;
+}
+.dd-th-input:focus {
+  outline: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+.dd-th-input:disabled {
+  color: var(--dim);
+}
+
+.dd-th-shortcut {
+  flex: none;
+  font-size: 11px;
+  padding-top: 5px;
+  white-space: nowrap;
+}
+
+.dd-th-box-foot {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 2px 0;
+}
+.dd-th-box-foot .fine {
+  margin: 0;
+}
+
+.dd-th-send {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 0;
+  padding: 6px 8px;
+}
+.dd-th-send:not(.primary) {
+  line-height: 1.4;
+  padding: 5px 10px;
+}
+
+@media (max-width: 900px) {
+  .dd-th-scroll,
+  .dd-th-composer,
+  .dd-th-reconnecting {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}

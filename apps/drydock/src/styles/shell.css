@@ -1,0 +1,305 @@
+/* The shell: the home screen, the project screen, the rail's own oddments and
+   the banner. Everything here is prefixed `.dd-` so the panel files written
+   alongside it cannot collide. Tokens only — no colour is spelled out. */
+
+/* ── booting ───────────────────────────────────────────────────────── */
+
+.dd-booting {
+  height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  font-size: 12px;
+}
+
+/* ── the banner ────────────────────────────────────────────────────── */
+
+.dd-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px 7px 14px;
+  background: var(--bad-soft);
+  border-bottom: 1px solid var(--danger-line);
+  color: var(--bad);
+  font-size: 12px;
+  flex: none;
+}
+
+/* ── the rail's oddments ───────────────────────────────────────────── */
+
+.dd-avatar-fallback {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface-active);
+  flex: none;
+}
+
+.dd-theme {
+  position: relative;
+}
+.dd-theme-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  min-width: 210px;
+  padding: 5px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  box-shadow: 0 14px 38px var(--shadow);
+  z-index: 40;
+}
+.dd-theme-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.dd-theme-item:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: transparent;
+}
+.dd-theme-item.on {
+  background: var(--surface-active);
+}
+.dd-theme-hint {
+  font-size: 10.5px;
+}
+.dd-theme-swatch {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+  flex: none;
+}
+/* The swatches are the only literal colours in the app, and they have to be:
+   a swatch that used the live tokens would show the current theme three times. */
+.dd-theme-slate {
+  background: linear-gradient(135deg, #0d0e11 50%, #8ab4f8 50%);
+}
+.dd-theme-ember {
+  background: linear-gradient(135deg, #12100e 50%, #e0a35f 50%);
+}
+.dd-theme-daylight {
+  background: linear-gradient(135deg, #f7f8fa 50%, #2c62c8 50%);
+}
+
+/* ── home ──────────────────────────────────────────────────────────── */
+
+.dd-home {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  place-items: center;
+  padding: 40px 24px 64px;
+}
+
+/* Sign-in renders outside the shell, so `flex: 1` has nothing to fill and the
+   wordmark would sit at the top of a page-height screen. */
+.dd-home.dd-standalone {
+  min-height: 100vh;
+}
+
+.dd-home-inner {
+  width: 100%;
+  max-width: 660px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 26px;
+}
+
+.dd-wordmark {
+  width: min(560px, 88%);
+  height: auto;
+  fill: var(--ink);
+  opacity: 0.92;
+}
+
+.dd-lede {
+  margin: 0;
+  max-width: 460px;
+  text-align: center;
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.dd-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  width: 100%;
+}
+
+.dd-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 18px 18px 16px;
+  min-height: 132px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  text-align: left;
+  color: var(--dim);
+}
+.dd-card:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: var(--line-strong);
+}
+.dd-card svg {
+  color: var(--dim);
+}
+.dd-card-name {
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.dd-card-note {
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.dd-home-aside {
+  margin: 0;
+  max-width: 520px;
+  text-align: center;
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.dd-recents {
+  width: 100%;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+.dd-recents h4 {
+  margin-bottom: 8px;
+}
+.dd-recent {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--dim);
+  font-size: 12px;
+}
+.dd-recent:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+/* ── sign in ───────────────────────────────────────────────────────── */
+
+.dd-signin {
+  gap: 22px;
+}
+.dd-signin-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 16px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent-ink);
+  font-weight: 550;
+}
+.dd-signin-button:hover {
+  text-decoration: none;
+  background: var(--surface-active);
+}
+
+/* ── the project screen ────────────────────────────────────────────── */
+
+.dd-project {
+  flex: 1;
+  overflow-y: auto;
+  padding: 30px 26px 60px;
+}
+.dd-project-inner {
+  max-width: 680px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+.dd-project-head {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.dd-project-head .fine {
+  margin: 0;
+}
+.dd-project-section {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.dd-project-section .fine {
+  margin: 0;
+  max-width: 60ch;
+  line-height: 1.65;
+}
+.dd-project-empty {
+  padding: 16px 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.dd-project-empty p {
+  margin: 0;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.65;
+  max-width: 60ch;
+}
+.dd-project-threads {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+}
+.dd-project-threads li + li {
+  border-top: 1px solid var(--line);
+}
+.dd-project-threads a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  color: var(--ink);
+  background: var(--panel);
+  font-size: 12.5px;
+}
+.dd-project-threads a:hover {
+  background: var(--surface);
+  text-decoration: none;
+}
+.dd-project-threads .chip {
+  flex: none;
+  max-width: 40%;
+}
+
+@media (max-width: 720px) {
+  .dd-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

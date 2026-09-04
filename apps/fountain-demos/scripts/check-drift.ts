@@ -45,8 +45,10 @@ const BUILT_WITH = "https://managoat.com/built-with";
  * and sign-in is GitHub — so whether it belongs on a list of things built *with*
  * Fountain by other people is a question for the fountain side to answer before
  * it is rostered here.
+ *
+ * drydock: newest, and the same on both counts as switchyard.
  */
-const UNLISTED_UPSTREAM = new Set(["salon", "paddock", "switchyard"]);
+const UNLISTED_UPSTREAM = new Set(["salon", "paddock", "switchyard", "drydock"]);
 
 const REPO_APPS = new Set(
   readdirSync(new URL("../../", import.meta.url).pathname, { withFileTypes: true })

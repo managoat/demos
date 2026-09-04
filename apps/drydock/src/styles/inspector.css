@@ -1,0 +1,756 @@
+/* The inspector: two stacked panes on the right of the shell, files above and
+   a shell below, with a strip of tabs on each and a splitter between them.
+
+   Everything here is layout and density. Every colour is a token from
+   styles.css, so the three themes reach this file for free and nothing in it
+   has a colour of its own — including the diff, whose tints are mixes of
+   --add and --del against --code-bg rather than a second green and a second
+   red invented here. Prefixed .dd-in throughout so it cannot collide with the
+   shell's own classes. */
+
+.dd-in {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+}
+
+.dd-in-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.dd-in-pane-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  position: relative;
+}
+
+/* The tab strips reuse .tabs/.tab; these are the things that sit beside them. */
+.dd-in-strip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+  margin-left: auto;
+  position: sticky;
+  right: 0;
+  background: var(--panel);
+}
+.dd-in-collapse {
+  flex: none;
+  margin-left: 2px;
+  transition: transform 0.14s ease;
+}
+.dd-in-collapse.shut {
+  transform: rotate(-90deg);
+}
+
+/* The splitter is 1px of line with a 7px grab area around it, so it looks
+   like a border and behaves like a handle. */
+.dd-in-split {
+  flex: none;
+  height: 7px;
+  margin: -3px 0;
+  cursor: row-resize;
+  position: relative;
+  z-index: 2;
+  touch-action: none;
+}
+.dd-in-split::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 3px;
+  height: 1px;
+  background: var(--line);
+  transition: background 0.1s ease;
+}
+.dd-in-split:hover::after,
+.dd-in-split.on::after {
+  background: var(--accent);
+  height: 2px;
+}
+
+/* ── shared small parts ────────────────────────────────────────────── */
+
+.dd-in-msg {
+  padding: 16px;
+  color: var(--dim);
+  font-size: 12px;
+}
+.dd-in-msg.error {
+  color: var(--bad);
+}
+
+.dd-in-wait {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 16px;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.dd-in-spin {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+  border-top-color: var(--accent);
+  animation: dd-in-turn 0.7s linear infinite;
+}
+@keyframes dd-in-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.dd-in-sk {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px 14px;
+}
+.dd-in-sk > div {
+  height: 11px;
+}
+
+.dd-in-empty {
+  gap: 10px;
+}
+.dd-in-empty-icon {
+  color: var(--faint);
+  margin-bottom: 2px;
+  line-height: 0;
+}
+.dd-in-empty p + p {
+  margin-top: -2px;
+}
+.dd-in-empty-what {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+
+/* A path that must keep its filename: the directory truncates, the name does
+   not. Two spans rather than a JS measurement, so it stays right at any
+   inspector width. */
+.dd-in-path {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.dd-in-path-dir {
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.dd-in-path-name {
+  flex: none;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* ── all files ─────────────────────────────────────────────────────── */
+
+.dd-in-tree {
+  padding: 4px 0 14px;
+  min-width: max-content;
+}
+.dd-in-node {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 100%;
+  padding: 2px 10px 2px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  text-align: left;
+  white-space: nowrap;
+}
+.dd-in-node:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: transparent;
+}
+.dd-in-node-icon {
+  flex: none;
+  color: var(--faint);
+  line-height: 0;
+}
+.dd-in-node-caret {
+  flex: none;
+  color: var(--faint);
+  line-height: 0;
+  width: 10px;
+  transition: transform 0.12s ease;
+}
+.dd-in-node-caret.open {
+  transform: rotate(90deg);
+}
+/* The wrapper around a row and its children exists only to key the recursion;
+   it must not become a box, or every level would indent twice. */
+.dd-in-kids {
+  display: contents;
+}
+.dd-in-node-note {
+  padding: 2px 10px;
+  color: var(--faint);
+  font-size: 11px;
+  font-family: var(--mono);
+}
+
+/* ── changes ───────────────────────────────────────────────────────── */
+
+.dd-in-chg {
+  padding: 4px 0 14px;
+}
+.dd-in-chg-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 4px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  text-align: left;
+}
+.dd-in-chg-row:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: transparent;
+}
+.dd-in-chg-status {
+  flex: none;
+  width: 12px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--dim);
+}
+.dd-in-chg-status.a {
+  color: var(--add);
+}
+.dd-in-chg-status.d {
+  color: var(--del);
+}
+.dd-in-chg-status.r {
+  color: var(--accent);
+}
+.dd-in-chg-counts {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+  display: flex;
+  gap: 6px;
+}
+.dd-in-chg-counts .add {
+  color: var(--add);
+}
+.dd-in-chg-counts .del {
+  color: var(--del);
+}
+.dd-in-chg-foot {
+  padding: 10px 12px 0;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+/* ── the file viewer, a modal over the whole shell ─────────────────── */
+
+.dd-in-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(2px);
+}
+.dd-in-modal-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: min(1040px, 100%);
+  height: min(760px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  box-shadow: 0 18px 48px var(--shadow);
+  overflow: hidden;
+}
+.dd-in-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 14px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.dd-in-modal-head .dd-in-path {
+  font-size: 12px;
+}
+.dd-in-modal-tabs {
+  padding: 0 10px;
+}
+.dd-in-modal-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--code-bg);
+}
+
+/* Code, in both tabs: one scroller, horizontal and vertical, and rows at
+   least as wide as it, so a tinted line runs the full width. */
+.dd-in-code {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  padding-bottom: 10px;
+}
+.dd-in-code-inner {
+  display: inline-block;
+  min-width: 100%;
+}
+.dd-in-dl {
+  display: flex;
+  background: var(--code-bg);
+}
+.dd-in-dl.add {
+  background: color-mix(in srgb, var(--add) 14%, var(--code-bg));
+}
+.dd-in-dl.del {
+  background: color-mix(in srgb, var(--del) 14%, var(--code-bg));
+}
+.dd-in-dl.hunk {
+  background: var(--surface);
+}
+.dd-in-dl-n {
+  flex: none;
+  width: 46px;
+  padding: 0 8px 0 0;
+  text-align: right;
+  color: var(--faint);
+  font-size: 11px;
+  user-select: none;
+  position: sticky;
+  background: inherit;
+  border-right: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+.dd-in-dl-n.a {
+  left: 0;
+}
+.dd-in-dl-n.b {
+  left: 46px;
+}
+.dd-in-dl-t {
+  flex: 1;
+  padding: 0 14px 0 8px;
+  white-space: pre;
+  color: var(--ink);
+}
+.dd-in-dl.add .dd-in-dl-t {
+  color: var(--add);
+}
+.dd-in-dl.del .dd-in-dl-t {
+  color: var(--del);
+}
+.dd-in-dl.note .dd-in-dl-t {
+  color: var(--faint);
+}
+.dd-in-dl.hunk .dd-in-dl-t {
+  color: var(--dim);
+  padding-left: 8px;
+}
+
+.dd-in-fl {
+  display: flex;
+  background: var(--code-bg);
+}
+.dd-in-fl-n {
+  flex: none;
+  width: 52px;
+  padding: 0 10px 0 0;
+  text-align: right;
+  color: var(--faint);
+  font-size: 11px;
+  user-select: none;
+  position: sticky;
+  left: 0;
+  background: inherit;
+  border-right: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+.dd-in-fl-t {
+  flex: 1;
+  padding: 0 14px 0 10px;
+  white-space: pre;
+}
+
+.dd-in-note-bar {
+  flex: none;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--notice);
+  color: var(--dim);
+  font-size: 11.5px;
+}
+
+/* ── checks ────────────────────────────────────────────────────────── */
+
+.dd-in-checks {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dd-in-pr {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  border-radius: 8px;
+}
+.dd-in-pr-num {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--accent-ink);
+  flex: none;
+}
+.dd-in-pr-title {
+  color: var(--ink);
+  font-size: 12.5px;
+  min-width: 0;
+}
+.dd-in-check-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  min-width: 0;
+}
+.dd-in-check-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+}
+.dd-in-check-when {
+  flex: none;
+  color: var(--faint);
+  font-size: 11px;
+  font-family: var(--mono);
+}
+
+.dd-in-branch {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 2px 2px;
+  color: var(--dim);
+  font-size: 11.5px;
+}
+.dd-in-branch code {
+  color: var(--ink);
+}
+
+/* A form that appears only when asked for, inside the panel rather than over
+   it — opening a pull request is a small edit, not a page. */
+.dd-in-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.dd-in-form-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dd-in-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 12px;
+  cursor: pointer;
+  margin: 0;
+}
+.dd-in-check input {
+  width: auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* ── setup ─────────────────────────────────────────────────────────── */
+
+.dd-in-setup {
+  padding: 12px 14px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.dd-in-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.dd-in-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dd-in-sec-head h4 {
+  flex: 1;
+}
+.dd-in-note {
+  margin: 0;
+  color: var(--dim);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.dd-in-notice {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--notice);
+  color: var(--dim);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.dd-in-notice.stale {
+  border-color: var(--warn-line);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+.dd-in-notice-icon {
+  flex: none;
+  color: var(--dim);
+  line-height: 0;
+  margin-top: 1px;
+}
+
+.dd-in-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.dd-in-chip-x {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+  padding: 0;
+  margin-right: -2px;
+  background: transparent;
+  border: none;
+  color: var(--faint);
+  border-radius: 3px;
+}
+.dd-in-chip-x:hover:not(:disabled) {
+  color: var(--bad);
+  background: transparent;
+  border-color: transparent;
+}
+.dd-in-add {
+  display: flex;
+  gap: 6px;
+}
+.dd-in-add input {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.dd-in-add button {
+  flex: none;
+}
+
+.dd-in-keys {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dd-in-key {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.dd-in-key code {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+}
+.dd-in-key .where {
+  flex: none;
+  color: var(--faint);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.dd-in-save {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── run ───────────────────────────────────────────────────────────── */
+
+.dd-in-run {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.dd-in-run-list {
+  flex: none;
+  max-height: 42%;
+  overflow: auto;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-bottom: 1px solid var(--line);
+}
+.dd-in-cmd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 5px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  min-width: 0;
+}
+.dd-in-cmd-play {
+  flex: none;
+  color: var(--accent);
+  padding: 3px;
+  line-height: 0;
+}
+.dd-in-cmd-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.dd-in-cmd-label {
+  font-size: 12px;
+}
+.dd-in-cmd-line {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+.dd-in-run-bar {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.dd-in-run-bar input {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.dd-in-out {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--code-bg);
+  padding: 9px 12px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+.dd-in-out-err {
+  color: var(--bad);
+}
+.dd-in-out-cmd {
+  color: var(--dim);
+  display: block;
+  margin-bottom: 4px;
+}
+.dd-in-out-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-family: var(--sans);
+}
+
+/* ── terminal ──────────────────────────────────────────────────────── */
+
+.dd-in-term {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: var(--code-bg);
+}
+.dd-in-term-host {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 2px 6px 8px;
+}
+.dd-in-term-host .xterm {
+  height: 100%;
+}
+.dd-in-term-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--dim);
+  font-size: 11.5px;
+}
+
+/* The frame while xterm's chunk arrives. It is lazy-loaded — see Inspector.tsx. */
+.dd-in-loading {
+  flex: 1;
+  margin: 12px;
+  min-height: 80px;
+}

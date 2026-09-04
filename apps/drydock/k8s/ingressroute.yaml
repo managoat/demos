@@ -1,0 +1,38 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: drydock
+  namespace: drydock
+  labels:
+    app: drydock
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`drydock.demo.managoat.com`)"
+      kind: Rule
+      services:
+        - name: drydock
+          port: 80
+  tls:
+    secretName: drydock-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: drydock-http
+  namespace: drydock
+  labels:
+    app: drydock
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: "Host(`drydock.demo.managoat.com`)"
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: drydock
+          port: 80

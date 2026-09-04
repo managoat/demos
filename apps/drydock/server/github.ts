@@ -1,0 +1,474 @@
+/**
+ * GitHub, in the two roles it plays here.
+ *
+ * **As the App.** A JWT signed with the App's private key buys an installation
+ * access token, and that token is what clones a private repository onto the
+ * machine and pushes the branch back. It is scoped to the repositories the
+ * person chose when they installed, which is the whole reason sign-in is an
+ * App rather than a plain OAuth app: an OAuth token is scoped to everything
+ * the person can reach, and a machine that can read every repository you have
+ * is not a machine you should let an agent loose on.
+ *
+ * **As the identity provider.** The same App has an OAuth client, so "sign in
+ * with GitHub" and "which repositories may we see" are answers from one
+ * registration rather than two. `GET /user/installations` with the *user's*
+ * token is the join: it returns exactly the installations that both the App
+ * has and this person can see, which is the correct answer to a question that
+ * is easy to get wrong in the direction of showing somebody else's repos.
+ *
+ * An installation token lives for an hour. That is short enough to matter —
+ * see `mintCloneToken` — and short enough to be worth it.
+ */
+import { createSign } from "node:crypto";
+import type { GitHubAppConfig } from "./config";
+import type { BranchRef, CheckRun, ChecksReport, IssueRef, PullRef, RepoRef } from "../shared/api";
+import { HttpError } from "./http";
+
+/**
+ * Where GitHub is.
+ *
+ * Configurable so `mock/server.ts` can stand in for it and the whole app runs
+ * offline — including sign-in, which is the half a fixture cannot fake. In
+ * production both are unset and these are the real thing; nothing else in the
+ * app knows they are variables.
+ */
+const API = (process.env.GITHUB_API_URL ?? "https://api.github.com").replace(/\/+$/, "");
+const WEB = (process.env.GITHUB_WEB_URL ?? "https://github.com").replace(/\/+$/, "");
+const UA = "drydock (+https://drydock.demo.managoat.com)";
+
+export class GitHubError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** An installation token and when it stops working. */
+interface MintedToken {
+  token: string;
+  expiresAtMs: number;
+}
+
+export class GitHub {
+  /**
+   * Installation tokens, cached until a minute before they expire.
+   *
+   * A minute of slack rather than none because the token is handed to a
+   * machine that then uses it — a token that was valid when it left here and
+   * expired in flight fails as `fatal: Authentication failed`, which reads
+   * like a permissions problem and is not one.
+   */
+  private readonly tokens = new Map<number, MintedToken>();
+
+  constructor(private readonly app: GitHubAppConfig) {}
+
+  // ── the App ──────────────────────────────────────────────────────────
+
+  /**
+   * A ten-minute JWT, which is the longest GitHub accepts.
+   *
+   * `iat` is backdated a minute on purpose: GitHub rejects a JWT whose `iat`
+   * is in the future by its clock, and two machines' clocks are never quite
+   * the same.
+   */
+  private appJwt(): string {
+    const now = Math.floor(Date.now() / 1000);
+    const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+    const payload = b64url(JSON.stringify({ iat: now - 60, exp: now + 9 * 60, iss: this.app.appId }));
+    const signer = createSign("RSA-SHA256");
+    signer.update(`${header}.${payload}`);
+    // node:crypto takes PKCS#1 ("BEGIN RSA PRIVATE KEY") as GitHub issues it,
+    // which WebCrypto does not — the reason this one function is not fetch.
+    const sig = signer.sign(this.app.privateKeyPem).toString("base64url");
+    return `${header}.${payload}.${sig}`;
+  }
+
+  /**
+   * A token for one installation, good for an hour, cached until it nearly is
+   * not.
+   *
+   * This one is the *whole* installation — every repository the person chose,
+   * with every permission the App asks for. It is what drydock reads with,
+   * and it never leaves this process. The credential that goes onto a machine
+   * is `mintCloneToken` below, and it is deliberately much smaller.
+   */
+  async installationToken(installationId: number): Promise<string> {
+    const cached = this.tokens.get(installationId);
+    if (cached && cached.expiresAtMs > Date.now() + 60_000) return cached.token;
+    const body = await this.request<{ token: string; expires_at: string }>(
+      "POST",
+      `/app/installations/${installationId}/access_tokens`,
+      { auth: `Bearer ${this.appJwt()}` },
+    );
+    const minted = { token: body.token, expiresAtMs: Date.parse(body.expires_at) };
+    this.tokens.set(installationId, minted);
+    return minted.token;
+  }
+
+  /**
+   * The token that goes onto a machine, narrowed twice.
+   *
+   * `repositories` and `permissions` on the mint call are both *intersections*
+   * with what the installation already grants — GitHub takes the smaller of
+   * the two — so asking for one repository and three permissions produces a
+   * credential that can do exactly what a thread needs and nothing else. That
+   * matters more here than anywhere else in the app: this is the one secret
+   * that leaves the server, and it lands on a machine an agent has a shell on.
+   * Somebody who has typed into that terminal can read it. An installation
+   * token for eleven repositories would be eleven repositories they could read.
+   *
+   * `contents` and `pull_requests` are write because the whole point is to
+   * push a branch and open a PR from it. `workflows` is write because GitHub
+   * refuses a push that touches `.github/workflows` without it, with an error
+   * that names neither the file nor the permission.
+   *
+   * Not cached, unlike the one above. It is scoped per repository, it is
+   * written into a vault the moment it is minted, and an hour is short enough
+   * that the saving is not worth a second cache keyed differently from the
+   * first.
+   */
+  async mintCloneToken(installationId: number, repoFullName: string): Promise<string> {
+    const [owner, repo] = repoFullName.split("/");
+    const body = await this.request<{ token: string }>("POST", `/app/installations/${installationId}/access_tokens`, {
+      auth: `Bearer ${this.appJwt()}`,
+      body: {
+        repositories: [repo],
+        ...(owner ? { owner } : {}),
+        permissions: { contents: "write", metadata: "read", pull_requests: "write", workflows: "write" },
+      },
+    });
+    return body.token;
+  }
+
+  // ── signing somebody in ──────────────────────────────────────────────
+
+  /**
+   * Where a browser goes to sign in. `state` is ours and comes back untouched.
+   *
+   * No `scope`. Scopes are an OAuth *App* concept; a GitHub App's user token
+   * gets everything it can do from the installation, and a `scope` parameter
+   * here is at best ignored and at worst shows the person a consent screen
+   * listing permissions this app does not use.
+   */
+  authorizeUrl(redirectUri: string, state: string): string {
+    const qs = new URLSearchParams({ client_id: this.app.clientId, redirect_uri: redirectUri, state });
+    return `${WEB}/login/oauth/authorize?${qs}`;
+  }
+
+  /** Where a browser goes to install the App, or to change which repos it sees. */
+  installUrl(state?: string): string {
+    const qs = state ? `?${new URLSearchParams({ state })}` : "";
+    return `${WEB}/apps/${this.app.slug}/installations/new${qs}`;
+  }
+
+  async exchangeCode(code: string, redirectUri: string): Promise<string> {
+    const res = await fetch(`${WEB}/login/oauth/access_token`, {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json", "user-agent": UA },
+      body: JSON.stringify({
+        client_id: this.app.clientId,
+        client_secret: this.app.clientSecret,
+        code,
+        redirect_uri: redirectUri,
+      }),
+    });
+    const body = (await res.json().catch(() => ({}))) as { access_token?: string; error_description?: string; error?: string };
+    if (!res.ok || !body.access_token) {
+      // GitHub answers 200 with an error body here, so the status is not the
+      // check. `bad_verification_code` is the ordinary one: a reloaded
+      // callback, or a code already spent.
+      throw new GitHubError(400, body.error_description ?? body.error ?? "GitHub would not exchange that code.");
+    }
+    return body.access_token;
+  }
+
+  async viewer(userToken: string): Promise<{ id: number; login: string; name: string | null; avatar_url: string }> {
+    return this.request("GET", "/user", { auth: `Bearer ${userToken}` });
+  }
+
+  // ── what this person can see ─────────────────────────────────────────
+
+  /**
+   * The installations this person can see *and* this App has.
+   *
+   * The intersection is the point. Asking the App for its installations would
+   * list every account that has ever installed drydock; asking the user's
+   * token for theirs lists only the ones they are a member of. The second
+   * question is the one the repository picker is actually asking.
+   */
+  async installationsFor(userToken: string): Promise<{ id: number; account: string; avatarUrl: string | null }[]> {
+    const body = await this.request<{
+      installations: { id: number; account: { login: string; avatar_url?: string } | null }[];
+    }>("GET", "/user/installations?per_page=100", { auth: `Bearer ${userToken}` });
+    return (body.installations ?? []).map((i) => ({
+      id: i.id,
+      account: i.account?.login ?? "(unknown)",
+      avatarUrl: i.account?.avatar_url ?? null,
+    }));
+  }
+
+  /**
+   * Every repository this person's installations grant, newest activity first.
+   *
+   * Sorted by `pushed_at` rather than by name, because the picker is opened by
+   * somebody who wants the thing they were just working on and the alphabet
+   * has no opinion about that. Paged to a thousand: an installation with more
+   * repositories than that wants a search box, which the picker has.
+   */
+  async repositories(userToken: string, installationId: number): Promise<RepoRef[]> {
+    const out: RepoRef[] = [];
+    for (let page = 1; page <= 10; page++) {
+      const body = await this.request<{ repositories: RawRepo[] }>(
+        "GET",
+        `/user/installations/${installationId}/repositories?per_page=100&page=${page}`,
+        { auth: `Bearer ${userToken}` },
+      );
+      const batch = body.repositories ?? [];
+      for (const r of batch) out.push(toRepoRef(r, installationId));
+      if (batch.length < 100) break;
+    }
+    return out.sort((a, b) => (b.pushedAt ?? "").localeCompare(a.pushedAt ?? ""));
+  }
+
+  /** One repository, read as the installation — so it works for private ones. */
+  async repository(installationId: number, fullName: string): Promise<RepoRef> {
+    const token = await this.installationToken(installationId);
+    const raw = await this.request<RawRepo>("GET", `/repos/${fullName}`, { auth: `Bearer ${token}` });
+    return toRepoRef(raw, installationId);
+  }
+
+  // ── the three ways to start a track ──────────────────────────────────
+
+  async branches(installationId: number, fullName: string, defaultBranch: string): Promise<BranchRef[]> {
+    const token = await this.installationToken(installationId);
+    const raw = await this.request<{ name: string; commit: { sha: string } }[]>(
+      "GET",
+      `/repos/${fullName}/branches?per_page=100`,
+      { auth: `Bearer ${token}` },
+    );
+    return raw
+      .map((b) => ({ name: b.name, sha: b.commit.sha, isDefault: b.name === defaultBranch }))
+      .sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.name.localeCompare(b.name));
+  }
+
+  async pulls(installationId: number, fullName: string): Promise<PullRef[]> {
+    const token = await this.installationToken(installationId);
+    const raw = await this.request<RawPull[]>(
+      "GET",
+      `/repos/${fullName}/pulls?state=open&sort=updated&direction=desc&per_page=50`,
+      { auth: `Bearer ${token}` },
+    );
+    return raw.map(toPullRef);
+  }
+
+  /**
+   * Open issues, without the pull requests.
+   *
+   * GitHub's issues endpoint returns pull requests too — they are issues as
+   * far as the data model is concerned — and a picker with a PRs tab beside an
+   * Issues tab showing the same rows twice is a bug people notice immediately.
+   */
+  async issues(installationId: number, fullName: string): Promise<IssueRef[]> {
+    const token = await this.installationToken(installationId);
+    const raw = await this.request<RawIssue[]>(
+      "GET",
+      `/repos/${fullName}/issues?state=open&sort=updated&direction=desc&per_page=50`,
+      { auth: `Bearer ${token}` },
+    );
+    return raw
+      .filter((i) => !i.pull_request)
+      .map((i) => ({
+        number: i.number,
+        title: i.title,
+        author: i.user?.login ?? null,
+        labels: (i.labels ?? []).map((l) => (typeof l === "string" ? l : l.name)),
+        updatedAt: i.updated_at,
+      }));
+  }
+
+  // ── what GitHub thinks of a branch ───────────────────────────────────
+
+  /**
+   * The Checks tab.
+   *
+   * A branch that has never been pushed is the ordinary case in a new track,
+   * not an error — so `pushed: false` is a first-class answer and the panel
+   * renders "nothing pushed yet" rather than an empty list that looks broken.
+   */
+  async checks(installationId: number, fullName: string, ref: string): Promise<ChecksReport> {
+    const token = await this.installationToken(installationId);
+    let sha: string | null = null;
+    try {
+      const branch = await this.request<{ commit: { sha: string } }>(
+        "GET",
+        `/repos/${fullName}/branches/${encodeURIComponent(ref)}`,
+        { auth: `Bearer ${token}` },
+      );
+      sha = branch.commit.sha;
+    } catch (err) {
+      if (err instanceof GitHubError && err.status === 404) return { ref, sha: null, pushed: false, runs: [], pull: null };
+      throw err;
+    }
+
+    const [runs, pulls] = await Promise.all([
+      this.request<{ check_runs: RawCheckRun[] }>("GET", `/repos/${fullName}/commits/${sha}/check-runs?per_page=50`, {
+        auth: `Bearer ${token}`,
+      }).catch(() => ({ check_runs: [] as RawCheckRun[] })),
+      this.request<RawPull[]>("GET", `/repos/${fullName}/pulls?state=open&head=${encodeURIComponent(fullName.split("/")[0] + ":" + ref)}`, {
+        auth: `Bearer ${token}`,
+      }).catch(() => [] as RawPull[]),
+    ]);
+
+    return {
+      ref,
+      sha,
+      pushed: true,
+      runs: (runs.check_runs ?? []).map(
+        (r): CheckRun => ({
+          name: r.name,
+          status: r.status,
+          conclusion: r.conclusion,
+          url: r.html_url ?? null,
+          startedAt: r.started_at ?? null,
+          completedAt: r.completed_at ?? null,
+        }),
+      ),
+      pull: pulls[0] ? toPullRef(pulls[0]) : null,
+    };
+  }
+
+  /** Open a pull request for a branch the machine has already pushed. */
+  async openPull(
+    installationId: number,
+    fullName: string,
+    input: { head: string; base: string; title: string; body: string; draft: boolean },
+  ): Promise<PullRef & { url: string }> {
+    const token = await this.installationToken(installationId);
+    const raw = await this.request<RawPull & { html_url: string }>("POST", `/repos/${fullName}/pulls`, {
+      auth: `Bearer ${token}`,
+      body: input,
+    });
+    return { ...toPullRef(raw), url: raw.html_url };
+  }
+
+  // ── the one request ──────────────────────────────────────────────────
+
+  private async request<T>(
+    method: string,
+    path: string,
+    init: { auth: string; body?: unknown },
+  ): Promise<T> {
+    const res = await fetch(path.startsWith("http") ? path : `${API}${path}`, {
+      method,
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: init.auth,
+        "user-agent": UA,
+        "x-github-api-version": "2022-11-28",
+        ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (res.status === 204) return undefined as T;
+    const text = await res.text();
+    if (!res.ok) {
+      let message = `GitHub said ${res.status}.`;
+      try {
+        const parsed = JSON.parse(text) as { message?: string; errors?: { message?: string }[] };
+        if (parsed.message) message = parsed.message;
+        const first = parsed.errors?.[0]?.message;
+        if (first) message += ` ${first}`;
+      } catch {
+        /* not JSON — the status line is the whole story */
+      }
+      throw new GitHubError(res.status, message);
+    }
+    return (text ? JSON.parse(text) : undefined) as T;
+  }
+}
+
+/** A GitHub failure as one of ours, keeping the part a person can act on. */
+export function asHttpError(err: unknown, whatFor: string): HttpError {
+  if (err instanceof GitHubError) {
+    if (err.status === 401 || err.status === 403) {
+      return new HttpError(502, "github_rejected", `GitHub would not let drydock ${whatFor}: ${err.message}`);
+    }
+    if (err.status === 404) return new HttpError(404, "github_not_found", err.message);
+    return new HttpError(err.status >= 500 ? 502 : err.status, "github_error", err.message);
+  }
+  return new HttpError(502, "github_unreachable", `Could not reach GitHub to ${whatFor}.`);
+}
+
+// ── the shapes GitHub actually sends ───────────────────────────────────
+
+interface RawRepo {
+  full_name: string;
+  name: string;
+  owner: { login: string };
+  private: boolean;
+  default_branch: string;
+  description: string | null;
+  pushed_at: string | null;
+  language: string | null;
+}
+
+interface RawPull {
+  number: number;
+  title: string;
+  user: { login: string } | null;
+  head: { ref: string };
+  base: { ref: string };
+  draft?: boolean;
+  updated_at: string;
+}
+
+interface RawIssue {
+  number: number;
+  title: string;
+  user: { login: string } | null;
+  labels: (string | { name: string })[] | null;
+  updated_at: string;
+  pull_request?: unknown;
+}
+
+interface RawCheckRun {
+  name: string;
+  status: string;
+  conclusion: string | null;
+  html_url?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+}
+
+function toRepoRef(r: RawRepo, installationId: number): RepoRef {
+  return {
+    fullName: r.full_name,
+    owner: r.owner.login,
+    name: r.name,
+    private: r.private,
+    defaultBranch: r.default_branch,
+    description: r.description,
+    pushedAt: r.pushed_at,
+    language: r.language,
+    installationId,
+  };
+}
+
+function toPullRef(p: RawPull): PullRef {
+  return {
+    number: p.number,
+    title: p.title,
+    author: p.user?.login ?? null,
+    headRef: p.head.ref,
+    baseRef: p.base.ref,
+    draft: !!p.draft,
+    updatedAt: p.updated_at,
+  };
+}
+
+function b64url(s: string): string {
+  return Buffer.from(s, "utf8").toString("base64url");
+}

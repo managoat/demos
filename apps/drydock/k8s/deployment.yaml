@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: drydock
+  namespace: drydock
+  labels:
+    app: drydock
+spec:
+  # One replica: the state is a SQLite file on a ReadWriteOnce volume, and the
+  # per-project SSE fan-out lives in the process. Two would disagree.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: drydock
+  template:
+    metadata:
+      labels:
+        app: drydock
+    spec:
+      containers:
+        - name: web
+          # Pinned to an immutable sha tag by .github/workflows/build.yml.
+          image: ghcr.io/managoat/drydock:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: FOUNTAIN_URL
+              value: https://managoat.com
+            - name: DATA_DIR
+              value: /data
+            - name: STATIC_DIR
+              value: /app/dist
+            # Where GitHub sends a browser back to, and what the App's callback
+            # and setup URLs are registered as. Load-bearing: a mismatch here
+            # is the one failure that looks like "sign-in is broken".
+            - name: PUBLIC_URL
+              value: https://drydock.demo.managoat.com
+          envFrom:
+            # `drydock-secrets`, materialized from Infisical by the operator —
+            # see infisicalsecret.yaml for the contents and why they live in a
+            # folder of their own.
+            #
+            # Not `optional: true`, unlike paddock's and salon's. Those generate
+            # their own secret into the volume and degrade to a working app; this
+            # one cannot. With no Fountain key there are no machines, and with no
+            # GitHub App there is no way to sign in — so a pod that starts
+            # without this Secret is a pod serving a sign-in button that cannot
+            # work. Failing to start is the more honest of the two, and it is the
+            # one that shows up in `kubectl get pods` rather than in a bug report.
+            - secretRef:
+                name: drydock-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 20m, memory: 96Mi }
+            limits: { memory: 384Mi }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: drydock-data
