@@ -215,3 +215,10 @@ button.danger-text { color: var(--bad); }
   .explorer { grid-template-columns: 1fr; }
   .tree { max-height: 30vh; }
 }
+
+/* Becoming a user. The tab is tinted because it is an offer, not a section. */
+.panel-tabs .upgrade-tab { color: var(--accent); }
+.upgrade .rows .mark { color: var(--ok); width: 14px; }
+.upgrade .primary { width: 100%; padding: 8px; margin-top: 10px; }
+.switcher { width: auto; padding: 3px 6px; font-size: 12px; }
+.node.inert { opacity: 0.45; }

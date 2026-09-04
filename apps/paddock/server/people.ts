@@ -76,6 +76,13 @@ export async function show(ctx: AppContext, req: Request): Promise<Response> {
   return json({ data: paddockDto(ctx, shared.paddock_id, "member", ctx.db.memberTabs(shared.paddock_id, id.user.email)) });
 }
 
+/** One named paddock, for somebody who can reach more than one. */
+export async function showOne(ctx: AppContext, req: Request, paddockId: string): Promise<Response> {
+  const id = await authenticate(ctx, req);
+  const access = paddockAccess(ctx, id, paddockId);
+  return json({ data: paddockDto(ctx, access.paddock.id, access.role, access.tabs) });
+}
+
 /** Claim this account's machine. Idempotent: one paddock per owner. */
 export async function claim(ctx: AppContext, req: Request): Promise<Response> {
   const id = await authenticate(ctx, req);

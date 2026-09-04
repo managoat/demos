@@ -58,6 +58,7 @@ export function buildRouter(ctx: AppContext): (req: Request) => Promise<Response
 
   on("GET", "/api/paddock", (req) => people.show(ctx, req));
   on("POST", "/api/paddock", (req) => people.claim(ctx, req));
+  on("GET", "/api/paddock/:id", (req, p) => people.showOne(ctx, req, p.id!));
   on("GET", "/api/paddock/:id/tabs/:c/people", (req, p) => people.tabPeople(ctx, req, p.id!, p.c!));
   on("POST", "/api/paddock/:id/tabs/:c/members", (req, p) => people.addMember(ctx, req, p.id!, p.c!));
   on("DELETE", "/api/paddock/:id/tabs/:c/members/:email", (req, p) => people.removeMember(ctx, req, p.id!, p.c!, p.email!));

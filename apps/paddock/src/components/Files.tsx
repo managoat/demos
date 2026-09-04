@@ -18,17 +18,12 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FountainClient } from "../api/client";
 import { describeError } from "../api/client";
-import type { SandboxListing } from "../api/types";
+import type { SandboxEntry, SandboxListing } from "../api/types";
+import { childPath, isDir, isOpenable, sortEntries } from "../lib/files";
 import { decodeFile } from "../lib/protocol";
 
-interface Entry {
-  name: string;
-  type: string;
-  size: number | null;
-}
-
 interface Loaded {
-  entries: Entry[];
+  entries: SandboxEntry[];
   truncated: boolean;
 }
 
@@ -218,8 +213,8 @@ function Node({
       {isOpen &&
         loaded &&
         loaded.entries.map((e) => {
-          const child = `${path.replace(/\/+$/, "")}/${e.name}`;
-          return e.type === "dir" ? (
+          const child = childPath(path, e.name);
+          return isDir(e) ? (
             <Node
               key={child}
               path={child}
@@ -235,11 +230,16 @@ function Node({
           ) : (
             <button
               key={child}
-              className={`node file ${selected === child ? "selected" : ""}`}
+              className={`node file ${selected === child ? "selected" : ""} ${isOpenable(e) ? "" : "inert"}`}
               style={{ paddingLeft: (depth + 1) * 12 + 18 }}
-              onClick={() => onOpenFile(child)}
+              onClick={() => isOpenable(e) && onOpenFile(child)}
+              disabled={!isOpenable(e)}
+              title={isOpenable(e) ? child : `${child} — ${e.type}, not readable`}
             >
-              <span className="node-name">{e.name}</span>
+              <span className="node-name">
+                {e.name}
+                {e.type === "symlink" ? " ↗" : ""}
+              </span>
               <span className="dim">{e.size === null ? "" : bytes(e.size)}</span>
             </button>
           );
@@ -256,14 +256,6 @@ function Node({
       )}
     </>
   );
-}
-
-/** Directories first, then files, each alphabetical — the order every editor uses. */
-function sortEntries(entries: Entry[]): Entry[] {
-  return [...entries].sort((a, b) => {
-    if ((a.type === "dir") !== (b.type === "dir")) return a.type === "dir" ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
 }
 
 function diffClass(line: string): string {

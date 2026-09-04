@@ -65,7 +65,14 @@ beforeEach(async () => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     const method = (init?.method ?? "GET").toUpperCase();
     upstream.push({ method, path: url.pathname });
-    if (url.pathname === "/api/auth/me") return Response.json({ id: "u1", email: OWNER });
+    if (url.pathname === "/api/auth/me") {
+      // One identity per key, so a test can be somebody else. The fake used to
+      // answer OWNER for every key, which quietly made every "another person"
+      // scenario a test of the owner signing in as themselves.
+      const auth = ((init?.headers ?? {}) as Record<string, string>).authorization ?? "";
+      const key = auth.replace(/^Bearer /, "");
+      return Response.json({ id: `u-${key}`, email: key === "ftn_owner" ? OWNER : `${key}@example.com` });
+    }
     if (url.pathname === "/api/conversations" && method === "GET") return Response.json({ data: conversations() });
     if (url.pathname === "/api/conversations" && method === "POST") {
       // Fountain identity-checks an attach: the disk was built for one
@@ -566,5 +573,87 @@ describe("only the owner opens tabs", () => {
 
     // And the owner still can.
     expect((await call(owner.cookie, "POST", `/f/${owner.id}/api/conversations`, { channel_id: channelFor("t9", 1) })).status).toBe(200);
+  });
+});
+
+describe("a guest signing in", () => {
+  /** Join a tab by link and come back with the guest's cookie. */
+  async function joinByLink(owner: { cookie: string; id: string }, conv: string): Promise<string> {
+    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/tabs/${conv}/invite`);
+    const token = ctx.db.inviteFor(owner.id, conv)!.token;
+    const joined = await call(null, "POST", `/api/join/${token}`);
+    return joined.headers.get("set-cookie")!.split(";")[0]!;
+  }
+
+  test("keeps the seat: the guest becomes a member of the same terminal", async () => {
+    const owner = await paddockFor(OWNER);
+    const guestCookie = await joinByLink(owner, "c2");
+
+    const res = await call(guestCookie, "POST", "/api/auth/session", { apiKey: "ftn_theirs" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { kind: string; email: string; role: string; paddockId: string; upgradedFrom: string };
+
+    expect(body.kind).toBe("user");
+    // Whatever handle they were given — it says who they used to be.
+    expect(body.upgradedFrom).toMatch(/^guest-[0-9a-f]{4}$/);
+    // Landed where they were, not somewhere else.
+    expect(body.paddockId).toBe(owner.id);
+    expect(ctx.db.memberTabs(owner.id, body.email)).toEqual(["c2"]);
+  });
+
+  test("and stops being a guest, so they are not in the room twice", async () => {
+    const owner = await paddockFor(OWNER);
+    const guestCookie = await joinByLink(owner, "c2");
+    expect(ctx.db.guests(owner.id, "c2")).toHaveLength(1);
+
+    await call(guestCookie, "POST", "/api/auth/session", { apiKey: "ftn_theirs" });
+    expect(ctx.db.guests(owner.id, "c2")).toHaveLength(0);
+  });
+
+  test("survives the re-mint that would have evicted them", async () => {
+    const owner = await paddockFor(OWNER);
+    const guestCookie = await joinByLink(owner, "c2");
+    const upgraded = await call(guestCookie, "POST", "/api/auth/session", { apiKey: "ftn_theirs" });
+    const cookie = upgraded.headers.get("set-cookie")!.split(";")[0]!;
+
+    // The thing that ends a guest's visit.
+    const reminted = await call(owner.cookie, "POST", `/api/paddock/${owner.id}/tabs/c2/invite`);
+    expect(((await reminted.json()) as { evicted: number }).evicted).toBe(0);
+
+    // Still in, and still only in that terminal.
+    expect((await call(cookie, "GET", `/f/${owner.id}/api/conversations/c2`)).status).toBe(200);
+    expect((await call(cookie, "GET", `/f/${owner.id}/api/conversations/c1`)).status).toBe(404);
+  });
+
+  test("can reach their own machine and the one they were invited to", async () => {
+    const owner = await paddockFor(OWNER);
+    const guestCookie = await joinByLink(owner, "c2");
+    const upgraded = await call(guestCookie, "POST", "/api/auth/session", { apiKey: "ftn_theirs" });
+    const cookie = upgraded.headers.get("set-cookie")!.split(";")[0]!;
+
+    // Their own is claimed the way any signed-in person's is.
+    await call(cookie, "POST", "/api/paddock");
+    const me = (await (await call(cookie, "GET", "/api/me")).json()) as { paddocks: { id: string; role: string }[] };
+    expect(me.paddocks.map((p) => p.role).sort()).toEqual(["member", "owner"]);
+    expect(me.paddocks.some((p) => p.id === owner.id && p.role === "member")).toBe(true);
+  });
+
+  test("the owner signing in on their own link is not demoted to a member of it", async () => {
+    const owner = await paddockFor(OWNER);
+    const guestCookie = await joinByLink(owner, "c2");
+    // Same account as the machine's owner, arriving through their own link.
+    const res = await call(guestCookie, "POST", "/api/auth/session", { apiKey: "ftn_owner" });
+    const body = (await res.json()) as { role: string; upgradedFrom?: string };
+    expect(body.role).toBe("owner");
+    expect(body.upgradedFrom).toBeUndefined();
+    expect(ctx.db.memberTabs(owner.id, OWNER)).toEqual([]);
+  });
+
+  test("signing in without having been a guest changes nothing about anybody's membership", async () => {
+    const owner = await paddockFor(OWNER);
+    const res = await call(null, "POST", "/api/auth/session", { apiKey: "ftn_someone" });
+    const body = (await res.json()) as { upgradedFrom?: string; email: string };
+    expect(body.upgradedFrom).toBeUndefined();
+    expect(ctx.db.memberTabs(owner.id, body.email)).toEqual([]);
   });
 });

@@ -240,7 +240,14 @@ Bun.serve({
     const body = method === "POST" || method === "PUT" ? await req.json().catch(() => ({})) : {};
 
     // ── identity ──────────────────────────────────────────────────────────
-    if (p === "/api/auth/me") return json({ id: "u1", email: "you@example.com" });
+    // One identity per key, so the fake can hold more than one person. With a
+    // single email for every key there is no way to be a guest signing in as
+    // somebody else, which is most of what invitations are for.
+    if (p === "/api/auth/me") {
+      const key = (req.headers.get("authorization") ?? "").replace(/^Bearer /, "").trim();
+      const email = !key || key === "ftn_owner" ? "you@example.com" : `${key.replace(/^ftn_/, "")}@example.com`;
+      return json({ id: `u-${key || "anon"}`, email });
+    }
     if (p === "/api/catalog")
       return json({ data: { runtimes: ["claude", "codex"], models: { claude: ["claude-opus-5", "claude-sonnet-5"], codex: ["gpt-5"] } } });
 
@@ -432,7 +439,9 @@ Bun.serve({
         const rest = path.slice(dir.length + 1);
         const slash = rest.indexOf("/");
         const name = slash === -1 ? rest : rest.slice(0, slash);
-        seen.set(name, slash === -1 ? { name, type: "file", size: content.length } : { name, type: "dir", size: null });
+        // "directory", the word Fountain uses. Saying "dir" here is what let a
+        // wrong assumption in the client survive every local test.
+        seen.set(name, slash === -1 ? { name, type: "file", size: content.length } : { name, type: "directory", size: null });
       }
       return json({ data: { path: dir || "/", entries: [...seen.values()], truncated: false } });
     }

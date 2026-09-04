@@ -28,23 +28,33 @@ export function config(ctx: AppContext): Response {
 }
 
 /** What the browser is told about itself. Never a key, never anyone else's. */
-export function meDto(id: Identity, role: Role | null, paddockId: string | null): Record<string, unknown> {
+export function meDto(
+  ctx: AppContext,
+  id: Identity,
+  role: Role | null,
+  paddockId: string | null,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     label: actorLabel(id),
     kind: id.kind,
     email: id.kind === "user" ? id.user.email : null,
     role,
     paddockId,
+    // Everywhere this person can go. A guest has exactly one; somebody who
+    // used to be a guest has two, which is the whole point of upgrading.
+    paddocks: id.kind === "user" ? ctx.db.paddocksFor(id.user.email) : [{ id: id.guest.paddock_id, ownerEmail: "", role: "guest" }],
+    ...extra,
   };
 }
 
 export async function me(ctx: AppContext, req: Request): Promise<Response> {
   const id = await authenticate(ctx, req);
-  if (id.kind === "guest") {
-    return json(meDto(id, "guest", id.guest.paddock_id));
-  }
+  if (id.kind === "guest") return json(meDto(ctx, id, "guest", id.guest.paddock_id));
   const own = ctx.db.paddockOf(id.user.email);
-  return json(meDto(id, own ? "owner" : null, own?.id ?? null));
+  const reachable = ctx.db.paddocksFor(id.user.email);
+  const landing = own ?? (reachable[0] ? { id: reachable[0].id } : null);
+  return json(meDto(ctx, id, own ? "owner" : reachable.length ? "member" : null, landing?.id ?? null));
 }
 
 export async function signIn(ctx: AppContext, req: Request): Promise<Response> {
@@ -64,16 +74,49 @@ export async function signIn(ctx: AppContext, req: Request): Promise<Response> {
   const email = who.email.trim().toLowerCase();
   if (!email) throw new HttpError(502, "no_email", "Fountain did not say who the key belongs to.");
 
+  // Who is signing in *from* — a guest upgrading keeps their seat.
+  const previous = await currentGuest(ctx, req);
+
   ctx.db.upsertUser(email, who.id ?? null, await ctx.cipher.encrypt(apiKey));
+
+  /**
+   * The upgrade. A guest is anonymous, tied to one terminal, and evicted the
+   * moment that link is re-minted; signing in turns that into a real
+   * membership of the same terminal — durable, named, and theirs on any
+   * device. The guest row goes, because keeping both would leave them in the
+   * room twice under two names.
+   *
+   * Deliberately silent about which account: whoever holds the link is who
+   * gets promoted, and that is already the deal the link makes.
+   */
+  let upgraded: { paddockId: string; conversationId: string; from: string } | null = null;
+  if (previous && ctx.db.getPaddock(previous.paddock_id)?.owner_email !== email) {
+    ctx.db.addMember(previous.paddock_id, previous.conversation_id, email, `upgraded:${previous.handle}`);
+    upgraded = { paddockId: previous.paddock_id, conversationId: previous.conversation_id, from: previous.handle };
+  }
+  if (previous) ctx.db.deleteGuest(previous.id);
+
   const token = randomToken();
   ctx.db.createUserSession(await sha256(token), email);
   ctx.db.expireSessions(ctx.config.sessionMaxAgeMs);
 
   const own = ctx.db.paddockOf(email);
   const id: Identity = { kind: "user", user: ctx.db.getUser(email)! };
-  return json(meDto(id, own ? "owner" : null, own?.id ?? null), 200, {
+  // Land where they were, if they were somewhere. Signing in to keep a seat
+  // and then being dropped somewhere else is not keeping it.
+  const landing = upgraded?.paddockId ?? own?.id ?? null;
+  const role: Role | null = own ? (own.id === landing ? "owner" : "member") : upgraded ? "member" : null;
+  return json(meDto(ctx, id, role, landing, upgraded ? { upgradedFrom: upgraded.from } : {}), 200, {
     "set-cookie": sessionCookie(token, req, ctx.config.sessionMaxAgeMs / 1000),
   });
+}
+
+/** The guest this request is currently, if it is one. */
+async function currentGuest(ctx: AppContext, req: Request) {
+  const token = cookieValue(req, SESSION_COOKIE);
+  if (!token) return null;
+  const session = ctx.db.session(await sha256(token));
+  return session?.guest_id ? ctx.db.getGuest(session.guest_id) : null;
 }
 
 /**
@@ -98,7 +141,7 @@ export async function join(ctx: AppContext, req: Request, token: string): Promis
       if (user) {
         const role: Role = paddock.owner_email === user.email ? "owner" : "member";
         if (role === "member") ctx.db.addMember(paddock.id, invite.conversation_id, user.email, `link:${paddock.owner_email}`);
-        return json(meDto({ kind: "user", user }, role, paddock.id));
+        return json(meDto(ctx, { kind: "user", user }, role, paddock.id));
       }
     }
   }
@@ -106,7 +149,7 @@ export async function join(ctx: AppContext, req: Request, token: string): Promis
   const guest = ctx.db.createGuest(randomToken(9), paddock.id, invite.conversation_id, guestHandle());
   const sessionToken = randomToken();
   ctx.db.createGuestSession(await sha256(sessionToken), guest.id);
-  return json(meDto({ kind: "guest", guest }, "guest", paddock.id), 200, {
+  return json(meDto(ctx, { kind: "guest", guest }, "guest", paddock.id), 200, {
     "set-cookie": sessionCookie(sessionToken, req, ctx.config.sessionMaxAgeMs / 1000),
   });
 }

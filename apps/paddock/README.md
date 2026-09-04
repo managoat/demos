@@ -110,6 +110,14 @@ when the box frees up.
 anyone who opens it is in, with no account, no sign-in and nothing to install.
 Either way the turns run on your key and you pay for them.
 
+A guest is a way in, not a place to stay: anonymous, one terminal, on somebody
+else's credit, and gone when that link is re-minted. Signing in from inside the
+app fixes all four at once — the seat becomes a real membership under their own
+name, a re-mint no longer evicts them, their turns say who sent them, and they
+get a machine of their own. The offer sits beside the other panels rather than
+behind a menu, and the server does the conversion on the sign-in itself, so it
+cannot half-happen.
+
 **An invitation is to a terminal, not to the machine.** Somebody let into
 Terminal 2 gets Terminal 2: they do not see your other terminals, cannot open
 one, and cannot change what is installed. Each terminal has its own link, and

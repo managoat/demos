@@ -8,12 +8,23 @@ import { readSse, type SseMessage } from "../lib/sse";
 
 export type Role = "owner" | "member" | "guest";
 
+export interface Reachable {
+  id: string;
+  ownerEmail: string;
+  role: Role;
+}
+
 export interface Me {
   label: string;
   kind: "user" | "guest";
   email: string | null;
   role: Role | null;
+  /** Where to land. */
   paddockId: string | null;
+  /** Everywhere this person can go: their own machine, and any shared with them. */
+  paddocks: Reachable[];
+  /** Set once, on the sign-in that turned a guest into a member. */
+  upgradedFrom?: string;
 }
 
 export interface Present {
@@ -63,6 +74,7 @@ export const paddock = {
   join: (token: string) => call<Me>("POST", `/api/join/${encodeURIComponent(token)}`),
 
   show: () => call<{ data: PaddockDto }>("GET", "/api/paddock").then((r) => r.data),
+  showOne: (id: string) => call<{ data: PaddockDto }>("GET", `/api/paddock/${id}`).then((r) => r.data),
   claim: () => call<{ data: PaddockDto }>("POST", "/api/paddock").then((r) => r.data),
 
   tabPeople: (id: string, conv: string) => call<{ data: TabPeopleDto }>("GET", `/api/paddock/${id}/tabs/${conv}/people`).then((r) => r.data),

@@ -17,6 +17,7 @@ import { Connect } from "./components/Connect";
 import { Files } from "./components/Files";
 import { Machine } from "./components/Machine";
 import { People } from "./components/People";
+import { Upgrade } from "./components/Upgrade";
 import { Tabs } from "./components/Tabs";
 import { Terminal } from "./components/Terminal";
 import { defaultChoice, ensureIdentity, type BootStep, type Identity } from "./lib/identity";
@@ -31,7 +32,7 @@ const STREAMS = ["acp", "stdout", "stderr", "stage"];
 /** The tab list carries status; a short poll keeps "who holds the machine" honest. */
 const POLL_MS = 4000;
 
-type Side = "machine" | "files" | "people";
+type Side = "machine" | "files" | "people" | "account";
 
 export function App() {
   const [me, setMe] = useState<Me | null>(null);
@@ -107,7 +108,12 @@ export function App() {
   const connect = useCallback(async (apiKey: string) => {
     setAuthError(null);
     try {
-      setMe(await paddock.signIn(apiKey));
+      const next = await paddock.signIn(apiKey);
+      setMe(next);
+      // A guest who just upgraded is now a different person in the same seat.
+      // Reload rather than reconcile: the identity, the role, the reachable
+      // paddocks and every ref keyed to the old session all moved at once.
+      if (next.upgradedFrom) window.location.reload();
     } catch (err) {
       setAuthError(describePaddockError(err));
     }
@@ -334,6 +340,25 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
       window.location.reload();
     } catch (err) {
       setNotice(describePaddockError(err));
+    }
+  }
+
+  const [upgradeError, setUpgradeError] = useState<string | null>(null);
+
+  /**
+   * A guest signing in. The server sees the guest cookie on the way through
+   * and turns that seat into a real membership before issuing the new session
+   * — so this is the same call the sign-in screen makes, and the upgrade is
+   * the server's doing rather than a second request that could half-happen.
+   */
+  async function onUpgrade(apiKey: string) {
+    setUpgradeError(null);
+    try {
+      const next = await paddock.signIn(apiKey);
+      if (next.upgradedFrom) window.location.reload();
+      else onMe(next);
+    } catch (err) {
+      setUpgradeError(describePaddockError(err));
     }
   }
 
@@ -791,7 +816,26 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
         <span className="dim">
           <code>{sandbox?.id ?? boxId}</code> · {sandbox?.status ?? "…"} · rev {rev}
         </span>
-        {!isOwner && <span className="badge">{people ? `${people.ownerEmail}'s machine` : "shared with you"}</span>}
+        {me.paddocks.length > 1 ? (
+          <select
+            className="switcher"
+            value={paddockId ?? ""}
+            onChange={(e) => {
+              setPaddockId(e.target.value);
+              // Everything below is keyed to a machine: tabs, receipt, people.
+              // Reloading is how they all change at once and stay consistent.
+              window.setTimeout(() => window.location.reload(), 0);
+            }}
+          >
+            {me.paddocks.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.role === "owner" ? "Your machine" : `${p.ownerEmail}'s machine`}
+              </option>
+            ))}
+          </select>
+        ) : (
+          !isOwner && <span className="badge">{people ? `${people.ownerEmail}'s machine` : "shared with you"}</span>
+        )}
         <span className="spacer" />
         <button className="ghost" onClick={onSignOut}>
           {me.kind === "guest" ? "Leave" : "Sign out"}
@@ -841,8 +885,15 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
                 {which === "machine" ? "Machine" : which === "files" ? "Files" : `People${people && people.here.length > 1 ? ` (${people.here.length})` : ""}`}
               </button>
             ))}
+            {me.kind === "guest" && (
+              <button className={`upgrade-tab ${side === "account" ? "on" : ""}`} onClick={() => setSide("account")}>
+                Sign in
+              </button>
+            )}
           </nav>
-          {side === "people" ? (
+          {side === "account" ? (
+            <Upgrade handle={me.label} onKey={(key) => void onUpgrade(key)} error={upgradeError} />
+          ) : side === "people" ? (
             people && active ? (
               <People
                 tab={tabPeople}

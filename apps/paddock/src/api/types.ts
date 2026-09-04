@@ -98,10 +98,24 @@ export interface Catalog {
   models: Record<string, string[]>;
 }
 
+/**
+ * What one entry of a directory is. Fountain's word for a directory is
+ * `"directory"` — not `"dir"`, which is what this app assumed until a real
+ * machine disagreed and every folder rendered as an unopenable file.
+ * See `apps/salon/shared/files.ts`, which has carried the same union all along.
+ */
+export type EntryType = "file" | "directory" | "symlink" | "other";
+
+export interface SandboxEntry {
+  name: string;
+  type: EntryType | string;
+  size: number | null;
+}
+
 /** `GET /api/sandboxes/:id/files`: one directory. */
 export interface SandboxListing {
   path: string;
-  entries: { name: string; type: string; size: number | null }[];
+  entries: SandboxEntry[];
   truncated: boolean;
 }
 

@@ -257,6 +257,30 @@ export class Db {
     this.sql.query("DELETE FROM tab_invites WHERE paddock_id = $p AND conversation_id = $c").run({ p: paddockId, c: conversationId });
   }
 
+  /**
+   * Every paddock this person can reach: their own, and any whose tab they
+   * were invited to. One row each, owner first.
+   *
+   * A guest who signs in ends up in exactly this position — a machine of their
+   * own plus somebody else's terminal — which is why it needs a list rather
+   * than the single id the app assumed until now.
+   */
+  paddocksFor(email: string): { id: string; ownerEmail: string; role: Role }[] {
+    const own = this.paddockOf(email);
+    const shared = this.sql
+      .query(
+        `SELECT DISTINCT p.id AS id, p.owner_email AS owner_email
+           FROM paddock_members m JOIN paddocks p ON p.id = m.paddock_id
+          WHERE m.email = $e AND p.owner_email != $e
+          ORDER BY p.created_at`,
+      )
+      .all({ e: email }) as { id: string; owner_email: string }[];
+    return [
+      ...(own ? [{ id: own.id, ownerEmail: own.owner_email, role: "owner" as Role }] : []),
+      ...shared.map((r) => ({ id: r.id, ownerEmail: r.owner_email, role: "member" as Role })),
+    ];
+  }
+
   // ── members and guests ──────────────────────────────────────────────────
 
   addMember(paddockId: string, conversationId: string, email: string, addedBy: string): void {
@@ -303,6 +327,10 @@ export class Db {
 
   getGuest(id: string): GuestRow | null {
     return this.sql.query("SELECT * FROM paddock_guests WHERE id = $id").get({ id }) as GuestRow | null;
+  }
+
+  deleteGuest(id: string): void {
+    this.sql.query("DELETE FROM paddock_guests WHERE id = $id").run({ id });
   }
 
   touchGuest(id: string): void {
