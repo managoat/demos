@@ -51,6 +51,10 @@ export interface MachineProps {
   onAddSecret: (where: "env" | "vault", key: string, value: string) => Promise<void>;
   onRemoveSecret: (where: "env" | "vault", key: string) => Promise<void>;
   onSaveAgent: (patch: Partial<Agent>) => Promise<void>;
+  /** A new box, same declared settings. */
+  onRebuild: () => Promise<void>;
+  /** A new box and no settings at all — every secret goes. */
+  onReset: () => Promise<void>;
 }
 
 export function Machine(props: MachineProps) {
@@ -170,7 +174,7 @@ export function Machine(props: MachineProps) {
 
       {/* ── tier: machine ─────────────────────────────────────────────── */}
       <section>
-        <SectionHead title="New machine" when="cannot be changed here" note="The runtime is baked into the disk when the box is built." />
+        <SectionHead title="New machine" when="only by replacing this one" note="The runtime is baked into the disk when the box is built." />
         <ul className="rows">
           <li className="row">
             <span className="state locked">baked in</span>
@@ -178,6 +182,7 @@ export function Machine(props: MachineProps) {
             <span className="dim">changing this means starting a new box, and losing what is on this one</span>
           </li>
         </ul>
+        {isOwner && <Replace onRebuild={props.onRebuild} onReset={props.onReset} busy={!!props.busy} />}
       </section>
     </div>
   );
@@ -483,6 +488,93 @@ function Skills({ agent, onSave }: { agent: Agent; onSave: MachineProps["onSaveA
         </button>
       </div>
     </Editor>
+  );
+}
+
+/**
+ * Replacing the machine.
+ *
+ * Two operations that look similar and are not, so they are spelled out
+ * rather than named: one keeps everything you configured, the other deletes
+ * your secrets. Neither uses a browser confirm() — a modal that blocks the
+ * page is a poor way to ask, and the thing worth showing is *what goes*,
+ * which a one-line dialog cannot say.
+ */
+function Replace({ onRebuild, onReset, busy }: { onRebuild: () => Promise<void>; onReset: () => Promise<void>; busy: boolean }) {
+  const [asking, setAsking] = useState<"rebuild" | "reset" | null>(null);
+  const [working, setWorking] = useState(false);
+
+  async function go(which: "rebuild" | "reset") {
+    setWorking(true);
+    try {
+      await (which === "rebuild" ? onRebuild() : onReset());
+    } finally {
+      setWorking(false);
+      setAsking(null);
+    }
+  }
+
+  if (working) return <p className="fine">Retiring this machine…</p>;
+
+  if (asking === "rebuild") {
+    return (
+      <div className="note warn">
+        <p>
+          <strong>Build a new machine?</strong> This one ends, and everything that only ever lived on its disk goes with it.
+        </p>
+        <p className="fine">
+          Kept: repositories, packages, the setup script, secrets, MCP servers and skills. The new box starts bare and you apply
+          them to it, the same as any other change.
+        </p>
+        <div className="editor-row">
+          <button onClick={() => void go("rebuild")} disabled={busy}>
+            Build a new one
+          </button>
+          <button className="ghost" onClick={() => setAsking(null)}>
+            Cancel
+          </button>
+          {busy && <span className="fine">A tab is mid-turn — that turn ends too.</span>}
+        </div>
+      </div>
+    );
+  }
+
+  if (asking === "reset") {
+    return (
+      <div className="note danger">
+        <p>
+          <strong>Delete everything?</strong> The machine, and every setting on it.
+        </p>
+        <p className="fine">
+          Repositories, packages, the setup script, MCP servers, skills and <strong>every secret you have added</strong> are
+          deleted from Fountain. Anyone you invited loses their way in, and the link stops working. This cannot be undone, and
+          the next sign-in starts from nothing.
+        </p>
+        <div className="editor-row">
+          <button className="danger" onClick={() => void go("reset")} disabled={busy}>
+            Delete everything
+          </button>
+          <button className="ghost" onClick={() => setAsking(null)}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="editor">
+      <div className="editor-row">
+        <button onClick={() => setAsking("rebuild")}>Build a new machine</button>
+        <span className="fine">Keeps everything above. Useful when the disk is in a state you would rather not unpick.</span>
+      </div>
+      <div className="editor-row">
+        <button className="ghost danger-text" onClick={() => setAsking("reset")}>
+          Start over
+        </button>
+        <span className="fine">Deletes the machine and the settings, secrets included.</span>
+      </div>
+    </div>
   );
 }
 

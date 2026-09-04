@@ -179,3 +179,10 @@ textarea.script { font-size: 12px; }
 .step.todo { opacity: 0.5; }
 .step .row-label { min-width: 170px; }
 .aside { min-height: 2.4em; font-style: italic; }
+
+/* Replacing the machine. `danger` is only ever on something irreversible. */
+.note.danger { border-left: 2px solid var(--bad); background: #241a1a; }
+.note.danger p { margin: 0 0 6px; }
+button.danger { border-color: #5a2f2f; background: #341f1f; color: #f0c8c2; }
+button.danger:hover:not(:disabled) { border-color: var(--bad); }
+button.danger-text { color: var(--bad); }

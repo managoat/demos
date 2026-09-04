@@ -20,6 +20,8 @@ export interface ConversationSummary {
   title: string | null;
   sandbox_id: string | null;
   agent_id: string | null;
+  environment_id?: string | null;
+  vault_id?: string | null;
   runtime: string;
   status: string;
   channel_id: string | null;

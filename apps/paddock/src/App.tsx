@@ -309,6 +309,32 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
     }
   }
 
+  /**
+   * Replacing the machine, then starting over from nothing.
+   *
+   * The reload is deliberate. Everything about the box — the identity, the
+   * tabs, the receipt, which tab is active, the refs that say boot already
+   * ran — is now describing something that does not exist, and unpicking that
+   * by hand is how you get an app that is subtly wrong. A reload lands on the
+   * one path that is already known to work: a person with no machine.
+   */
+  async function replaceMachine(which: "rebuild" | "reset") {
+    if (!paddockId) return;
+    try {
+      const report = which === "rebuild" ? await paddock.rebuild(paddockId) : await paddock.reset(paddockId);
+      if (report.failed.length) {
+        // The machine is gone either way; say what would not go rather than
+        // reloading over the top of it.
+        setNotice(`Machine retired, but ${report.failed.map((f) => `${f.what} (${f.why})`).join("; ")}.`);
+        window.setTimeout(() => window.location.reload(), 4000);
+        return;
+      }
+      window.location.reload();
+    } catch (err) {
+      setNotice(describePaddockError(err));
+    }
+  }
+
   /** The retry behind the Try again button. Everything here is idempotent. */
   async function retryBoot() {
     setFatal(null);
@@ -817,6 +843,8 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
               onAddSecret={addSecret}
               onRemoveSecret={removeSecret}
               onSaveAgent={saveAgent}
+              onRebuild={() => replaceMachine("rebuild")}
+              onReset={() => replaceMachine("reset")}
               role={role ?? "guest"}
             />
             )

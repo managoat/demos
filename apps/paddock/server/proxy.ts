@@ -148,7 +148,9 @@ export async function handleProxy(ctx: AppContext, req: Request, paddockId: stri
  * alone — the newest live paddock conversation names both, exactly as the
  * client's `findBox` does. Nothing is stored, so nothing goes stale.
  */
-async function machineOf(client: FountainClient): Promise<{ agentId: string; sandboxId: string; all: ConversationSummary[] } | null> {
+async function machineOf(
+  client: FountainClient,
+): Promise<{ agentId: string; sandboxId: string; environmentId: string | null; vaultId: string | null; all: ConversationSummary[] } | null> {
   let all: ConversationSummary[];
   try {
     all = await client.listConversations();
@@ -158,7 +160,15 @@ async function machineOf(client: FountainClient): Promise<{ agentId: string; san
   const newest = all
     .filter((c) => c.sandbox_id && c.agent_id && c.channel_id?.startsWith("paddock:") && ["pending", "idle", "running"].includes(c.status))
     .sort((a, b) => b.inserted_at.localeCompare(a.inserted_at))[0];
-  return newest ? { agentId: newest.agent_id!, sandboxId: newest.sandbox_id!, all } : null;
+  return newest
+    ? {
+        agentId: newest.agent_id!,
+        sandboxId: newest.sandbox_id!,
+        environmentId: newest.environment_id ?? null,
+        vaultId: newest.vault_id ?? null,
+        all,
+      }
+    : null;
 }
 
 /** The tabs of this machine, as everyone in the paddock may see them: ops excluded. */
@@ -235,7 +245,20 @@ async function newConversation(
     req,
     "POST",
     "/api/conversations",
-    JSON.stringify({ agent_id: machine.agentId, sandbox_id: machine.sandboxId, title: str(body.title, 200) || undefined, channel_id: channel }),
+    JSON.stringify({
+      agent_id: machine.agentId,
+      sandbox_id: machine.sandboxId,
+      // The whole identity, not half of it. A disk is built for
+      // `(agent, environment, vault)` and an attach that names only the agent
+      // is asking for a *different* identity — one with no environment and no
+      // vault — which Fountain refuses as `sandbox_identity_mismatch`. Sending
+      // only the agent is exactly what broke opening a second tab, and it is
+      // why fountain-team's openThread bothers to pass these through.
+      ...(machine.environmentId ? { environment_id: machine.environmentId } : {}),
+      ...(machine.vaultId ? { vault_id: machine.vaultId } : {}),
+      title: str(body.title, 200) || undefined,
+      channel_id: channel,
+    }),
   );
   if (res.ok) {
     const created = (await res.clone().json()) as { data?: { id?: string } };

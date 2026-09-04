@@ -36,8 +36,8 @@ function conv(id: string, channel: string, at: string) {
     sandbox_id: BOX,
     sandbox: null,
     agent_id: AGENT,
-    vault_id: null,
-    environment_id: null,
+    vault_id: "v1",
+    environment_id: "e1",
     runtime: "claude",
     status: "idle",
     channel_id: channel,
@@ -67,10 +67,25 @@ beforeEach(async () => {
     upstream.push({ method, path: url.pathname });
     if (url.pathname === "/api/auth/me") return Response.json({ id: "u1", email: OWNER });
     if (url.pathname === "/api/conversations" && method === "GET") return Response.json({ data: conversations() });
-    if (url.pathname === "/api/conversations" && method === "POST") return Response.json({ data: conv("c3", channelFor("t3", 1), "2026-09-04T13:00:00Z") });
+    if (url.pathname === "/api/conversations" && method === "POST") {
+      // Fountain identity-checks an attach: the disk was built for one
+      // (agent, environment, vault) and naming a different one — including by
+      // omitting a field the box was built with — is a 422.
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, string | undefined>;
+      if (body.sandbox_id) {
+        const wanted = { agent_id: AGENT, environment_id: "e1", vault_id: "v1" };
+        for (const key of ["agent_id", "environment_id", "vault_id"] as const) {
+          if ((body[key] ?? null) !== wanted[key]) {
+            return Response.json({ error: "sandbox_identity_mismatch" }, { status: 422 });
+          }
+        }
+      }
+      return Response.json({ data: conv("c3", channelFor("t3", 1), "2026-09-04T13:00:00Z") });
+    }
     if (/^\/api\/conversations\/[^/]+/.test(url.pathname)) return Response.json({ status: "accepted" });
     if (url.pathname === "/api/catalog") return Response.json({ data: { runtimes: ["claude"], models: {} } });
     if (/^\/api\/agents\/[^/]+$/.test(url.pathname)) return Response.json({ data: { id: AGENT, name: "Paddock", runtime: "claude", model: "m" } });
+    if (method === "DELETE" && /^\/api\/(agents|environments|vaults)\/[^/]+$/.test(url.pathname)) return new Response(null, { status: 204 });
     if (/^\/api\/environments\/[^/]+$/.test(url.pathname)) return Response.json({ data: { id: "e1", name: "Paddock" } });
     if (/^\/api\/(environments|vaults)\/[^/]+\/secrets$/.test(url.pathname)) return Response.json({ data: [] });
     // Only this paddock's box exists upstream; the proxy is what refuses the
@@ -310,5 +325,146 @@ describe("turns carry who sent them", () => {
     await guestSession(owner.id);
     await call(owner.cookie, "POST", `/f/${owner.id}/api/conversations/c1/prompts`, { prompt: "with company" });
     expect(sent[1]).toBe(`[from ${OWNER}] with company`);
+  });
+});
+
+describe("replacing the machine", () => {
+  test("rebuild ends every tab and retires the agent, and leaves the settings alone", async () => {
+    const owner = await paddockFor(OWNER);
+    upstream = [];
+    const res = await call(owner.cookie, "POST", `/api/paddock/${owner.id}/rebuild`);
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as { data: { terminated: number; removed: string[]; failed: unknown[] } };
+
+    // Every paddock conversation, the hidden ops tab included: a machine is
+    // not retired while something is still running on it.
+    expect(data.terminated).toBe(3);
+    expect(upstream.filter((u) => u.path.endsWith("/terminate")).map((u) => u.path)).toEqual([
+      "/api/conversations/c1/terminate",
+      "/api/conversations/c2/terminate",
+      "/api/conversations/cops/terminate",
+    ]);
+
+    // The agent is what changes the identity, so it is what has to go.
+    expect(data.removed).toEqual(["agent"]);
+    expect(data.failed).toEqual([]);
+
+    // And the settings are untouched — that is the whole difference from reset.
+    expect(upstream.some((u) => u.method === "DELETE" && u.path.startsWith("/api/environments"))).toBe(false);
+    expect(upstream.some((u) => u.method === "DELETE" && u.path.startsWith("/api/vaults"))).toBe(false);
+  });
+
+  test("reset takes the environment and vault too, and with them every secret", async () => {
+    const owner = await paddockFor(OWNER);
+    upstream = [];
+    const res = await call(owner.cookie, "POST", `/api/paddock/${owner.id}/reset`);
+    const { data } = (await res.json()) as { data: { removed: string[] } };
+    expect(data.removed).toEqual(["agent", "environment", "vault"]);
+  });
+
+  test("reset closes the way in: the link dies and its guests with it", async () => {
+    const owner = await paddockFor(OWNER);
+    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/invite`);
+    const token = ctx.db.getPaddock(owner.id)!.invite_token!;
+    const joined = await call(null, "POST", `/api/join/${token}`);
+    const guestCookie = joined.headers.get("set-cookie")!.split(";")[0]!;
+
+    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/reset`);
+
+    expect(ctx.db.getPaddock(owner.id)!.invite_token).toBeNull();
+    expect((await call(null, "POST", `/api/join/${token}`)).status).toBe(404);
+    expect((await call(guestCookie, "GET", "/api/me")).status).toBe(401);
+  });
+
+  test("a rebuild leaves an invited guest in place for the machine that replaces it", async () => {
+    const owner = await paddockFor(OWNER);
+    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/invite`);
+    const token = ctx.db.getPaddock(owner.id)!.invite_token!;
+    const joined = await call(null, "POST", `/api/join/${token}`);
+    const guestCookie = joined.headers.get("set-cookie")!.split(";")[0]!;
+
+    await call(owner.cookie, "POST", `/api/paddock/${owner.id}/rebuild`);
+
+    expect(ctx.db.getPaddock(owner.id)!.invite_token).toBe(token);
+    expect((await call(guestCookie, "GET", "/api/me")).status).toBe(200);
+  });
+
+  test("neither is anybody else's to do", async () => {
+    const owner = await paddockFor(OWNER);
+    const guest = await guestSession(owner.id);
+    const memberCookie = await signIn(OTHER);
+    ctx.db.addMember(owner.id, OTHER, OWNER);
+
+    upstream = [];
+    for (const cookie of [guest, memberCookie]) {
+      for (const what of ["rebuild", "reset"]) {
+        expect((await call(cookie, "POST", `/api/paddock/${owner.id}/${what}`)).status).toBe(403);
+      }
+    }
+    // And nothing was terminated or deleted on the way to those refusals.
+    expect(upstream).toEqual([]);
+  });
+
+  test("an agent Fountain will not delete is retired anyway, rather than silently left in place", async () => {
+    const owner = await paddockFor(OWNER);
+    const inner = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url));
+      if ((init?.method ?? "GET") === "DELETE" && url.pathname.startsWith("/api/agents/")) {
+        return Response.json({ error: "agent_in_use", message: "still referenced" }, { status: 409 });
+      }
+      return inner(input as string, init);
+    }) as typeof fetch;
+
+    const res = await call(owner.cookie, "POST", `/api/paddock/${owner.id}/rebuild`);
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as { data: { removed: string[] } };
+    // Un-marked instead: ensureIdentity looks for the marker, so this is
+    // genuinely retired even though the record survives.
+    expect(data.removed).toEqual(["agent (retired, not deleted)"]);
+  });
+
+  test("an agent that can be neither deleted nor retired is an error, not a lie", async () => {
+    const owner = await paddockFor(OWNER);
+    const inner = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url));
+      const method = (init?.method ?? "GET").toUpperCase();
+      if ((method === "DELETE" || method === "PUT") && url.pathname.startsWith("/api/agents/")) {
+        return Response.json({ error: "nope", message: "refused" }, { status: 409 });
+      }
+      return inner(input as string, init);
+    }) as typeof fetch;
+
+    const res = await call(owner.cookie, "POST", `/api/paddock/${owner.id}/rebuild`);
+    // Reporting success here would send somebody back to the same machine.
+    expect(res.status).toBe(502);
+    expect(((await res.json()) as { error: string }).error).toBe("retire_failed");
+  });
+});
+
+describe("opening a tab on an existing machine", () => {
+  test("names the whole identity, not just the agent", async () => {
+    // A disk is built for (agent, environment, vault). An attach that sends
+    // only the agent is asking for a different identity — one with neither —
+    // and Fountain refuses it. This is what broke the + button.
+    const owner = await paddockFor(OWNER);
+    upstream = [];
+    const res = await call(owner.cookie, "POST", `/f/${owner.id}/api/conversations`, { title: "Terminal 3", channel_id: channelFor("t3", 1) });
+    expect(res.status).toBe(200);
+  });
+
+  test("a guest opening a tab gets the same identity, and cannot name another", async () => {
+    const owner = await paddockFor(OWNER);
+    const guest = await guestSession(owner.id);
+    // Even asked for a different box and agent, the attach is built from the
+    // machine this paddock actually has.
+    const res = await call(guest, "POST", `/f/${owner.id}/api/conversations`, {
+      channel_id: channelFor("t4", 1),
+      agent_id: "somebody-elses-agent",
+      sandbox_id: "somebody-elses-box",
+      environment_id: "nope",
+    });
+    expect(res.status).toBe(200);
   });
 });

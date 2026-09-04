@@ -21,6 +21,12 @@ export interface Present {
   role: string;
 }
 
+export interface RetireReport {
+  terminated: number;
+  removed: string[];
+  failed: { what: string; why: string }[];
+}
+
 export interface PaddockDto {
   id: string;
   role: Role;
@@ -57,6 +63,15 @@ export const paddock = {
     call<{ data: PaddockDto }>("DELETE", `/api/paddock/${id}/members/${encodeURIComponent(email)}`).then((r) => r.data),
   mintInvite: (id: string) => call<{ data: PaddockDto; evicted: number }>("POST", `/api/paddock/${id}/invite`),
   closeInvite: (id: string) => call<{ data: PaddockDto; evicted: number }>("DELETE", `/api/paddock/${id}/invite`),
+
+  /**
+   * A new machine, keeping everything you declared. Fountain cannot delete a
+   * sandbox, so this retires the agent — the identity is what decides which
+   * box you get, and a retired one means the next sign-in builds a fresh one.
+   */
+  rebuild: (id: string) => call<{ data: RetireReport }>("POST", `/api/paddock/${id}/rebuild`).then((r) => r.data),
+  /** The above, and the environment and vault with every secret in them. */
+  reset: (id: string) => call<{ data: RetireReport }>("POST", `/api/paddock/${id}/reset`).then((r) => r.data),
 
   presence: (id: string, clientId: string) => call<{ data: Present[] }>("POST", `/api/paddock/${id}/presence`, { clientId }).then((r) => r.data),
 

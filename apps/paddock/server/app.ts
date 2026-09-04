@@ -16,6 +16,8 @@
  *   DELETE /api/paddock/:id/invite            owner: close the link
  *   POST   /api/paddock/:id/presence          heartbeat
  *   GET    /api/paddock/:id/stream            presence, tabs, turns
+ *   POST   /api/paddock/:id/rebuild           owner: new machine, same settings
+ *   POST   /api/paddock/:id/reset             owner: new machine, settings gone
  *
  *   *      /f/:id/api/conversations…          Fountain, scoped to that machine's tabs
  *
@@ -27,6 +29,7 @@
  */
 import { authenticate, type AppContext } from "./context";
 import * as auth from "./auth";
+import * as lifecycle from "./lifecycle";
 import * as people from "./people";
 import { handleProxy } from "./proxy";
 import { errorResponse, HttpError, json } from "./http";
@@ -60,6 +63,8 @@ export function buildRouter(ctx: AppContext): (req: Request) => Promise<Response
   on("DELETE", "/api/paddock/:id/invite", (req, p) => people.closeInvite(ctx, req, p.id!));
   on("POST", "/api/paddock/:id/presence", (req, p) => people.presence(ctx, req, p.id!));
   on("GET", "/api/paddock/:id/stream", (req, p) => people.stream(ctx, req, p.id!));
+  on("POST", "/api/paddock/:id/rebuild", (req, p) => lifecycle.rebuild(ctx, req, p.id!));
+  on("POST", "/api/paddock/:id/reset", (req, p) => lifecycle.reset(ctx, req, p.id!));
 
   on("*", "/f/:id/*", async (req, p) => {
     const id = await authenticate(ctx, req);

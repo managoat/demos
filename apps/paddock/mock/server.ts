@@ -254,6 +254,10 @@ Bun.serve({
     if (agentId) {
       const agent = state.agents.find((a) => a.id === agentId);
       if (!agent) return json({ error: "not_found" }, 404);
+      if (method === "DELETE") {
+        state.agents = state.agents.filter((a) => a.id !== agentId);
+        return new Response(null, { status: 204 });
+      }
       if (method === "PUT") Object.assign(agent, body);
       return json({ data: agent });
     }
@@ -270,6 +274,11 @@ Bun.serve({
     if (envId) {
       const env = state.environments.find((e) => e.id === envId);
       if (!env) return json({ error: "not_found" }, 404);
+      if (method === "DELETE") {
+        state.environments = state.environments.filter((e) => e.id !== envId);
+        state.secrets.delete(`environments:${envId}`);
+        return new Response(null, { status: 204 });
+      }
       if (method === "PUT") {
         const bad = badEnvironment(body);
         if (bad) return json(bad, 422);
@@ -282,6 +291,18 @@ Bun.serve({
     if (p === "/api/vaults" && method === "POST") {
       const vault = { id: `v${state.vaults.length + 1}`, ...body };
       state.vaults.push(vault);
+      return json({ data: vault });
+    }
+
+    const vaultId = /^\/api\/vaults\/([^/]+)$/.exec(p)?.[1];
+    if (vaultId) {
+      const vault = state.vaults.find((v) => v.id === vaultId);
+      if (!vault) return json({ error: "not_found" }, 404);
+      if (method === "DELETE") {
+        state.vaults = state.vaults.filter((v) => v.id !== vaultId);
+        state.secrets.delete(`vaults:${vaultId}`);
+        return new Response(null, { status: 204 });
+      }
       return json({ data: vault });
     }
 
@@ -309,6 +330,21 @@ Bun.serve({
       if (!state.sandbox) {
         state.sandbox = { id: "sb-mock-1", sprite_name: "paddock-mock", status: "ready", provider: "mock", mode: "persistent", agent_id: b.agent_id, environment_id: b.environment_id ?? null, vault_id: b.vault_id ?? null, url: null };
         state.files.set(`${WORK_ROOT}/.keep`, "");
+      }
+      // Attaching is identity-checked, the way Fountain checks it. The disk was
+      // built for one (agent, environment, vault) and a launch that names a
+      // different one — including by *omitting* a field the box was built with
+      // — is 422 sandbox_identity_mismatch. Paddock shipped an attach that sent
+      // only the agent and the sandbox, and this is the rule that caught it.
+      if (b.sandbox_id) {
+        const box = state.sandbox as Record<string, string | null> | null;
+        if (!box || box.id !== b.sandbox_id) return json({ error: "sandbox_not_found" }, 404);
+        const wanted = { agent_id: b.agent_id ?? null, environment_id: b.environment_id ?? null, vault_id: b.vault_id ?? null };
+        for (const key of ["agent_id", "environment_id", "vault_id"] as const) {
+          if ((box[key] ?? null) !== wanted[key]) {
+            return json({ error: "sandbox_identity_mismatch", message: "That machine was built for a different agent, environment or vault." }, 422);
+          }
+        }
       }
       const agent = state.agents.find((a) => a.id === b.agent_id) as { runtime?: string } | undefined;
       const conv: Conv = {
