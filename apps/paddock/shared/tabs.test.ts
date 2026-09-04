@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Conversation } from "../src/api/types";
+import { bootstrapPrompt, welcomePrompt } from "./spec";
 import {
   canPrompt,
   channelFor,
@@ -193,5 +194,28 @@ describe("findBox", () => {
 
   test("a live conversation with no machine yet does not name one", () => {
     expect(findBox([conv({ id: "p", status: "pending", sandbox_id: null })], "a1")).toBeNull();
+  });
+});
+
+describe("the welcome turn", () => {
+  test("does the setup as well as the introduction — a tab is useless without a directory", () => {
+    const welcome = welcomePrompt({ slug: "t1", repoPath: null });
+    const bootstrap = bootstrapPrompt({ slug: "t1", repoPath: null });
+    // Everything the terse version does, verbatim, and then some.
+    expect(welcome.startsWith(bootstrap)).toBe(true);
+    expect(welcome).toContain("introduce it");
+    expect(welcome.length).toBeGreaterThan(bootstrap.length);
+  });
+
+  test("carries a worktree when the box has a repository, exactly as the terse one does", () => {
+    const welcome = welcomePrompt({ slug: "t2", repoPath: "/home/sprite/api" });
+    expect(welcome).toContain("git worktree add /home/sprite/work/t2");
+  });
+
+  test("names what a person can actually do here, so the first turn orients them", () => {
+    const welcome = welcomePrompt({ slug: "t1", repoPath: null });
+    for (const subject of ["persists", "tab", "one tab runs a turn at a time", "Machine panel", "applied", "People"]) {
+      expect(welcome).toContain(subject);
+    }
   });
 });

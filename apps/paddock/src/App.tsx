@@ -12,19 +12,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, describeError, FountainClient } from "./api/client";
 import type { Agent, Catalog, Conversation, Environment, LogEvent, Repository, Sandbox } from "./api/types";
-import { Boot } from "./components/Boot";
+import { Starting } from "./components/Starting";
 import { Connect } from "./components/Connect";
 import { Files } from "./components/Files";
 import { Machine } from "./components/Machine";
 import { People } from "./components/People";
 import { Tabs } from "./components/Tabs";
 import { Terminal } from "./components/Terminal";
-import { ensureIdentity, type Identity } from "./lib/identity";
+import { defaultChoice, ensureIdentity, type BootStep, type Identity } from "./lib/identity";
 import { boxDrift, applyKeep, applyTodo, configRev, desiredItems, primaryRepoPath, withRev } from "./lib/machine";
 import { parseReceipt, decodeFile, type Receipt } from "./lib/protocol";
 import { completeLoginIfCallback } from "./lib/oauth";
 import { describePaddockError, paddock, type Me, type PaddockDto } from "./api/paddock";
-import { applyPrompt, bootstrapPrompt, reconcilePrompt, RECEIPT_PATH, WORK_ROOT } from "../shared/spec";
+import { applyPrompt, bootstrapPrompt, reconcilePrompt, welcomePrompt, RECEIPT_PATH, WORK_ROOT } from "../shared/spec";
 import { canPrompt, channelFor, findBox, holder, nextSlug, opsTab, OPS_SLUG, staleTabs, tabsOf, visibleTabs } from "../shared/tabs";
 
 const STREAMS = ["acp", "stdout", "stderr", "stage"];
@@ -133,6 +133,8 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
   // Every Fountain call goes through this machine's own proxy, on the owner's
   // key. A guest's browser makes exactly the same calls and holds nothing.
   const [paddockId, setPaddockId] = useState<string | null>(me.paddockId);
+  /** Which paddock the boot effect has already run for. See the effect. */
+  const bootedRef = useRef<string | null | undefined>(undefined);
   const client = useMemo(() => new FountainClient(`/f/${paddockId ?? "none"}`), [paddockId]);
   const role = me.role;
   const isOwner = role === "owner";
@@ -141,7 +143,7 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [booting, setBooting] = useState(true);
-  const [starting, setStarting] = useState(false);
+  const [step, setStep] = useState<BootStep>("environment");
   const [fatal, setFatal] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -169,7 +171,15 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
    * identity is read *from* the conversations, and the conversations were
    * gated on having an identity.
    */
-  const agentId = identity?.agent.id ?? conversations.find((c) => c.agent_id)?.agent_id ?? null;
+  const identityAgent = identity?.agent.id ?? null;
+  // Prefer the identity's own agent — but only if the machine is actually on
+  // it. The conversations are the truth about where the machine lives, and an
+  // account that ended up with two paddock identities would otherwise hold one
+  // agent while its box belonged to the other, and match nothing forever.
+  const agentId =
+    identityAgent && findBox(conversations, identityAgent)
+      ? identityAgent
+      : (conversations.find((c) => c.agent_id)?.agent_id ?? identityAgent);
   const boxId = agentId ? findBox(conversations, agentId) : null;
   const rev = identity ? configRev(identity.agent) : 0;
 
@@ -186,6 +196,13 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
   // identity behind the machine. A guest does neither: they were handed a
   // paddock id by the invite and everything else is derived.
   useEffect(() => {
+    // Once per client, ever. React double-invokes effects in development and
+    // will re-run this on any dep change; `ensureIdentity` creates records, so
+    // two overlapping runs created two agents and left the app holding the one
+    // without the machine. The work is idempotent against Fountain but not
+    // against itself running twice at the same time.
+    if (bootedRef.current === paddockId) return;
+    bootedRef.current = paddockId;
     void (async () => {
       try {
         let id = paddockId;
@@ -212,8 +229,11 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
           const meta = (a.metadata ?? {})["paddock"];
           return !!meta && typeof meta === "object" && !Array.isArray(meta) && (meta as { identity?: unknown }).identity === true;
         });
-        if (!mine) return; // first run — Boot asks for a runtime
-        setIdentity(await ensureIdentity(client, { runtime: mine.runtime, model: mine.model }));
+        // First run provisions rather than asking. The one choice that was
+        // ever on that form — the runtime — is the same answer for everybody,
+        // and the Machine panel says what was picked and what changing it costs.
+        const choice = mine ? { runtime: mine.runtime, model: mine.model } : defaultChoice(cat);
+        setIdentity(await ensureIdentity(client, choice, setStep));
       } catch (err) {
         setFatal(describeError(err));
       } finally {
@@ -228,8 +248,12 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
     if (!paddockId) return;
     try {
       setConversations(await client.listConversations());
-    } catch {
-      /* a poll that misses is not worth a message; the next one will do */
+    } catch (err) {
+      // A poll that misses is not worth interrupting anybody over — the next
+      // one will do — but it is worth *saying*. An empty catch here hid two
+      // bugs in a row, both of which looked like the app being stuck rather
+      // than the app failing.
+      console.error("paddock: could not list tabs —", describeError(err));
     }
   }, [client, paddockId]);
 
@@ -240,24 +264,37 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
     return () => window.clearInterval(t);
   }, [paddockId, refreshConversations]);
 
-  // First run of an identity that exists but has no live box: start one.
+  /**
+   * An identity with no live machine: start one.
+   *
+   * `conversations.length === 0` is the "this account has never had a box"
+   * case and gets the welcome turn. An identity with conversations but no live
+   * box has simply had its machine end, and only needs its directory back.
+   */
   const startedRef = useRef(false);
   useEffect(() => {
-    if (!identity || booting || boxId || startedRef.current || conversations.length === 0) return;
+    if (!identity || booting || startedRef.current || !isOwner) return;
+    // A box with a usable tab needs nothing. A box whose tabs have all ended
+    // is as unusable as no box, and gets one the same way.
+    if (boxId && strip.length > 0) return;
     startedRef.current = true;
-    void startBox(identity);
+    void startBox(identity, conversations.length === 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity, booting, boxId, conversations.length]);
+  }, [identity, booting, boxId, isOwner, strip.length, conversations.length]);
 
-  async function startBox(id: Identity) {
-    setStarting(true);
+  async function startBox(id: Identity, welcome = false) {
+    setStep("machine");
     try {
-      // The first turn goes in the same call that starts the machine: a fresh
-      // conversation with nothing to do is a 422, and a machine that failed to
-      // start is worth an error rather than a silent catch.
+      // The first turn goes in the same call that starts the machine, which is
+      // how the rest of the suite does it, and a machine that failed to start
+      // is worth an error rather than a silent catch.
+      //
+      // On a brand-new machine that turn also introduces the place: the first
+      // thing somebody sees is the agent working on their own box, saying what
+      // is true of it. A machine being restarted just gets its directory back.
       await client.startBox({
         agent_id: id.agent.id,
-        prompt: bootstrapPrompt({ slug: "t1", repoPath: primaryRepoPath(id.environment) }),
+        prompt: (welcome ? welcomePrompt : bootstrapPrompt)({ slug: "t1", repoPath: primaryRepoPath(id.environment) }),
         agentDefaultMode: id.agent.sandbox_mode ?? null,
         title: "Terminal 1",
         channel_id: channelFor("t1", configRev(id.agent)),
@@ -265,25 +302,23 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
         ...(id.vault ? { vault_id: id.vault.id } : {}),
       });
       setActiveSlug("t1");
+      setStep("waking");
       await refreshConversations();
     } catch (err) {
       setFatal(describeError(err));
-    } finally {
-      setStarting(false);
     }
   }
 
-  async function boot(choice: { runtime: string; model: string }) {
-    setStarting(true);
+  /** The retry behind the Try again button. Everything here is idempotent. */
+  async function retryBoot() {
     setFatal(null);
     try {
-      const id = await ensureIdentity(client, choice);
+      const id = await ensureIdentity(client, defaultChoice(catalog), setStep);
       setIdentity(id);
       startedRef.current = true;
-      await startBox(id);
+      await startBox(id, conversations.length === 0);
     } catch (err) {
       setFatal(describeError(err));
-      setStarting(false);
     }
   }
 
@@ -668,12 +703,13 @@ function Paddock({ me, onMe, onSignOut }: { me: Me; onMe: (m: Me) => void; onSig
 
   // ── render ───────────────────────────────────────────────────────────────
   if (booting) return <Splash line="finding your machine…" />;
-  // Only the owner can start a machine, so only the owner is ever asked how.
-  if (isOwner && !identity) return <Boot catalog={catalog} starting={starting} error={fatal} onStart={boot} />;
-  if (fatal && !boxId) return <Splash line={fatal} error />;
-  if (!boxId || strip.length === 0) {
-    return <Splash line={isOwner ? (starting ? "starting your machine…" : "waiting for your machine…") : "This machine is not running yet."} />;
+  // The owner watches their machine get built; anybody else is only waiting
+  // for somebody else's, and has nothing to retry.
+  if (isOwner && (!identity || !boxId || strip.length === 0)) {
+    return <Starting step={step} error={fatal} onRetry={() => void retryBoot()} />;
   }
+  if (fatal && !boxId) return <Splash line={fatal} error />;
+  if (!boxId || strip.length === 0) return <Splash line="This machine is not running yet." />;
 
   return (
     <div className="app">

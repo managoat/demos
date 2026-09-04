@@ -24,6 +24,35 @@ import { systemPrompt } from "../../shared/spec";
 /** The name all three records carry, and the marker on the agent. */
 export const IDENTITY_NAME = "Paddock";
 
+/**
+ * What a machine is, unless the Fountain it runs on cannot offer it.
+ *
+ * Not a question the app asks. Runtime is the one thing baked into the disk,
+ * so it looked like it deserved a form — but a form on first run is a form
+ * between somebody and the thing they came for, answered identically by
+ * everyone. Paddock picks, and the Machine panel says what was picked and what
+ * changing it would cost.
+ */
+export const DEFAULT_RUNTIME = "claude";
+export const DEFAULT_MODEL = "claude-opus-5";
+
+/** The steps of first run, in order, so a person can watch it happen. */
+export type BootStep = "environment" | "vault" | "agent" | "machine" | "waking";
+
+/**
+ * The defaults, reconciled with what this Fountain actually has. A deployment
+ * without our preferred model should still get a machine rather than an error
+ * about a model nobody asked for.
+ */
+export function defaultChoice(catalog: { runtimes?: string[]; models?: Record<string, string[]> } | null): { runtime: string; model: string } {
+  const runtimes = catalog?.runtimes ?? [];
+  const runtime = runtimes.includes(DEFAULT_RUNTIME) ? DEFAULT_RUNTIME : (runtimes[0] ?? DEFAULT_RUNTIME);
+  const models = catalog?.models?.[runtime] ?? [];
+  if (models.includes(DEFAULT_MODEL)) return { runtime, model: DEFAULT_MODEL };
+  const opus = models.find((m) => m.includes("opus"));
+  return { runtime, model: opus ?? models[0] ?? DEFAULT_MODEL };
+}
+
 export interface Identity {
   agent: Agent;
   environment: Environment;
@@ -45,9 +74,21 @@ export function isPaddockAgent(a: Pick<Agent, "metadata">): boolean {
  * to point at them afterwards would be an agent whose identity changed between
  * its creation and its first machine.
  */
-export async function ensureIdentity(client: FountainClient, choice: { runtime: string; model: string }): Promise<Identity> {
-  const existing = (await client.listAgents()).find(isPaddockAgent);
+export async function ensureIdentity(
+  client: FountainClient,
+  choice: { runtime: string; model: string },
+  onStep: (step: BootStep) => void = () => {},
+): Promise<Identity> {
+  // Sorted, not `.find`. If two paddock agents exist — which a double-render
+  // once managed to create — every caller has to pick the *same* one, or the
+  // app holds one identity while its machine belongs to the other and nothing
+  // matches. Id order is arbitrary but stable, which is the whole requirement.
+  const existing = (await client.listAgents()).filter(isPaddockAgent).sort((a, b) => a.id.localeCompare(b.id))[0];
   if (existing) {
+    // Nothing is being built on a return visit, so the first-run screen — if
+    // it shows at all — should not claim to be fencing a paddock that has
+    // stood for weeks.
+    onStep("machine");
     const [environment, vault] = await Promise.all([
       existing.environment_id ? client.getEnvironment(existing.environment_id) : ensureEnvironment(client),
       findVault(client, existing.vault_id ?? null),
@@ -55,8 +96,11 @@ export async function ensureIdentity(client: FountainClient, choice: { runtime: 
     return { agent: existing, environment, vault };
   }
 
+  onStep("environment");
   const environment = await ensureEnvironment(client);
+  onStep("vault");
   const vault = await ensureVault(client);
+  onStep("agent");
   const agent = await client.createAgent({
     name: IDENTITY_NAME,
     model: choice.model,

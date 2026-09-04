@@ -166,3 +166,16 @@ textarea.script { font-size: 12px; }
 .code.diff .del { color: var(--bad); }
 .code.diff .hunk { color: var(--accent); }
 .code.diff .meta { color: var(--dim); }
+
+/* ── first run ─────────────────────────────────────────────────────────── */
+.steps { margin: 18px 0 14px; }
+.step { gap: 10px; padding: 5px 0; color: var(--dim); transition: color 0.2s; }
+.step .mark { flex: none; width: 14px; text-align: center; }
+.step.done { color: var(--ink); }
+.step.done .mark { color: var(--ok); }
+.step.doing { color: var(--ink); }
+.step.doing .mark { color: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.step.failed .mark { color: var(--bad); }
+.step.todo { opacity: 0.5; }
+.step .row-label { min-width: 170px; }
+.aside { min-height: 2.4em; font-style: italic; }

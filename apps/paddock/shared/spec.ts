@@ -83,6 +83,42 @@ export function bootstrapPrompt(input: { slug: string; repoPath: string | null }
   return lines.join("\n");
 }
 
+/**
+ * The very first turn on a brand-new machine.
+ *
+ * It does the same setup as `bootstrapPrompt` — a tab is useless without a
+ * working directory — and then introduces the place, because this turn is the
+ * only one a person watches with no idea what they are looking at. Every tab
+ * after this gets the terse version: an orientation lecture on every new tab
+ * would be noise.
+ *
+ * It is deliberately a real turn rather than static copy in the UI. The first
+ * thing a new arrival sees is the agent actually working on their machine, in
+ * the scrollback, which is the whole product — and it says what is true of
+ * *this* box (whether it has a repository, where it put things) rather than
+ * what is true of a screenshot.
+ */
+export function welcomePrompt(input: { slug: string; repoPath: string | null }): string {
+  return [
+    bootstrapPrompt(input),
+    "",
+    "Then, because this is the person's first look at their machine, introduce it.",
+    "Keep it short — a terminal, not a brochure. Cover, in your own words:",
+    "",
+    "  - this machine is theirs and it persists; it is here next time",
+    "  - a new tab is another session on this same box, with its own directory",
+    "  - only one tab runs a turn at a time, because there is one machine",
+    "  - the Machine panel is where repositories, packages, a setup script,",
+    "    secrets, MCP servers and skills go, and nothing there reaches the box",
+    "    until it is applied — which is a turn they will watch happen here",
+    "  - People is how someone else gets in, by email or by a link that needs",
+    "    no account; anyone let in can read this machine",
+    "",
+    "Then suggest one concrete thing to try, and stop. No headings, no bullet",
+    "list longer than the one above, no offer to explain further.",
+  ].join("\n");
+}
+
 /** One thing paddock wants on the box, as the apply turn is told about it. */
 export interface ApplyItem {
   /** The canonical id (`pkg:ripgrep`) — copied verbatim into the receipt. */

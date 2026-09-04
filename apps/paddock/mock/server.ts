@@ -111,6 +111,19 @@ async function runTurn(conv: Conv, prompt: string) {
     await sleep(300);
     push(conv.id, { kind: "output", stream: "acp", data: toolDone("t1", "") });
     push(conv.id, { kind: "output", stream: "acp", data: text(`${dir}`) });
+    // The welcome turn asks for an introduction after the setup; a real agent
+    // would write one, so the fake gestures at it rather than stopping short
+    // and making the first-run screen look broken.
+    if (prompt.includes("introduce it")) {
+      await sleep(300);
+      push(conv.id, {
+        kind: "output",
+        stream: "acp",
+        data: text(
+          "\n(mock) This machine is yours and it stays up between visits. A new tab is another session on this same box with its own directory, and only one tab takes a turn at a time. The Machine panel is where repositories, packages and secrets go — nothing there reaches the box until you apply it, and you watch that happen here. People is how you let somebody else in.\n\nTry: ask me what is installed.",
+        ),
+      });
+    }
   } else if (isApply || isReconcile) {
     // "keep" ids are the bullet-less lines under the keep list; the numbered
     // work is what carries `id:`. Both end up in the receipt, which is what a
