@@ -39,8 +39,14 @@ const BUILT_WITH = "https://managoat.com/built-with";
  *
  * paddock: new, and not on built_apps/0 yet. Same deal — remove this entry and
  * add it to src/roster.ts together, once the fountain-side list has it.
+ *
+ * switchyard: new, and the same again. It is also the one app in the suite that
+ * does not run on the reader's own Fountain account — the server holds the key
+ * and sign-in is GitHub — so whether it belongs on a list of things built *with*
+ * Fountain by other people is a question for the fountain side to answer before
+ * it is rostered here.
  */
-const UNLISTED_UPSTREAM = new Set(["salon", "paddock"]);
+const UNLISTED_UPSTREAM = new Set(["salon", "paddock", "switchyard"]);
 
 const REPO_APPS = new Set(
   readdirSync(new URL("../../", import.meta.url).pathname, { withFileTypes: true })
