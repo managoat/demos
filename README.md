@@ -1,6 +1,6 @@
 # managoat/demos
 
-The Fountain demo suite. Fourteen apps, one per directory under `apps/`, each
+The Fountain demo suite. Sixteen apps, one per directory under `apps/`, each
 served at `<name>.demo.managoat.com` and indexed at
 [demo.managoat.com](https://demo.managoat.com).
 
@@ -20,9 +20,11 @@ what they do is an ordinary web app with no privileged access.
 | [fountain-workbench](apps/fountain-workbench) | fountain-workbench.demo.managoat.com | Projects → work items → the agents pulled into them. Bun server. |
 | [mend](apps/mend) | mend.demo.managoat.com | An audit of a public repo's CI, manifests and rulesets. Bun server. |
 | [mission-control](apps/mission-control) | mission-control.demo.managoat.com | Plan, approve, fan out over a fleet of sandboxes. |
+| [paddock](apps/paddock) | paddock.demo.managoat.com | A computer in the cloud that stays yours. Terminal tabs as threads on one box. Bun server. |
 | [repo-sage](apps/repo-sage) | repo-sage.demo.managoat.com | Chat with any public GitHub repo, cited to file:line. |
 | [rounds](apps/rounds) | rounds.demo.managoat.com | Mend's ambient sibling: repositories on a schedule. Bun server. |
 | [salon](apps/salon) | salon.demo.managoat.com | Multiplayer chat — the host's Fountain account pays. Bun server. |
+| [switchyard](apps/switchyard) | switchyard.demo.managoat.com | Parallel git worktrees on one machine. Sign in with GitHub; the server owns the Fountain account. Bun server. |
 | [table-talk](apps/table-talk) | table-talk.demo.managoat.com | Drop a CSV, get charts and plain-English answers. |
 | [watchtower](apps/watchtower) | watchtower.demo.managoat.com | Scheduled uptime, TLS and DNS patrols by an SRE teammate. |
 
@@ -53,6 +55,12 @@ fountain-workbench's suite installs happy-dom's globals, and in a shared
 process that changes what other suites see. See `scripts/each.ts`.
 
 ## Shared code
+
+One app does not fit that sentence, and it is worth knowing before you read
+it: **switchyard** signs people in with GitHub and runs every machine on the
+*server's* Fountain account, so its browser holds no key at all. It is the one
+place in the suite where the app has privileged access, and its README says
+why and what that costs.
 
 `packages/fountain-app` holds the four client libs every app was cloned with —
 the SSE reader, the ACP log parser, the settings store and PKCE sign-in. Each
