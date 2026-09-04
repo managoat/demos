@@ -336,3 +336,47 @@ button.danger-text { color: var(--bad); }
   .theme-trigger-copy, .theme-chevron { display: none; }
   .theme-menu { left: 54px; right: auto; bottom: 0; width: 190px; }
 }
+
+/* ── people ───────────────────────────────────────────────────────────── */
+/* Two doors and a guest list. Each door is a card that names itself, then
+   shows its control, then explains — the order the eye wants and the reverse
+   of what the panel used to do. `clip` is everywhere because a tab's title is
+   whatever the agent called it, and generated titles are long. */
+.clip { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.head-copy { min-width: 0; }
+.head-copy p { margin: 3px 0 0; font-size: 12px; }
+
+h4.loud { color: var(--ink); font-size: 11px; font-weight: 650; letter-spacing: 0.07em; }
+h4.loud .dim { font-weight: 500; letter-spacing: 0.03em; text-transform: none; }
+
+.who { list-style: none; margin: 8px 0 0; padding: 0; }
+.who li { display: flex; gap: 8px; align-items: center; padding: 4px 0; }
+.who-dot { flex: none; width: 6px; height: 6px; border-radius: 999px; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 14%, transparent); }
+.who-name { flex: 1; color: var(--ink); }
+.who li .dim { flex: none; font-size: 11px; }
+
+/* A card, so the two ways in read as two things you can do rather than as one
+   long article about sharing. */
+.panel section.act { margin: 0 0 12px; padding: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.act-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.act-head h3 { flex: 1; min-width: 0; font-size: 14px; letter-spacing: -0.01em; }
+.act-head .badge { flex: none; color: var(--dim); }
+.act-do { display: flex; gap: 6px; align-items: center; }
+.act-do input { flex: 1; min-width: 0; }
+.act-do button { flex: none; padding: 5px 12px; }
+.act-do button.wide { flex: 1; padding: 6px; }
+.act .fine { margin: 6px 0 0; }
+.act-list { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.act-list .row { gap: 6px; align-items: center; }
+.act-list h4 { margin-bottom: 6px; }
+.act-more { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.act-more .fine { flex-basis: 100%; margin: 0; }
+
+/* The caveat stays a caveat: its first line is always on screen, the rest is
+   there when somebody wants it, and neither pushes the button down the page. */
+.caveat { margin-top: 8px; border-left: 2px solid var(--warn); background: color-mix(in srgb, var(--warn) 8%, transparent); border-radius: 0 5px 5px 0; }
+.caveat summary { padding: 5px 8px; color: var(--warn); cursor: pointer; list-style: none; }
+.caveat summary::-webkit-details-marker { display: none; }
+.caveat summary::after { content: "what that means ›"; display: block; margin-top: 1px; padding-left: 18px; color: var(--dim); font-size: 12px; }
+.caveat[open] summary::after { display: none; }
+.caveat p { margin: 0; padding: 0 8px 8px 26px; color: var(--dim); font-size: 12px; }
