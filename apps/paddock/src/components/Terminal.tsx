@@ -10,11 +10,11 @@
  * The one piece of real terminal behaviour that matters here is the prompt
  * line's states, and they are honest about the machine: a box runs one turn at
  * a time, so a tab whose box is busy elsewhere says so and queues rather than
- * failing. See `lib/tabs.ts`.
+ * failing. See `shared/tabs.ts`.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { blocksForTurn, type Block } from "../lib/acp";
-import type { Tab } from "../lib/tabs";
+import type { Tab } from "../../shared/tabs";
 import type { LogEvent } from "../api/types";
 
 export interface TerminalProps {

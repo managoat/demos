@@ -18,12 +18,18 @@
  *     the agent's rev started before the change and did not get it. Nothing
  *     needs to be stored to know that, and nothing can get it wrong.
  *
+ * It lives in `shared/` rather than `src/lib/` because the server needs the
+ * *same* answer to "is this conversation a tab on that box?" that the client
+ * renders. The guest proxy admits a conversation only if this derivation says
+ * it is a tab, so a second implementation of it would be a hole the day the
+ * two disagreed. One function, both sides.
+ *
  * The other fact this file encodes: **turns on one box serialise.** Fountain
  * answers `sandbox_at_capacity` when a second tab prompts mid-turn. That is
  * ordinary rather than exceptional, so `holder` names the tab that has the
  * machine and the UI queues behind it instead of showing an error.
  */
-import type { Conversation } from "../api/types";
+import type { Conversation } from "../src/api/types";
 
 export const CHANNEL_PREFIX = "paddock";
 

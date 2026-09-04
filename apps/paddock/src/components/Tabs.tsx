@@ -3,7 +3,7 @@
  * another. A tab that is mid-turn shows it, because while it is, the others
  * cannot take one.
  */
-import type { Tab } from "../lib/tabs";
+import type { Tab } from "../../shared/tabs";
 
 export function Tabs({
   tabs,

@@ -24,7 +24,7 @@ import { parseReceipt, decodeFile, type Receipt } from "./lib/protocol";
 import { completeLoginIfCallback, revoke } from "./lib/oauth";
 import { clearSettings, loadSettings, saveSettings, type Settings } from "./lib/settings";
 import { applyPrompt, bootstrapPrompt, reconcilePrompt, RECEIPT_PATH, WORK_ROOT } from "./lib/spec";
-import { canPrompt, channelFor, findBox, holder, nextSlug, opsTab, OPS_SLUG, staleTabs, tabsOf, visibleTabs } from "./lib/tabs";
+import { canPrompt, channelFor, findBox, holder, nextSlug, opsTab, OPS_SLUG, staleTabs, tabsOf, visibleTabs } from "../shared/tabs";
 
 const STREAMS = ["acp", "stdout", "stderr", "stage"];
 /** The tab list carries status; a short poll keeps "who holds the machine" honest. */

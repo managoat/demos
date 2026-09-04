@@ -21,7 +21,7 @@ import { useState } from "react";
 import type { Agent, Environment, Repository, Sandbox, Vault } from "../api/types";
 import type { BoxDrift, DesiredItem, ItemStatus } from "../lib/machine";
 import { needsApply } from "../lib/machine";
-import type { Tab } from "../lib/tabs";
+import type { Tab } from "../../shared/tabs";
 
 export interface MachineProps {
   sandbox: Sandbox | null;

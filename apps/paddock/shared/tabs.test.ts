@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Conversation } from "../api/types";
+import type { Conversation } from "../src/api/types";
 import {
   canPrompt,
   channelFor,

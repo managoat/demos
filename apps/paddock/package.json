@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "mock": "bun mock/server.ts"
+    "mock": "bun mock/server.ts",
+    "server": "STATIC_DIR= DATA_DIR=./data bun --watch server/index.ts",
+    "start": "bun server/index.ts"
   },
   "dependencies": {
     "@managoat/fountain-app": "workspace:*",
