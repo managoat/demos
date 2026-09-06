@@ -53,10 +53,10 @@ test("viewers share in-flight checks and cached reports, then refresh after five
   const token = spyOn(gh, "installationToken").mockResolvedValue("test");
   let now = 1_000_000;
   const clock = spyOn(Date, "now").mockImplementation(() => now);
-  const fetcher = spyOn(globalThis, "fetch").mockImplementation(async input => {
+  const fetcher = spyOn(globalThis, "fetch").mockImplementation(Object.assign(async (input: Parameters<typeof fetch>[0]) => {
     const url = String(input);
     return Response.json(url.includes("/branches/") ? { commit: { sha: "abc" } } : url.includes("check-runs") ? { check_runs: [] } : []);
-  });
+  }, { preconnect: fetch.preconnect }));
   try {
     await Promise.all(Array.from({ length: 20 }, () => gh.checks(1, "o/r", "branch")));
     expect(fetcher).toHaveBeenCalledTimes(3);
@@ -81,7 +81,7 @@ for (const headers of [
     const clock = spyOn(Date, "now").mockImplementation(() => now);
     const fetcher = spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json({ message: "API rate limit exceeded" }, { status: 403, headers }))
-      .mockImplementation(async () => Response.json([]));
+      .mockImplementation(Object.assign(async () => Response.json([]), { preconnect: fetch.preconnect }));
     try {
       await expect(gh.checks(1, "o/r", "a")).rejects.toThrow("rate limit");
       await expect(gh.checks(1, "o/r", "a")).rejects.toThrow("rate limit");
