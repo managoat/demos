@@ -50,6 +50,7 @@ import { visiblePreviewPrompt } from "../../shared/previews";
 import { visibleBrowserPrompt } from "../../shared/browser";
 import type { Person, TurnRecord } from "../../shared/api";
 import type { LogEvent } from "../../shared/fountain-types";
+import { mergeEvents, mergeTurns } from "../lib/transcript";
 import { renderMarkdown } from "../lib/md";
 import { activityOf, describeTool, resultOf, toolDetails, type ToolDetail, type ToolKind } from "../lib/tools";
 import { Chevron, File as FileIcon, Globe, Pencil, Search, Sparkle, Terminal, Wrench, X } from "../lib/icons";
@@ -304,11 +305,11 @@ interface GroupedTurn {
 function group(turns: TurnRecord[], events: LogEvent[], runtime: string): GroupedTurn[] {
   const byTurn = new Map<string, GroupedTurn>();
   const order: string[] = [];
-  for (const t of turns) {
+  for (const t of mergeTurns([], turns)) {
     byTurn.set(t.id, { id: t.id, prompt: t.prompt, events: [] });
     order.push(t.id);
   }
-  for (const ev of events) {
+  for (const ev of mergeEvents([], events)) {
     const id = ev.turn_id || "pending";
     let turn = byTurn.get(id);
     if (!turn) {
@@ -373,25 +374,32 @@ function Turn({
               {who.avatarUrl ? <img src={who.avatarUrl} alt="" /> : <span className="mono">{who.login.slice(0, 1).toUpperCase()}</span>}
               @{who.login}
             </span>
-          ) : null}
+          ) : <span className="said-who">You</span>}
           <div className="turn-you">{text}</div>
         </div>
       ) : null}
-      {blocks.map((block, i) => (
-        <BlockView
-          key={i}
-          block={block}
-          detail={block.kind === "tool" && block.id ? details.get(block.id) : undefined}
-          workdir={workdir}
-          // The caret belongs to the block being written; reasoning stays open
-          // for the whole turn it was part of. Folding it the instant a tool
-          // call starts collapses the thing somebody is mid-sentence through
-          // and moves everything under it up the screen.
-          live={live && i === lastBlock}
-          turnLive={live}
-        />
-      ))}
-      {live ? <Working since={turn.events[0]?.ts ?? null} what={activityOf(blocks, details, workdir)} /> : null}
+      {blocks.length > 0 || live ? (
+        <section className="agent-terminal" aria-label="Agent output">
+          <div className="agent-terminal-label"><Terminal size={12} /><span>agent</span></div>
+          <div className="agent-terminal-output">
+            {blocks.map((block, i) => (
+              <BlockView
+                key={i}
+                block={block}
+                detail={block.kind === "tool" && block.id ? details.get(block.id) : undefined}
+                workdir={workdir}
+                // The caret belongs to the block being written; reasoning stays open
+                // for the whole turn it was part of. Folding it the instant a tool
+                // call starts collapses the thing somebody is mid-sentence through
+                // and moves everything under it up the screen.
+                live={live && i === lastBlock}
+                turnLive={live}
+              />
+            ))}
+            {live ? <Working since={turn.events[0]?.ts ?? null} what={activityOf(blocks, details, workdir)} /> : null}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -446,7 +454,29 @@ function BlockView({
  */
 function Markdown({ body, live }: { body: string; live: boolean }) {
   const html = useMemo(() => renderMarkdown(body), [body]);
-  return <div className={`block-text md${live ? " live" : ""}`} dangerouslySetInnerHTML={{ __html: html }} />;
+  return <div className={`block-text md${live ? " live" : ""}`} onClick={async (event) => {
+    if (!(event.target instanceof Element)) return;
+    const button = event.target.closest<HTMLButtonElement>("button.code-copy");
+    if (!button || button.disabled) return;
+    const code = button.closest(".code-block")?.querySelector("pre code");
+    if (!code) return;
+    button.disabled = true;
+    try {
+      await navigator.clipboard.writeText(code.textContent ?? "");
+      button.textContent = "Copied!";
+      button.setAttribute("aria-label", "Code copied");
+    } catch {
+      button.textContent = "Copy failed";
+      button.setAttribute("aria-label", "Copy failed. Try again");
+    } finally {
+      button.disabled = false;
+      window.setTimeout(() => {
+        if (!button.isConnected) return;
+        button.textContent = "Copy";
+        button.setAttribute("aria-label", "Copy code");
+      }, 2000);
+    }
+  }} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 /**
