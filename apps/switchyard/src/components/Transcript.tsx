@@ -298,6 +298,8 @@ export function Transcript({ trackId, turns, events, runtime, running, head, foo
 interface GroupedTurn {
   id: string;
   prompt: string | null;
+  /** Fountain's own verdict on the turn: `completed`, `failed`, `running`. */
+  status: string | null;
   events: LogEvent[];
 }
 
@@ -315,14 +317,14 @@ function group(turns: TurnRecord[], events: LogEvent[], runtime: string): Groupe
   const byTurn = new Map<string, GroupedTurn>();
   const order: string[] = [];
   for (const t of mergeTurns([], turns)) {
-    byTurn.set(t.id, { id: t.id, prompt: t.prompt, events: [] });
+    byTurn.set(t.id, { id: t.id, prompt: t.prompt, status: t.status, events: [] });
     order.push(t.id);
   }
   for (const ev of mergeEvents([], events)) {
-    const id = ev.turn_id || "pending";
+    const id = turnIdOf(ev) || "pending";
     let turn = byTurn.get(id);
     if (!turn) {
-      turn = { id, prompt: null, events: [] };
+      turn = { id, prompt: null, status: null, events: [] };
       byTurn.set(turn.id, turn);
       order.push(turn.id);
     }
@@ -337,6 +339,28 @@ function group(turns: TurnRecord[], events: LogEvent[], runtime: string): Groupe
 
 function visibleBlock(block: Block): boolean {
   return block.kind === "tool" || block.body.trim().length > 0;
+}
+
+/**
+ * Which turn an event belongs to.
+ *
+ * Output frames carry `turn_id` on the event. Stage frames — `turn started`,
+ * `turn failed`, the ones that say what became of a turn — leave it null and
+ * put the id inside their JSON payload instead. Reading only the column files
+ * every one of them under a trailing group with no prompt above it, which is
+ * how a turn that failed before the runtime said a word renders as nothing at
+ * all: the prompt keeps its bubble, and the reason it never got an answer sits
+ * in a group the reader has no way to connect to it.
+ */
+function turnIdOf(ev: LogEvent): string {
+  if (ev.turn_id) return ev.turn_id;
+  if (ev.kind !== "stage" || typeof ev.data !== "string") return "";
+  try {
+    const payload = JSON.parse(ev.data) as { turn_id?: unknown };
+    return typeof payload.turn_id === "string" ? payload.turn_id : "";
+  } catch {
+    return "";
+  }
 }
 
 function Turn({
@@ -409,8 +433,73 @@ function Turn({
           </div>
         </section>
       ) : null}
+      {turn.status === "failed" ? <Failed reason={failureReason(turn.events)} /> : null}
     </div>
   );
+}
+
+/**
+ * A turn the machine never answered.
+ *
+ * Without this the transcript is honest only about turns that produced bytes:
+ * a turn Fountain marked `failed` before the runtime emitted anything renders
+ * as a prompt with nothing under it, which is indistinguishable from a turn
+ * still being thought about — and the conversation goes back to `idle`, so the
+ * track's own badge says nothing either. A reader looking at that has no way
+ * to learn that the answer is never coming, and the only remedy they can act
+ * on — send it again, or start the track over — is the one they will not try.
+ */
+function Failed({ reason }: { reason: string | null }) {
+  return (
+    <div className="turn-failed">
+      <div className="turn-failed-head">This turn failed on the machine.</div>
+      {reason ? <pre className="turn-failed-why">{reason}</pre> : null}
+    </div>
+  );
+}
+
+/**
+ * Why a turn failed, in the words of whatever refused it.
+ *
+ * Fountain records the reason as its own inspect output, with the runtime's
+ * message quoted inside it — the message being the only part of that term a
+ * reader can do anything with. Pulled out when it is there, and the whole
+ * reason shown when it is not, because a failure with its explanation dropped
+ * on the floor is the state this whole block exists to end.
+ */
+function failureReason(events: LogEvent[]): string | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i]!;
+    if (ev.kind !== "stage" || ev.stage !== "turn" || ev.state !== "failed") continue;
+    let reason = ev.data ?? "";
+    try {
+      const payload = JSON.parse(ev.data ?? "") as { reason?: unknown };
+      if (typeof payload.reason === "string") reason = payload.reason;
+    } catch {
+      // Not JSON: the frame is the reason.
+    }
+    return quotedMessage(reason) ?? (reason.trim() || null);
+  }
+  return null;
+}
+
+/** The first `"message" => "..."` in an inspected term, unescaped. */
+function quotedMessage(reason: string): string | null {
+  const marker = '"message" => "';
+  const at = reason.indexOf(marker);
+  if (at === -1) return null;
+  let out = "";
+  for (let i = at + marker.length; i < reason.length; i++) {
+    const c = reason[i]!;
+    if (c === "\\") {
+      const next = reason[++i];
+      out += next === "n" ? "\n" : (next ?? "");
+      continue;
+    }
+    if (c === '"') break;
+    out += c;
+  }
+  return out.trim() || null;
 }
 
 /**
