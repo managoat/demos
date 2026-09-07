@@ -42,6 +42,16 @@ const STREAMS = ["acp", "stdout", "stderr", "stage"];
 const POLL_MS = 4000;
 
 /**
+ * Whether two polls of the tab strip say the same thing.
+ *
+ * The strip is small — a handful of conversations — so a structural compare
+ * is cheaper than what a spurious re-render costs downstream.
+ */
+function sameConversations(a: readonly Conversation[], b: readonly Conversation[]): boolean {
+  return a.length === b.length && JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
  * Which panel the inspector is showing. `setup` is the owner's only — it is
  * never in the tab strip for anybody else, and the branch that renders it
  * checks again, because a `side` can outlive the role that chose it.
@@ -490,7 +500,15 @@ function Paddock({
   const refreshConversations = useCallback(async () => {
     if (!paddockId) return;
     try {
-      setConversations(await client.listConversations());
+      const next = await client.listConversations();
+      // Keep the array we have when nothing changed. Everything downstream —
+      // the tabs, the active tab, the stream on it — is derived from this
+      // value's identity, and a fresh array every four seconds made all of it
+      // look new: the tab strip re-derived, and the active tab's stream was
+      // torn down and reopened on every poll, replaying its history each time.
+      // That replay is where ~7,000 stream opens and ~13,000 receipt reads an
+      // hour against production came from (2026-09-07).
+      setConversations((cur) => (sameConversations(cur, next) ? cur : next));
     } catch (err) {
       // A poll that misses is not worth interrupting anybody over — the next
       // one will do — but it is worth *saying*. An empty catch here hid two
@@ -502,9 +520,19 @@ function Paddock({
 
   useEffect(() => {
     if (!paddockId) return;
-    void refreshConversations();
-    const t = window.setInterval(() => void refreshConversations(), POLL_MS);
-    return () => window.clearInterval(t);
+    // A background tab is not looking at the strip, and the paddock's own
+    // stream still tells it when something happens. It catches up the moment
+    // somebody looks again.
+    const poll = () => {
+      if (!document.hidden) void refreshConversations();
+    };
+    poll();
+    const t = window.setInterval(poll, POLL_MS);
+    document.addEventListener("visibilitychange", poll);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", poll);
+    };
   }, [paddockId, refreshConversations]);
 
   /**
@@ -679,21 +707,39 @@ function Paddock({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity?.agent.id]);
 
+  /**
+   * Whether the last receipt read found the box parked.
+   *
+   * A parked machine answers 409 `sandbox_not_ready` and will go on answering
+   * it until a turn wakes it, so reading again before then is a request that
+   * cannot succeed. The flag clears when a turn ends — the one event that
+   * means the box is awake — and the read is made then.
+   */
+  const receiptParked = useRef(false);
+
   /** The receipt: free to read, and it does not wake a parked box. */
-  const readReceipt = useCallback(async () => {
-    if (!boxId) return;
-    try {
-      const file = await client.readFile(boxId, RECEIPT_PATH);
-      setReceipt(parseReceipt(decodeFile(file)));
-    } catch {
-      setReceipt(null); // missing is the common case, and it is not an error
-    } finally {
-      setReceiptRead(true);
-    }
-  }, [client, boxId]);
+  const readReceipt = useCallback(
+    async (opts: { woke?: boolean } = {}) => {
+      if (!boxId) return;
+      if (opts.woke) receiptParked.current = false;
+      else if (receiptParked.current) return;
+      try {
+        const file = await client.readFile(boxId, RECEIPT_PATH);
+        receiptParked.current = false;
+        setReceipt(parseReceipt(decodeFile(file)));
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409) receiptParked.current = true;
+        setReceipt(null); // missing is the common case, and it is not an error
+      } finally {
+        setReceiptRead(true);
+      }
+    },
+    [client, boxId],
+  );
 
   useEffect(() => {
     if (!boxId) return;
+    receiptParked.current = false;
     void readReceipt();
     void client.getSandbox(boxId).then(setSandbox).catch(() => undefined);
   }, [boxId, client, readReceipt]);
@@ -762,20 +808,33 @@ function Paddock({
     void loadEvents(id);
   }, [active, loadedTabs, loadEvents]);
 
+  /**
+   * The newest event id seen on each tab's stream, kept across reconnects.
+   *
+   * It used to be a local of the effect below, so every time the effect
+   * re-ran the stream came back with no `Last-Event-ID` and Fountain replayed
+   * the tab's whole history — and every replayed turn boundary re-read the
+   * receipt and the strip. Held here, a reconnect resumes where it left off.
+   */
+  const lastEventIds = useRef<Record<string, string>>({});
+  // The stream is keyed by the *id* of the active tab, not the tab object:
+  // `tabsOf` builds fresh objects from every poll, and an effect keyed on one
+  // of those reconnected on every poll.
+  const activeId = active?.conversation.id ?? null;
+
   // The active tab's live tail. Phase 1 used Fountain's account-wide stream,
   // which cannot be shared: it carries every conversation on the owner's key.
   useEffect(() => {
-    if (!active) return;
-    const conversationId = active.conversation.id;
+    if (!activeId) return;
+    const conversationId = activeId;
     const ctrl = new AbortController();
     let stopped = false;
-    let lastEventId: string | null = null;
     let backoff = 1000;
 
     const run = () => {
       void client.streamConversation({
         conversationId,
-        lastEventId,
+        lastEventId: lastEventIds.current[conversationId] ?? null,
         streams: STREAMS,
         signal: ctrl.signal,
         onOpen: () => {
@@ -787,7 +846,7 @@ function Paddock({
           void loadEvents(conversationId);
         },
         onMessage: (msg) => {
-          if (msg.id) lastEventId = msg.id;
+          if (msg.id) lastEventIds.current[conversationId] = msg.id;
           let ev: LogEvent;
           try {
             ev = JSON.parse(msg.data) as LogEvent;
@@ -801,7 +860,9 @@ function Paddock({
           });
           if (ev.kind === "stage" && ev.stage === "turn" && ev.state !== "started") {
             void refreshConversations();
-            void readReceipt();
+            // A turn just ended on this box, so it is awake: the one moment a
+            // parked machine's receipt is worth asking for again.
+            void readReceipt({ woke: true });
           }
         },
         onClose: () => {
@@ -816,7 +877,7 @@ function Paddock({
       stopped = true;
       ctrl.abort();
     };
-  }, [client, active, refreshConversations, readReceipt, loadEvents]);
+  }, [client, activeId, refreshConversations, readReceipt, loadEvents]);
 
   // The paddock's own channel: who is here, and when somebody else acts.
   useEffect(() => {
