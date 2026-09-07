@@ -5,6 +5,7 @@
  * Same origin, cookie-authenticated, no key anywhere near the browser.
  */
 import { readSse, type SseMessage } from "../lib/sse";
+import { BUILD_HEADER, buildHeaders, noteServerBuild } from "../lib/build";
 import type { SkillHit } from "../lib/skills";
 
 export type Role = "owner" | "member" | "guest";
@@ -108,7 +109,7 @@ export class PaddockError extends Error {
 }
 
 export const paddock = {
-  config: () => call<{ fountainUrl: string; anonymousStart: boolean }>("GET", "/api/config"),
+  config: () => call<{ fountainUrl: string; anonymousStart: boolean; buildId: string }>("GET", "/api/config"),
   me: () => call<Me>("GET", "/api/me"),
 
   /**
@@ -182,9 +183,10 @@ export const paddock = {
 };
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = { accept: "application/json" };
+  const headers: Record<string, string> = { accept: "application/json", ...buildHeaders() };
   if (body !== undefined) headers["content-type"] = "application/json";
   const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  noteServerBuild(res.headers.get(BUILD_HEADER));
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   let parsed: unknown = null;

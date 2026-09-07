@@ -35,7 +35,7 @@ export function config(ctx: AppContext): Response {
   // `anonymousStart` is what tells the SPA whether to start a computer or show
   // the sign-in screen. It is a capability of the deployment, not of the
   // caller, which is why it sits on the unauthenticated config route.
-  return json({ fountainUrl: ctx.config.fountainUrl, anonymousStart: ctx.config.anonymousStart });
+  return json({ fountainUrl: ctx.config.fountainUrl, anonymousStart: ctx.config.anonymousStart, buildId: ctx.buildId ?? null });
 }
 
 /**

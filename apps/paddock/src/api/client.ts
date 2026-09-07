@@ -35,7 +35,8 @@ import type {
   SecretKey,
   Vault,
 } from "./types";
-import { readSse, type SseMessage } from "../lib/sse";
+import { SseParser, type SseMessage } from "../lib/sse";
+import { BUILD_HEADER, buildHeaders, noteServerBuild } from "../lib/build";
 
 export class ApiError extends Error {
   constructor(
@@ -270,10 +271,14 @@ export class FountainClient {
     return this.json<void>("POST", `/api/conversations/${conversationId}/read`);
   }
 
-  /** Every event of one tab on the given streams, oldest first, paging until drained. */
-  async listAllEvents(conversationId: string, streams: string[]): Promise<LogEvent[]> {
+  /**
+   * Every event of one tab on the given streams, oldest first, paging until
+   * drained — or, with `after`, only the ones newer than an id already held,
+   * which is what a reconnecting stream asks for so a reconnect costs the gap
+   * rather than the history.
+   */
+  async listAllEvents(conversationId: string, streams: string[], after: number | null = null): Promise<LogEvent[]> {
     const out: LogEvent[] = [];
-    let after: number | null = null;
     for (;;) {
       const qs = new URLSearchParams({ limit: "1000", streams: streams.join(","), blocks: "true" });
       if (after !== null) qs.set("after", String(after));
@@ -320,7 +325,7 @@ export class FountainClient {
    * means parsing it. One connection per tab, scoped by the proxy to a tab
    * that is genuinely on this machine, is the honest version.
    */
-  streamConversation(opts: {
+  async streamConversation(opts: {
     conversationId: string;
     lastEventId: string | null;
     streams: string[];
@@ -330,19 +335,56 @@ export class FountainClient {
     onClose: (err?: unknown) => void;
   }): Promise<void> {
     const qs = new URLSearchParams({ streams: opts.streams.join(","), blocks: "true" });
-    return readSse(`${this.baseUrl}/api/conversations/${encodeURIComponent(opts.conversationId)}/stream?${qs}`, {
-      lastEventId: opts.lastEventId,
-      signal: opts.signal,
-      onMessage: opts.onMessage,
-      onOpen: opts.onOpen,
-      onClose: opts.onClose,
-    });
+    // The open is made here rather than by the suite's `readSse`, because a
+    // refusal has to reach the caller as an `ApiError` with its status and
+    // `Retry-After`: a 429 on the stream is the server saying when to come
+    // back, and a reader that reports it as "the stream closed" leaves the
+    // reconnect loop to guess. The read loop below is the suite's, verbatim.
+    const headers: Record<string, string> = { accept: "text/event-stream", ...buildHeaders() };
+    if (opts.lastEventId) headers["last-event-id"] = opts.lastEventId;
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}/api/conversations/${encodeURIComponent(opts.conversationId)}/stream?${qs}`, { headers, signal: opts.signal });
+    } catch (err) {
+      if (opts.signal.aborted) return;
+      opts.onClose(err);
+      return;
+    }
+    noteServerBuild(res.headers.get(BUILD_HEADER));
+    if (!res.ok || !res.body) {
+      const ra = res.headers.get("retry-after");
+      let code: string | null = null;
+      try {
+        const body = (await res.json()) as { error?: unknown };
+        if (typeof body.error === "string") code = body.error;
+      } catch {
+        /* not JSON, or no body — the status is the message */
+      }
+      opts.onClose(new ApiError(res.status, code, `stream ${res.status}`, ra ? Number(ra) : null));
+      return;
+    }
+
+    opts.onOpen?.();
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    const parser = new SseParser();
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+        for (const msg of parser.push(text)) opts.onMessage(msg);
+      }
+      if (!opts.signal.aborted) opts.onClose();
+    } catch (err) {
+      if (!opts.signal.aborted) opts.onClose(err);
+    }
   }
 
   // ── plumbing ──────────────────────────────────────────────────────────────
 
   private async json<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
-    const headers: Record<string, string> = { accept: "application/json" };
+    const headers: Record<string, string> = { accept: "application/json", ...buildHeaders() };
     if (body !== undefined) headers["content-type"] = "application/json";
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
@@ -350,6 +392,8 @@ export class FountainClient {
       body: body === undefined ? undefined : JSON.stringify(body),
       signal,
     });
+    // A tab left open across a deploy learns about it here and reloads.
+    noteServerBuild(res.headers.get(BUILD_HEADER));
     if (res.status === 204) return undefined as T;
     const text = await res.text();
     let parsed: unknown = null;

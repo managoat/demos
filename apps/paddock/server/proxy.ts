@@ -54,6 +54,7 @@ import { HttpError, readJson, str } from "./http";
 import { withPromptLock } from "./prompt-lock";
 import { hub } from "./hub";
 import { agentHint, cached, forget, keyFor, rememberAgent } from "./machine-cache";
+import { BUILD_HEADER } from "./app";
 
 /** What a role may do to one tab. Anything absent is a 404. */
 function tabAllowed(method: string, sub: string, role: Role, claimed: boolean): boolean {
@@ -135,6 +136,17 @@ export async function handleProxy(ctx: AppContext, req: Request, paddockId: stri
   // Filtered, always. The owner's raw conversation list would show a guest
   // every other conversation on the account, which is nobody's business here.
   if (method === "GET" && path === "/api/conversations") {
+    // The strip is what every tab polls, so it is where a tab running an
+    // older build is turned away. A current build reloads on the mismatch it
+    // sees in the response header; an older one, which knows nothing of
+    // builds, logs a failed poll and keeps the strip it has — and, crucially,
+    // stops. The bundle this replaced reopened its stream on every successful
+    // poll and replayed the tab's history each time, and a server fix that
+    // made the poll faster made that loop faster; refusing the poll is the
+    // one lever the server has over a tab nobody is going to find and reload.
+    if (ctx.buildId && req.headers.get(BUILD_HEADER) !== ctx.buildId) {
+      throw new HttpError(409, "stale_client", "This tab is running an older paddock. Reload the page.");
+    }
     const tabs = await visibleTabs(client, here, allowed);
     return jsonRes({ data: tabs.map((t) => t.conversation) });
   }

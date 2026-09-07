@@ -28,6 +28,13 @@ export interface AppContext {
   db: Db;
   cipher: Cipher;
   config: Config;
+  /**
+   * Which build this server is, stamped on every response and into the HTML
+   * it serves so a tab left open across a deploy notices and reloads (see
+   * `src/lib/build.ts`). Absent means unstamped — the dev server, and tests
+   * that do not care.
+   */
+  buildId?: string;
 }
 
 /**
