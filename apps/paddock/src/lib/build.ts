@@ -14,8 +14,8 @@
  * otherwise teach an old bundle the new id and it would never reload.
  *
  * `null` means "not stamped" — the vite dev server serves no meta tag and the
- * mock server sends no header — and a tab that does not know its build never
- * reloads over it.
+ * mock server sends no header. A tab with no stamp adopts the first build a
+ * response names, and a tab that never hears one never reloads.
  */
 
 export const BUILD_HEADER = "x-paddock-build";
@@ -39,7 +39,15 @@ export function myBuild(): string | null {
  * ignored.
  */
 export function noteServerBuild(theirs: string | null, reload: () => void = () => window.location.reload()): boolean {
-  const ours = myBuild();
+  let ours = myBuild();
+  // A tab whose HTML carried no stamp adopts the first build it hears from,
+  // so it is never left permanently refused by a server that stamps. The one
+  // thing that buys is worse than a stamp — a deploy landing in the sub-second
+  // between the HTML and this first answer would leave the tab not reloading
+  // until the deploy after — and far better than the alternative, which #69
+  // shipped: a strip that answers 409 to a current bundle for as long as the
+  // tab is open.
+  if (!ours && theirs) mine = ours = theirs;
   if (!ours || !theirs || theirs === ours || reloading) return false;
   reloading = true;
   reload();

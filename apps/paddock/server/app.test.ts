@@ -348,8 +348,14 @@ describe("a tab running an older build", () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "index.html"), "<!doctype html><html><head><title>p</title></head><body></body></html>");
     ctx.config = { ...ctx.config, staticDir: dir };
-    const html = await (await call(null, "GET", "/anything")).text();
-    expect(html).toContain(`<head><meta name="paddock-build" content="${BUILD}">`);
+    // However the shell is reached: the root, by name, or a client-side route.
+    // #69 stamped only the last, and a tab loaded from `/` — which is every
+    // tab — did not know its build and was turned away from the strip.
+    for (const path of ["/", "/index.html", "/anything"]) {
+      const res = await call(null, "GET", path);
+      expect(res.headers.get("content-type")).toContain("text/html");
+      expect(await res.text()).toContain(`<head><meta name="paddock-build" content="${BUILD}">`);
+    }
     rmSync(dir, { recursive: true, force: true });
   });
 });

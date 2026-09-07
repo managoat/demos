@@ -159,8 +159,14 @@ async function serveStatic(ctx: AppContext, path: string): Promise<Response> {
   const rel = path === "/" ? "index.html" : path.replace(/^\/+/, "");
   // No traversal out of the bundle.
   if (rel.includes("..")) return json({ error: "not_found" }, 404);
-  const file = Bun.file(`${ctx.config.staticDir}/${rel}`);
-  if (await file.exists()) return new Response(file);
+  // The shell itself is never served as a bare file: `/` and `/index.html`
+  // go through `indexHtml` like every client-side route, so the build stamp is
+  // on it however it was reached. (#69 stamped only the fallback, so a tab
+  // loaded from `/` did not know its build and was turned away from the strip.)
+  if (rel !== "index.html") {
+    const file = Bun.file(`${ctx.config.staticDir}/${rel}`);
+    if (await file.exists()) return new Response(file);
+  }
   const html = await indexHtml(ctx);
   if (html !== null) return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
   return json({ error: "not_found" }, 404);
