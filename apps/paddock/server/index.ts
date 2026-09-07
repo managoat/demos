@@ -11,9 +11,22 @@ const ctx: AppContext = {
   config,
   db: new Db(config.dbPath),
   cipher: await Cipher.from(config.secret),
+  buildId: await buildIdOf(config.staticDir),
 };
 
 const fetch = buildRouter(ctx);
+
+/**
+ * The build id is the built HTML's hash. Vite writes the bundle's content
+ * hashes into `index.html`, so any change to the client changes this, and a
+ * server-only change does not make every open tab reload for nothing.
+ */
+async function buildIdOf(staticDir: string | null): Promise<string | undefined> {
+  if (!staticDir) return undefined;
+  const index = Bun.file(`${staticDir}/index.html`);
+  if (!(await index.exists())) return undefined;
+  return Bun.hash(await index.text()).toString(36);
+}
 
 Bun.serve({ port: config.port, fetch, idleTimeout: 0 });
 

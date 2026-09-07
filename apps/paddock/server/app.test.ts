@@ -176,7 +176,7 @@ beforeEach(async () => {
     }),
     dbPath: ":memory:",
   };
-  ctx = { config, db: new Db(":memory:"), cipher: await Cipher.from(config.secret) };
+  ctx = { config, db: new Db(":memory:"), cipher: await Cipher.from(config.secret), buildId: BUILD };
   route = buildRouter(ctx);
   upstream = [];
   hub.reset();
@@ -264,9 +264,13 @@ async function guestSession(paddockId: string, conversationId = "c1"): Promise<s
   return `paddock_session=${encodeURIComponent(token)}`;
 }
 
-function call(cookie: string | null, method: string, path: string, body?: unknown): Promise<Response> {
+/** The build id this fake server is, and what a current tab sends. */
+const BUILD = "build-1";
+
+function call(cookie: string | null, method: string, path: string, body?: unknown, build: string | null = BUILD): Promise<Response> {
   const headers: Record<string, string> = {};
   if (cookie) headers.cookie = cookie;
+  if (build) headers["x-paddock-build"] = build;
   if (body !== undefined) headers["content-type"] = "application/json";
   return route(new Request(`http://paddock.test${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }));
 }
@@ -304,6 +308,51 @@ async function addComputer(cookie: string, name?: string): Promise<string> {
   expect(res.status).toBe(201);
   return ((await res.json()) as { data: { id: string } }).data.id;
 }
+
+describe("a tab running an older build", () => {
+  test("every answer names the build, refusals included", async () => {
+    const owner = await paddockFor(OWNER);
+    expect((await call(owner.cookie, "GET", `/f/${owner.id}/api/conversations`)).headers.get("x-paddock-build")).toBe(BUILD);
+    expect((await call(owner.cookie, "GET", "/api/config")).headers.get("x-paddock-build")).toBe(BUILD);
+    expect((await call(null, "GET", "/api/nope")).headers.get("x-paddock-build")).toBe(BUILD);
+    const cfg = (await (await call(null, "GET", "/api/config")).json()) as { buildId: string };
+    expect(cfg.buildId).toBe(BUILD);
+  });
+
+  test("is turned away from the strip, and nowhere else", async () => {
+    const owner = await paddockFor(OWNER);
+    for (const stale of [null, "build-0"]) {
+      const res = await call(owner.cookie, "GET", `/f/${owner.id}/api/conversations`, undefined, stale);
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { error: string }).error).toBe("stale_client");
+      // The rest of the machine still works for it: the tab it is on, the
+      // files, a prompt. Refusing those would break the tab harder than the
+      // loop being stopped ever did.
+      expect((await call(owner.cookie, "GET", `/f/${owner.id}/api/conversations/c1`, undefined, stale)).status).toBe(200);
+      expect((await call(owner.cookie, "GET", `/f/${owner.id}/api/sandboxes/${BOX}/files?path=/`, undefined, stale)).status).toBe(200);
+      expect((await call(owner.cookie, "POST", `/f/${owner.id}/api/conversations/c1/prompts`, { prompt: "hi" }, stale)).status).toBe(200);
+    }
+  });
+
+  test("an unstamped server turns nobody away", async () => {
+    ctx.buildId = undefined;
+    const owner = await paddockFor(OWNER);
+    const res = await call(owner.cookie, "GET", `/f/${owner.id}/api/conversations`, undefined, null);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-paddock-build")).toBeNull();
+  });
+
+  test("the HTML it serves carries the build it belongs to", async () => {
+    const dir = join(tmpdir(), `paddock-static-${randomToken(6)}`);
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "index.html"), "<!doctype html><html><head><title>p</title></head><body></body></html>");
+    ctx.config = { ...ctx.config, staticDir: dir };
+    const html = await (await call(null, "GET", "/anything")).text();
+    expect(html).toContain(`<head><meta name="paddock-build" content="${BUILD}">`);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
 
 describe("one Fountain call per burst", () => {
   const lists = () => upstream.filter((u) => u.method === "GET" && u.path === "/api/conversations");

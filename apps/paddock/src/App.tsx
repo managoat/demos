@@ -35,6 +35,8 @@ import { parseReceipt, decodeFile, type Receipt } from "./lib/protocol";
 import { completeLoginIfCallback } from "./lib/oauth";
 import { describePaddockError, paddock, type Me, type PaddockDto, type Reachable, type Role, type TabPeopleDto } from "./api/paddock";
 import { applyPrompt, bootstrapPrompt, reconcilePrompt, welcomePrompt, RECEIPT_PATH, WORK_ROOT } from "../shared/spec";
+import { Hold } from "./lib/hold";
+import { startTail } from "./lib/tail";
 import { canPrompt, channelFor, findBox, holder, nextSlug, opsTab, OPS_SLUG, staleTabs, tabsOf, visibleTabs } from "../shared/tabs";
 
 const STREAMS = ["acp", "stdout", "stderr", "stage"];
@@ -345,6 +347,12 @@ function Paddock({
   /** Which paddock the boot effect has already run for. See the effect. */
   const bootedRef = useRef<string | null | undefined>(undefined);
   const client = useMemo(() => new FountainClient(`/f/${paddockId ?? "none"}`), [paddockId]);
+  /**
+   * The one pause every Fountain-bound loop here shares. A 429 from Fountain
+   * names how long to wait; the poll, the receipt, the scrollback and the
+   * stream all check this before going, so one refusal quiets all of them.
+   */
+  const hold = useMemo(() => new Hold(), []);
   const role = me.role;
   const isOwner = role === "owner";
   /**
@@ -498,7 +506,7 @@ function Paddock({
   // No agent filter and no identity gate: the proxy already returns exactly
   // this machine's tabs, to everybody in the paddock.
   const refreshConversations = useCallback(async () => {
-    if (!paddockId) return;
+    if (!paddockId || hold.active()) return;
     try {
       const next = await client.listConversations();
       // Keep the array we have when nothing changed. Everything downstream —
@@ -510,13 +518,14 @@ function Paddock({
       // hour against production came from (2026-09-07).
       setConversations((cur) => (sameConversations(cur, next) ? cur : next));
     } catch (err) {
+      hold.note(err);
       // A poll that misses is not worth interrupting anybody over — the next
       // one will do — but it is worth *saying*. An empty catch here hid two
       // bugs in a row, both of which looked like the app being stuck rather
       // than the app failing.
       console.error("paddock: could not list tabs —", describeError(err));
     }
-  }, [client, paddockId]);
+  }, [client, paddockId, hold]);
 
   useEffect(() => {
     if (!paddockId) return;
@@ -720,7 +729,7 @@ function Paddock({
   /** The receipt: free to read, and it does not wake a parked box. */
   const readReceipt = useCallback(
     async (opts: { woke?: boolean } = {}) => {
-      if (!boxId) return;
+      if (!boxId || hold.active()) return;
       if (opts.woke) receiptParked.current = false;
       else if (receiptParked.current) return;
       try {
@@ -728,13 +737,14 @@ function Paddock({
         receiptParked.current = false;
         setReceipt(parseReceipt(decodeFile(file)));
       } catch (err) {
+        hold.note(err);
         if (err instanceof ApiError && err.status === 409) receiptParked.current = true;
         setReceipt(null); // missing is the common case, and it is not an error
       } finally {
         setReceiptRead(true);
       }
     },
-    [client, boxId],
+    [client, boxId, hold],
   );
 
   useEffect(() => {
@@ -786,19 +796,21 @@ function Paddock({
    * between. Union by event id, oldest first, so calling this twice is free.
    */
   const loadEvents = useCallback(
-    async (conversationId: string) => {
+    async (conversationId: string, after: number | null = null) => {
+      if (hold.active()) return;
       try {
-        const history = await client.listAllEvents(conversationId, STREAMS);
+        const history = await client.listAllEvents(conversationId, STREAMS, after);
         setEvents((m) => {
           const seen = new Set(history.map((e) => e.id));
           const live = (m[conversationId] ?? []).filter((e) => !seen.has(e.id));
-          return { ...m, [conversationId]: [...history, ...live].sort((a, b) => a.id - b.id) };
+          return { ...m, [conversationId]: [...live, ...history].sort((a, b) => a.id - b.id) };
         });
-      } catch {
+      } catch (err) {
+        hold.note(err);
         /* the stream is the other half of this; a missed fetch is not fatal */
       }
     },
-    [client],
+    [client, hold],
   );
 
   useEffect(() => {
@@ -811,7 +823,7 @@ function Paddock({
   /**
    * The newest event id seen on each tab's stream, kept across reconnects.
    *
-   * It used to be a local of the effect below, so every time the effect
+   * It used to be a local of the stream effect, so every time the effect
    * re-ran the stream came back with no `Last-Event-ID` and Fountain replayed
    * the tab's whole history — and every replayed turn boundary re-read the
    * receipt and the strip. Held here, a reconnect resumes where it left off.
@@ -821,63 +833,44 @@ function Paddock({
   // `tabsOf` builds fresh objects from every poll, and an effect keyed on one
   // of those reconnected on every poll.
   const activeId = active?.conversation.id ?? null;
+  // What the tail calls back into, read at call time. The three callbacks are
+  // stable today, but a dependency on them is a promise that they stay so, and
+  // the cost of one of them changing identity is the loop this replaced — so
+  // the effect depends on none of them.
+  const latest = useRef({ refreshConversations, readReceipt, loadEvents });
+  latest.current = { refreshConversations, readReceipt, loadEvents };
 
-  // The active tab's live tail. Phase 1 used Fountain's account-wide stream,
-  // which cannot be shared: it carries every conversation on the owner's key.
+  // The active tab's live tail (`lib/tail.ts`). Phase 1 used Fountain's
+  // account-wide stream, which cannot be shared: it carries every
+  // conversation on the owner's key.
   useEffect(() => {
     if (!activeId) return;
     const conversationId = activeId;
-    const ctrl = new AbortController();
-    let stopped = false;
-    let backoff = 1000;
-
-    const run = () => {
-      void client.streamConversation({
-        conversationId,
-        lastEventId: lastEventIds.current[conversationId] ?? null,
-        streams: STREAMS,
-        signal: ctrl.signal,
-        onOpen: () => {
-          backoff = 1000;
-          // Whatever happened before this connection existed. The first turn
-          // of a brand-new machine starts the instant the conversation does,
-          // which is before any of this is listening — that turn was invisible
-          // until a reload, and so would anything missed by a dropped stream.
-          void loadEvents(conversationId);
-        },
-        onMessage: (msg) => {
-          if (msg.id) lastEventIds.current[conversationId] = msg.id;
-          let ev: LogEvent;
-          try {
-            ev = JSON.parse(msg.data) as LogEvent;
-          } catch {
-            return;
-          }
-          if (msg.id) ev.id = Number(msg.id);
-          setEvents((m) => {
-            const list = m[conversationId] ?? [];
-            return list.some((e) => e.id === ev.id) ? m : { ...m, [conversationId]: [...list, ev] };
-          });
-          if (ev.kind === "stage" && ev.stage === "turn" && ev.state !== "started") {
-            void refreshConversations();
-            // A turn just ended on this box, so it is awake: the one moment a
-            // parked machine's receipt is worth asking for again.
-            void readReceipt({ woke: true });
-          }
-        },
-        onClose: () => {
-          if (stopped) return;
-          window.setTimeout(run, backoff);
-          backoff = Math.min(backoff * 2, 15000);
-        },
-      });
-    };
-    run();
-    return () => {
-      stopped = true;
-      ctrl.abort();
-    };
-  }, [client, activeId, refreshConversations, readReceipt, loadEvents]);
+    const tail = startTail({
+      conversationId,
+      client,
+      streams: STREAMS,
+      lastEventIds: lastEventIds.current,
+      hold,
+      // Whatever happened before this connection existed — or, on a reconnect,
+      // since the last event it saw. The first turn of a brand-new machine
+      // starts the instant the conversation does, which is before any of this
+      // is listening.
+      onOpen: (after) => void latest.current.loadEvents(conversationId, after),
+      onEvent: (ev) =>
+        setEvents((m) => {
+          const list = m[conversationId] ?? [];
+          return list.some((e) => e.id === ev.id) ? m : { ...m, [conversationId]: [...list, ev] };
+        }),
+      onTurnEnded: () => {
+        void latest.current.refreshConversations();
+        // A turn just ended on this box, so it is awake: the one moment a
+        // parked machine's receipt is worth asking for again.
+        void latest.current.readReceipt({ woke: true });
+      },
+    });
+    return () => tail.stop();
+  }, [client, activeId, hold]);
 
   // The paddock's own channel: who is here, and when somebody else acts.
   useEffect(() => {

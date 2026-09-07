@@ -97,7 +97,7 @@ export function buildRouter(ctx: AppContext): (req: Request) => Promise<Response
     return handleProxy(ctx, req, p.id!, "/" + (p.rest ?? ""), id);
   });
 
-  return async (req: Request): Promise<Response> => {
+  const dispatch = async (req: Request): Promise<Response> => {
     const url = new URL(req.url);
     const path = url.pathname;
     try {
@@ -115,7 +115,26 @@ export function buildRouter(ctx: AppContext): (req: Request) => Promise<Response
       return errorResponse(err);
     }
   };
+
+  // Every answer says which build gave it, so a tab running an older one can
+  // tell (`src/lib/build.ts`). Errors and streams included: the first answer
+  // an old tab gets after a deploy is as likely to be a refusal as anything.
+  return async (req: Request): Promise<Response> => {
+    const res = await dispatch(req);
+    if (ctx.buildId) {
+      try {
+        res.headers.set(BUILD_HEADER, ctx.buildId);
+      } catch {
+        // An immutable header set (a response handed straight through from
+        // fetch). The next answer will carry it.
+      }
+    }
+    return res;
+  };
 }
+
+/** The request header a browser sends naming the build it is running. */
+export const BUILD_HEADER = "x-paddock-build";
 
 /** `:name` captures a segment; a trailing `*` captures the rest as `rest`. */
 function match(pattern: string[], segments: string[]): Record<string, string> | null {
@@ -142,7 +161,33 @@ async function serveStatic(ctx: AppContext, path: string): Promise<Response> {
   if (rel.includes("..")) return json({ error: "not_found" }, 404);
   const file = Bun.file(`${ctx.config.staticDir}/${rel}`);
   if (await file.exists()) return new Response(file);
-  const index = Bun.file(`${ctx.config.staticDir}/index.html`);
-  if (await index.exists()) return new Response(index, { headers: { "content-type": "text/html; charset=utf-8" } });
+  const html = await indexHtml(ctx);
+  if (html !== null) return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
   return json({ error: "not_found" }, 404);
+}
+
+let indexCache: { dir: string | null; buildId: string | undefined; html: string | null } | null = null;
+
+/**
+ * The SPA's shell, stamped with the build it belongs to.
+ *
+ * The bundle learns its own build id from this tag rather than from its first
+ * API answer, because a deploy that lands between the HTML and that first call
+ * would otherwise teach an old bundle the new id — and it would never reload.
+ * Read once; the file does not change under a running server.
+ */
+async function indexHtml(ctx: AppContext): Promise<string | null> {
+  const dir = ctx.config.staticDir;
+  if (indexCache && indexCache.dir === dir && indexCache.buildId === ctx.buildId) return indexCache.html;
+  const index = Bun.file(`${dir}/index.html`);
+  let html: string | null = null;
+  if (await index.exists()) {
+    html = await index.text();
+    if (ctx.buildId) {
+      const tag = `<meta name="paddock-build" content="${ctx.buildId}">`;
+      html = html.includes("<head>") ? html.replace("<head>", `<head>${tag}`) : `${tag}${html}`;
+    }
+  }
+  indexCache = { dir, buildId: ctx.buildId, html };
+  return html;
 }
