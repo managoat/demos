@@ -53,6 +53,7 @@ import { asHttpError, type ConversationSummary, type FountainClient } from "./fo
 import { HttpError, readJson, str } from "./http";
 import { withPromptLock } from "./prompt-lock";
 import { hub } from "./hub";
+import { agentHint, cached, forget, keyFor, rememberAgent } from "./machine-cache";
 
 /** What a role may do to one tab. Anything absent is a 404. */
 function tabAllowed(method: string, sub: string, role: Role, claimed: boolean): boolean {
@@ -157,7 +158,11 @@ export async function handleProxy(ctx: AppContext, req: Request, paddockId: stri
     if (!tab) throw new HttpError(404, "not_found", "No such tab on this machine.");
     if (!tabAllowed(method, sub, role, claimed)) throw new HttpError(404, "not_found");
     if (method === "POST" && sub === "/prompts") return prompt(ctx, req, paddock, client, tab, id);
-    return forward(client, req, method, `/api/conversations/${encodeURIComponent(conversationId)}${sub}${url.search}`, method === "POST" ? "{}" : null);
+    const res = await forward(client, req, method, `/api/conversations/${encodeURIComponent(conversationId)}${sub}${url.search}`, method === "POST" ? "{}" : null);
+    // Ending a tab changes which conversations are live on the box, which is
+    // exactly the answer `machineOf` has memoised.
+    if (sub === "/terminate" && res.ok) forget(paddock.id);
+    return res;
   }
 
   // ── reading the machine ─────────────────────────────────────────────────
@@ -224,14 +229,31 @@ export interface Here {
  * gives both, exactly as the client's `findBox` does from the other side.
  * Nothing is stored, so nothing goes stale, and an account with four machines
  * needs no more state than an account with one.
+ *
+ * Memoised for a few seconds per paddock and credential (`machine-cache.ts`),
+ * because every proxied request asks this and the list it reads is the whole
+ * account. Once the machine's agent is known the list is narrowed to that
+ * agent — `tabsOf` keeps only that agent's conversations anyway, so nothing
+ * is lost — and only when the narrowed list shows no live machine is the
+ * whole account read again, which is what a rebuild onto a fresh agent looks
+ * like from here.
  */
-async function machineOf(
-  client: FountainClient,
-  here: Here,
-): Promise<{ agentId: string; sandboxId: string; environmentId: string | null; vaultId: string | null; all: ConversationSummary[] } | null> {
+type Machine = { agentId: string; sandboxId: string; environmentId: string | null; vaultId: string | null; all: ConversationSummary[] };
+
+function machineOf(client: FountainClient, here: Here): Promise<Machine | null> {
+  return cached(keyFor(here.id, client.credentialId), async () => {
+    const hint = agentHint(here.id);
+    let found = await readMachine(client, here, hint);
+    if (!found && hint) found = await readMachine(client, here, undefined);
+    if (found) rememberAgent(here.id, found.agentId);
+    return found;
+  });
+}
+
+async function readMachine(client: FountainClient, here: Here, agentId: string | undefined): Promise<Machine | null> {
   let all: ConversationSummary[];
   try {
-    all = await client.listConversations();
+    all = await client.listConversations(agentId);
   } catch (err) {
     throw asHttpError(err, "find this machine");
   }
@@ -333,7 +355,9 @@ async function newConversation(
   if (!machine) {
     // First run: forwarded as the client built it, so the persistent-mode and
     // environment/vault choices stay in one place (shared/spec + identity).
-    return forward(client, req, "POST", "/api/conversations", JSON.stringify(body));
+    const res = await forward(client, req, "POST", "/api/conversations", JSON.stringify(body));
+    if (res.ok) forget(paddock.id);
+    return res;
   }
 
   // Past first run this is a *second* terminal, which is the other side of the
@@ -362,6 +386,7 @@ async function newConversation(
     }),
   );
   if (res.ok) {
+    forget(paddock.id);
     const created = (await res.clone().json()) as { data?: { id?: string } };
     if (created.data?.id) ctx.db.recordTabOpener(created.data.id, paddock.id, actorLabel(id));
     hub.publish(paddock.id, "tabs", { opened: created.data?.id ?? null, by: actorLabel(id) });
@@ -406,10 +431,13 @@ async function forward(client: FountainClient, req: Request, method: string, tar
  *
  * A machine with no receipt yet is the ordinary first state — `readReceipt`
  * treats that 404 as "the box has not said" and the panel renders it as such.
- * Logging it as a refusal would put a line in the log on every poll.
+ * A parked machine answers the same read with 409 `sandbox_not_ready`, which
+ * is just as ordinary: the read is deliberately one that does not wake it.
+ * Logging either as a refusal would put a line in the log on every poll —
+ * forty in a row, in the production incident this file's cache came out of.
  */
 function expected(status: number, target: string): boolean {
-  return status === 404 && /^\/api\/sandboxes\/[^/]+\/file\?/.test(target);
+  return (status === 404 || status === 409) && /^\/api\/sandboxes\/[^/]+\/file\?/.test(target);
 }
 
 function jsonRes(body: unknown): Response {

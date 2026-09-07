@@ -24,6 +24,7 @@
  * actually happened, including what would not go.
  */
 import { ownerClient, paddockAccess, requireClaimed, requireOwner, type AppContext } from "./context";
+import { forget } from "./machine-cache";
 import type { ConversationSummary, FountainClient } from "./fountain";
 import { asHttpError } from "./fountain";
 import { authenticate } from "./context";
@@ -98,6 +99,8 @@ export async function retire(ctx: AppContext, paddock: PaddockRow, original: boo
     if (res?.ok) report.terminated += 1;
     else report.failed.push({ what: `tab ${c.title ?? c.id}`, why: await reason(res) });
   }
+  // The proxy memoises which tabs are live on this box; they just stopped being.
+  forget(paddock.id);
 
   // The agent is what actually changes the identity, so it is the one removal
   // that has to work. Deleting is the tidy version; un-marking is the version

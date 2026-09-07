@@ -13,6 +13,7 @@ import type { AppContext } from "./context";
 import { Cipher, randomToken, sha256 } from "./crypto";
 import { Db } from "./db";
 import { hub } from "./hub";
+import { forget, resetMachineCache } from "./machine-cache";
 import { channelFor, OPS_SLUG } from "../shared/tabs";
 import { MAX_COMPUTERS } from "./computers";
 import { sweepExpired } from "./starter";
@@ -68,7 +69,11 @@ function conv(id: string, channel: string, at: string) {
 
 let ctx: AppContext;
 let route: (req: Request) => Promise<Response>;
-let upstream: { method: string; path: string; key: string }[] = [];
+let upstream: { method: string; path: string; key: string; query: string }[] = [];
+/** The query strings of the list calls, in order — how narrow each read was. */
+const queries = () => upstream.filter((u) => u.method === "GET" && u.path === "/api/conversations").map((u) => u.query);
+/** Let one paddock's memoised machine expire without waiting the TTL out. */
+const expireListCache = (paddockId: string) => forget(paddockId);
 const realFetch = globalThis.fetch;
 
 /**
@@ -179,6 +184,7 @@ beforeEach(async () => {
   grants = new Map();
   grantByIdem = new Map();
   claimableHook = null;
+  resetMachineCache();
   grantExpiresAt = "2099-01-01T00:00:00.000Z";
 
   // A fake Fountain. Only the calls the proxy actually makes are answered;
@@ -191,7 +197,7 @@ beforeEach(async () => {
     // The key is recorded, not just the path: after a claim the machine has to
     // run on the credential the claim handed back, and nothing but the key on
     // the wire can show that it does.
-    upstream.push({ method, path: url.pathname, key });
+    upstream.push({ method, path: url.pathname, key, query: url.searchParams.toString() });
     if (url.pathname === "/api/auth/me") {
       // One identity per key, so a test can be somebody else. The fake used to
       // answer OWNER for every key, which quietly made every "another person"
@@ -298,6 +304,76 @@ async function addComputer(cookie: string, name?: string): Promise<string> {
   expect(res.status).toBe(201);
   return ((await res.json()) as { data: { id: string } }).data.id;
 }
+
+describe("one Fountain call per burst", () => {
+  const lists = () => upstream.filter((u) => u.method === "GET" && u.path === "/api/conversations");
+
+  test("a burst of proxied requests derives the machine once", async () => {
+    const owner = await paddockFor(OWNER);
+    upstream = [];
+    // What one screen does in a few seconds: the strip, a tab, its events,
+    // the receipt, a file listing. Each has to know which tabs are on the box.
+    await Promise.all([
+      call(owner.cookie, "GET", `/f/${owner.id}/api/conversations`),
+      call(owner.cookie, "GET", `/f/${owner.id}/api/conversations/c1`),
+      call(owner.cookie, "GET", `/f/${owner.id}/api/conversations/c1/events`),
+      call(owner.cookie, "GET", `/f/${owner.id}/api/sandboxes/${BOX}/file?path=/x`),
+      call(owner.cookie, "GET", `/f/${owner.id}/api/sandboxes/${BOX}/files?path=/`),
+    ]);
+    for (let n = 0; n < 5; n++) await call(owner.cookie, "GET", `/f/${owner.id}/api/conversations`);
+    expect(lists()).toHaveLength(1);
+    // And the answers were still the right ones.
+    const strip = (await (await call(owner.cookie, "GET", `/f/${owner.id}/api/conversations`)).json()) as { data: { id: string }[] };
+    expect(strip.data.map((c) => c.id)).toEqual(["c1", "c2"]);
+  });
+
+  test("opening or ending a tab reads the list afresh", async () => {
+    const owner = await paddockFor(OWNER);
+    await call(owner.cookie, "GET", `/f/${owner.id}/api/conversations`);
+    upstream = [];
+    expect((await call(owner.cookie, "POST", `/f/${owner.id}/api/conversations`, { channel_id: channelFor(owner.id, "t3", 1), title: "Terminal 3" })).status).toBe(200);
+    await call(owner.cookie, "GET", `/f/${owner.id}/api/conversations`);
+    // The POST's own "is there a machine?" was served from the memo; the strip
+    // read after it could not be, because the tab did not exist when the memo
+    // was made.
+    expect(lists()).toHaveLength(1);
+
+    upstream = [];
+    expect((await call(owner.cookie, "POST", `/f/${owner.id}/api/conversations/c1/terminate`)).status).toBe(200);
+    await call(owner.cookie, "GET", `/f/${owner.id}/api/conversations`);
+    expect(lists()).toHaveLength(1);
+  });
+
+  test("once the agent is known, the list is narrowed to it", async () => {
+    const owner = await paddockFor(OWNER);
+    await call(owner.cookie, "GET", `/f/${owner.id}/api/conversations`);
+    expireListCache(owner.id);
+    upstream = [];
+    await call(owner.cookie, "GET", `/f/${owner.id}/api/conversations`);
+    expect(queries()).toEqual([`agent_id=${AGENT}`]);
+  });
+
+  test("a machine that moved to another agent is still found", async () => {
+    const owner = await paddockFor(OWNER);
+    await call(owner.cookie, "GET", `/f/${owner.id}/api/conversations`);
+    // The rebuilt machine lives on a2; asking about a1 finds nothing live.
+    const inner = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url));
+      if (url.pathname === "/api/conversations" && (init?.method ?? "GET") === "GET") {
+        upstream.push({ method: "GET", path: url.pathname, key: "", query: url.searchParams.toString() });
+        if (url.searchParams.get("agent_id") === AGENT) return Response.json({ data: [] });
+        return Response.json({ data: conversations().map((c) => ({ ...c, agent_id: "a2" })) });
+      }
+      return inner(input as string, init);
+    }) as typeof fetch;
+    expireListCache(owner.id);
+    upstream = [];
+    const strip = (await (await call(owner.cookie, "GET", `/f/${owner.id}/api/conversations`)).json()) as { data: { id: string }[] };
+    expect(strip.data.map((c) => c.id)).toEqual(["c1", "c2"]);
+    expect(queries()).toEqual([`agent_id=${AGENT}`, ""]);
+  });
+});
 
 describe("the ops tab", () => {
   test("is not reachable through the proxy, by anyone — it is how the machine gets changed", async () => {

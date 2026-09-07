@@ -75,10 +75,20 @@ export class FountainHttpError extends Error {
 }
 
 export class FountainClient {
+  /**
+   * A fingerprint of the key, for cache keys. Not the key: `machine-cache.ts`
+   * keys answers by paddock *and* credential so a claim's rotation cannot be
+   * served an answer read on the credential it just revoked, and a hash is
+   * enough to tell two credentials apart.
+   */
+  readonly credentialId: string;
+
   constructor(
     private readonly baseUrl: string,
     private readonly apiKey: string,
-  ) {}
+  ) {
+    this.credentialId = Bun.hash(apiKey).toString(36);
+  }
 
   me(): Promise<FountainUser> {
     return this.json<FountainUser>("GET", "/api/auth/me");
