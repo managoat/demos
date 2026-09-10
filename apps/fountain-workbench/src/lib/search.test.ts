@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { Fountain } from "@agentshit/fountain-sdk";
+import type { Fountain } from "@managoat/fountain-sdk";
 import type { Agent, Conversation, SearchHit } from "../types";
 import type { ItemDto } from "./api";
 import { describeHits, findIsOurs, matchConversations, searchMessages, threadHits, type Context } from "./search";

@@ -16,7 +16,7 @@
  * `failed` says why the conversation could not start. Neither carries a
  * value, ever, so nothing here has one to hide.
  */
-import type { Fountain } from "@agentshit/fountain-sdk";
+import type { Fountain } from "@managoat/fountain-sdk";
 import type { LogEvent } from "../types";
 import { dataOf } from "./digest";
 

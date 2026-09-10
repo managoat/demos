@@ -19,7 +19,7 @@
  * Everything here but `searchMessages` is pure, so the ranking, the ordering
  * and the labels are testable without a Fountain.
  */
-import type { Fountain } from "@agentshit/fountain-sdk";
+import type { Fountain } from "@managoat/fountain-sdk";
 import type { Agent, Conversation, SearchHit } from "../types";
 import type { ItemDto } from "./api";
 import { conversationLabel } from "./format";

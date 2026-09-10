@@ -125,8 +125,8 @@
       "name": "fountain-workbench",
       "version": "0.1.0",
       "dependencies": {
-        "@agentshit/fountain-sdk": "1.15.0",
         "@managoat/fountain-app": "workspace:*",
+        "@managoat/fountain-sdk": "1.25.0",
         "react": "^19.1.0",
         "react-dom": "^19.1.0",
       },
@@ -229,8 +229,8 @@
       "name": "salon",
       "version": "0.1.0",
       "dependencies": {
-        "@agentshit/fountain-sdk": "1.15.0",
         "@managoat/fountain-app": "workspace:*",
+        "@managoat/fountain-sdk": "1.25.0",
         "react": "^19.1.0",
         "react-dom": "^19.1.0",
       },
@@ -310,8 +310,6 @@
     },
   },
   "packages": {
-    "@agentshit/fountain-sdk": ["@agentshit/fountain-sdk@1.15.0", "", {}, "sha512-OV0ZlaobChTJesF1BBNWs9/vK6+lmouDiUYj69BBfzuUiwpZum2kyuB2vP5FABqWuE0p9d7w1KvSerYGqokHyQ=="],
-
     "@babel/code-frame": ["@babel/code-frame@7.29.7", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.29.7", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw=="],
 
     "@babel/compat-data": ["@babel/compat-data@7.29.7", "", {}, "sha512-locTkQyKvwIEgBzVrn8693ebc97F2U8ZHjbXwDXJ5Fn2TCpNwTlKcaKLkdHop5c/icOFE7qt7Q9JC5hnKNa6Gg=="],
@@ -415,6 +413,8 @@
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
     "@managoat/fountain-app": ["@managoat/fountain-app@workspace:packages/fountain-app"],
+
+    "@managoat/fountain-sdk": ["@managoat/fountain-sdk@1.25.0", "", {}, "sha512-9eV191+jWYbaq1jHOIy9Nx5j7BcBQ2o54UiRHOC7zFNz9DjCKrEEVZZEXugkfjOiUWy0QYipyAoZIFkTNa14Xg=="],
 
     "@napi-rs/lzma-linux-x64-gnu": ["@napi-rs/lzma-linux-x64-gnu@1.5.1", "", { "os": "linux", "cpu": "x64" }, "sha512-oTXEIha4SsuXdTA4Iyskj0kpdx2yVXdhd75c2v3xGrHFfVMsbhTPZU/nMPL4sWKo4pBHm3aucLaqGlF696dTyQ=="],
 

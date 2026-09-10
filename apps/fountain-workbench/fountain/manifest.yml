@@ -98,7 +98,7 @@ spec:
          owner's key. server/app.ts lists the routes; server/proxy.ts is the
          boundary a member must not cross. Keep it that way.
       3. For anything touching the Fountain API, read the OpenAPI document in
-         the SDK (node_modules/@agentshit/fountain-sdk/dist/generated/openapi.d.ts)
+         the SDK (node_modules/@managoat/fountain-sdk/dist/generated/openapi.d.ts)
          or /home/sprite/work/fountain/docs before guessing a shape.
 
     The gate, in the foreground, before you push:
