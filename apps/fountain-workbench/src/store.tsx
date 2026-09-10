@@ -14,7 +14,7 @@
  * events into that stream when another member changes something.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Fountain } from "@agentshit/fountain-sdk";
+import { Fountain } from "@managoat/fountain-sdk";
 import type { Agent, Conversation, Environment, SandboxRecord, UserEvent, Vault } from "./types";
 import { computersOf } from "./lib/sidebar";
 import { api, ApiError, projectFountainBase, type ActivityDto, type ItemDto, type ItemPatch, type Me, type ProjectDto } from "./lib/api";

@@ -5,7 +5,7 @@
  * the SDK at `/f/<chat>` (`makeChatClient`).
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Fountain } from "@agentshit/fountain-sdk";
+import { Fountain } from "@managoat/fountain-sdk";
 import type { ProjectDto } from "../shared/projects";
 import { api, ApiError, chatFountainBase, type ChatDto, type Me, type MenuDto, type NotificationDto, type WorkspaceMemberDto } from "./lib/api";
 import { describeError } from "./lib/errors";

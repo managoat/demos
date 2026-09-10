@@ -4,7 +4,7 @@
  * the computer is asleep or the checkout is somewhere Fountain cannot read.
  */
 import { describe, expect, mock, test } from "bun:test";
-import { FountainError } from "@agentshit/fountain-sdk";
+import { FountainError } from "@managoat/fountain-sdk";
 import { mount, wait } from "../../test/render";
 import type { Computer } from "../lib/sidebar";
 import type { ItemDto, SnapshotDto } from "../lib/api";

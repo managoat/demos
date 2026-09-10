@@ -628,7 +628,7 @@ browser ──(session cookie)──▶ workbench server ──(owner's Fountain
   before the server existed is offered a one-time import (ids are kept, so
   the channels line up).
 
-The API is reached through [`@agentshit/fountain-sdk`](https://www.npmjs.com/package/@agentshit/fountain-sdk)
+The API is reached through [`@managoat/fountain-sdk`](https://www.npmjs.com/package/@managoat/fountain-sdk)
 in the browser (`src/lib/sse.ts` reads the user-wide stream by hand, which
 the SDK does not do for a browser). The server uses plain `fetch`.
 

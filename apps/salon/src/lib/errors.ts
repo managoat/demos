@@ -1,4 +1,4 @@
-import { FountainError } from "@agentshit/fountain-sdk";
+import { FountainError } from "@managoat/fountain-sdk";
 import { ApiError } from "./api";
 
 /** One line a person can act on, from whatever the SDK, the server or the browser threw. */

@@ -1,4 +1,4 @@
-import { FountainError } from "@agentshit/fountain-sdk";
+import { FountainError } from "@managoat/fountain-sdk";
 
 /** One line a person can act on, from whatever the SDK or the browser threw. */
 export function describeError(err: unknown): string {

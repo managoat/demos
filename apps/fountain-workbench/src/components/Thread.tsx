@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { useProject, useWorkbench } from "../store";
-import type { Stream } from "@agentshit/fountain-sdk";
+import type { Stream } from "@managoat/fountain-sdk";
 import type { Conversation, LogEvent, Turn, UserEvent } from "../types";
 import { arrange } from "../lib/blocks";
 import { fold, stageLine } from "../lib/turns";

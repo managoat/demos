@@ -15,9 +15,9 @@ export type {
   SearchHit,
   Turn,
   Vault,
-} from "@agentshit/fountain-sdk";
+} from "@managoat/fountain-sdk";
 
-import type { LogEvent } from "@agentshit/fountain-sdk";
+import type { LogEvent } from "@managoat/fountain-sdk";
 
 /** A log event off `GET /api/events/stream`, labelled with the conversation it belongs to. */
 export interface UserEvent extends LogEvent {

@@ -21,7 +21,7 @@ The build-an-app guide lives in the Fountain repo, not here:
 and its `references/traps.md`. It is a project skill of that checkout, so it
 does not load from this directory — open it by path. The Fountain manual is
 `docs/build/*.md` and `docs/sdk.md` in the same repo, or `/docs` on
-managoat.com. Salon uses `@agentshit/fountain-sdk` in the browser and plain
+managoat.com. Salon uses `@managoat/fountain-sdk` in the browser and plain
 `fetch` on the server (never the SDK server-side: a proxied call must carry
 no headers of ours).
 
