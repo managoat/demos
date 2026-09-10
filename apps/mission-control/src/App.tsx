@@ -631,7 +631,7 @@ function Control(props: {
             {missions.length === 0 && <p className="fineprint">No missions yet.</p>}
           </div>
           <footer className="fineprint">
-            Runs on <a href="https://github.com/BinaryBourbon/fountain">Fountain</a> ·{" "}
+            Runs on <a href="https://github.com/managoat/fountain">Fountain</a> ·{" "}
             <a href="https://github.com/managoat/mission-control">source</a>
           </footer>
         </aside>

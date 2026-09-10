@@ -6,7 +6,7 @@ sandboxed agent per task** — watch the fleet boot and work on a live board,
 get one synthesized report at the end.
 
 It is a static single-page app with no backend of its own — it talks only to
-the [Fountain](https://github.com/BinaryBourbon/fountain) API. The coordinator
+the [Fountain](https://github.com/managoat/fountain) API. The coordinator
 runs as a teammate; every worker is a plain `POST /api/conversations`, one
 fresh computer each; the whole fleet streams back on a single
 `GET /api/events/stream?blocks=true` connection. Client patterns (OAuth, SSE,

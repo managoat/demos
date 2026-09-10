@@ -27,7 +27,7 @@ const BUILT_WITH = "https://managoat.com/built-with";
  * Apps deliberately absent from both rosters.
  *
  * The copy on this page is lifted verbatim from `built_apps/0` in
- * BinaryBourbon/fountain, which is what renders built-with — so an app can
+ * managoat/fountain, which is what renders built-with — so an app can
  * only be listed here once it is listed there, and writing a blurb locally
  * would just move the drift to the other comparison. Naming the exception is
  * the honest version: the check stays strict for the other twelve, and the

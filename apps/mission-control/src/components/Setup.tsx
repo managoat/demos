@@ -33,7 +33,7 @@ export function Setup(props: { error: string | null; onPaste: (s: Settings) => v
         <p className="setup-tag">
           Describe a mission; a coordinator plans it, you approve, and one sandboxed agent per task works it — one
           synthesized report at the end. Runs on your{" "}
-          <a href="https://github.com/BinaryBourbon/fountain">Fountain</a>.
+          <a href="https://github.com/managoat/fountain">Fountain</a>.
         </p>
         {props.error && <p className="error">{props.error}</p>}
         <label>
@@ -60,7 +60,7 @@ export function Setup(props: { error: string | null; onPaste: (s: Settings) => v
         )}
         <p className="fineprint">Everything stays in this browser. Signing out revokes an OAuth key.</p>
         <footer className="fineprint">
-          Runs on <a href="https://github.com/BinaryBourbon/fountain">Fountain</a> ·{" "}
+          Runs on <a href="https://github.com/managoat/fountain">Fountain</a> ·{" "}
           <a href="https://github.com/managoat/mission-control">source</a>
         </footer>
       </div>

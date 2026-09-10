@@ -47,7 +47,7 @@ describe("manifest", () => {
             allowed_environment_ids: null,
             description: "thinks: deeply",
             system: "line one\nline two",
-            skills: [{ source: "BinaryBourbon/fountain-api-skill" }],
+            skills: [{ source: "anthropics/skills" }],
             mcp_servers: { github: { type: "http", url: "https://api.githubcopilot.com/mcp/", headers: { Authorization: "Bearer ${GITHUB_TOKEN}" } } },
           },
         },
@@ -61,7 +61,7 @@ describe("manifest", () => {
     expect(y).toContain("  environment: proj-env");
     expect(y).toContain('  description: "thinks: deeply"');
     expect(y).toContain("  system: |-\n    line one\n    line two");
-    expect(y).toContain("  skills:\n    - source: BinaryBourbon/fountain-api-skill");
+    expect(y).toContain("  skills:\n    - source: anthropics/skills");
     expect(y).toContain("        Authorization: Bearer ${GITHUB_TOKEN}");
     expect(y).toContain("fountain apply -f team.yml");
   });

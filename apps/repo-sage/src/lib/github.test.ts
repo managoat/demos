@@ -3,7 +3,7 @@ import { blobUrl, parseRepoInput, splitPathMentions } from "./github";
 
 describe("parseRepoInput", () => {
   test("owner/name passes through", () => {
-    expect(parseRepoInput("BinaryBourbon/fountain")).toBe("BinaryBourbon/fountain");
+    expect(parseRepoInput("managoat/fountain")).toBe("managoat/fountain");
     expect(parseRepoInput("  rails/rails  ")).toBe("rails/rails");
   });
 

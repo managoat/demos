@@ -1,7 +1,7 @@
 # Switchyard
 
 **switchyard.demo.managoat.com** — parallel tracks on one cloud machine, on the
-[Fountain](https://github.com/BinaryBourbon/fountain) API.
+[Fountain](https://github.com/managoat/fountain) API.
 
 Sign in with GitHub, pick a repository, and switchyard builds it a machine with
 the repository already cloned. Every piece of work you start on it is a

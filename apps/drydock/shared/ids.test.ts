@@ -69,6 +69,6 @@ test("a branch is namespaced under whoever asked for it", () => {
 });
 
 test("a repository lands where Fountain's own convention puts it", () => {
-  expect(mountPathFor("BinaryBourbon/fountain")).toBe("/workspace/fountain");
+  expect(mountPathFor("managoat/fountain")).toBe("/workspace/fountain");
   expect(mountPathFor("demos")).toBe("/workspace/demos");
 });

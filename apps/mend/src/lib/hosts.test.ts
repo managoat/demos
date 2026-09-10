@@ -3,7 +3,7 @@ import { authedCloneUrl, fileUrl, parseRefKey, parseRepoInput, refKey, refLabel,
 
 describe("parseRepoInput", () => {
   test("owner/name defaults to github", () => {
-    expect(parseRepoInput("BinaryBourbon/fountain")).toEqual({ host: "github.com", owner: "BinaryBourbon", name: "fountain" });
+    expect(parseRepoInput("managoat/fountain")).toEqual({ host: "github.com", owner: "managoat", name: "fountain" });
   });
 
   test("full URLs, .git suffixes, trailing paths, scp form", () => {

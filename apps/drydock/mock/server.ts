@@ -459,7 +459,7 @@ function stream(c: Conversation, signal: AbortSignal, lastId: number): Response 
 // ── a GitHub, for the pickers ──────────────────────────────────────────
 
 const REPOS = [
-  { full_name: "BinaryBourbon/fountain", name: "fountain", private: true, default_branch: "main", language: "Elixir" },
+  { full_name: "managoat/fountain", name: "fountain", private: true, default_branch: "main", language: "Elixir" },
   { full_name: "managoat/demos", name: "demos", private: false, default_branch: "main", language: "TypeScript" },
   { full_name: "jhgaylor/home-cloud", name: "home-cloud", private: true, default_branch: "main", language: "TypeScript" },
   { full_name: "jhgaylor/cantor", name: "cantor", private: true, default_branch: "main", language: "TypeScript" },

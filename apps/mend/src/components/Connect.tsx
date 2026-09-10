@@ -36,7 +36,7 @@ export function Connect(props: { error: string | null; onPaste: (s: Settings) =>
         </p>
         <p className="setup-tag">
           The agent needs a computer to run chant on, which is what{" "}
-          <a href="https://github.com/BinaryBourbon/fountain">Fountain</a> provides. Point this at yours to begin.
+          <a href="https://github.com/managoat/fountain">Fountain</a> provides. Point this at yours to begin.
         </p>
         {props.error && <p className="error">{props.error}</p>}
         <label>

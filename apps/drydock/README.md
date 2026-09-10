@@ -1,7 +1,7 @@
 # Drydock
 
 **drydock.demo.managoat.com** — [Conductor](https://conductor.build), for
-machines in the cloud, on the [Fountain](https://github.com/BinaryBourbon/fountain) API.
+machines in the cloud, on the [Fountain](https://github.com/managoat/fountain) API.
 
 Sign in with GitHub, pick a repository, and open a **thread**. The thread gets a
 machine of its own with a fresh clone on it, a branch to push from, an agent

@@ -580,7 +580,7 @@ export function App() {
           </button>
           <p className="fineprint">
             The audit is <a href="https://intentius.io/chant/cli/audit/">chant</a>. The computer it runs on is{" "}
-            <a href="https://github.com/BinaryBourbon/fountain">Fountain</a>.{" "}
+            <a href="https://github.com/managoat/fountain">Fountain</a>.{" "}
             <a href="https://github.com/managoat/mend">Source</a>.
           </p>
         </div>

@@ -32,7 +32,7 @@ export function Setup(props: { error: string | null; onPaste: (s: Settings) => v
         </div>
         <p className="setup-tag">
           A dedicated DNS operator for your Cloudflare zones. Ask for a change in plain words, review the plan as a
-          diff, approve. Runs on your <a href="https://github.com/BinaryBourbon/fountain">Fountain</a>.
+          diff, approve. Runs on your <a href="https://github.com/managoat/fountain">Fountain</a>.
         </p>
         {props.error && <p className="error">{props.error}</p>}
         <label>

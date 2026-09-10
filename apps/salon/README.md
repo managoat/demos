@@ -1,7 +1,7 @@
 # Salon
 
 **[salon.demo.managoat.com](https://salon.demo.managoat.com)** — multiplayer
-chat on the [Fountain](https://github.com/BinaryBourbon/fountain) API.
+chat on the [Fountain](https://github.com/managoat/fountain) API.
 
 Sign in with Fountain. Pick a model, say something, and a chat starts on your
 account. Invite people by email or by link; they read and write the same

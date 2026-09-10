@@ -1,6 +1,6 @@
 # fountain-team
 
-A messaging-style client for your [Fountain](https://github.com/BinaryBourbon/fountain)
+A messaging-style client for your [Fountain](https://github.com/managoat/fountain)
 team: your agents as teammates, one ongoing conversation each (and, when you
 want it, more threads on the same computer) — the roster on the left, the
 thread on the right, Enter to send. It is the `/team` page as a

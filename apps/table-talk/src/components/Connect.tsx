@@ -32,7 +32,7 @@ export function Connect(props: { error: string | null; onPaste: (s: Settings) =>
         </div>
         <p className="setup-tag">
           Drop a spreadsheet, get charts and plain-English answers, then just keep asking. Runs on your{" "}
-          <a href="https://github.com/BinaryBourbon/fountain">Fountain</a>.
+          <a href="https://github.com/managoat/fountain">Fountain</a>.
         </p>
         {props.error && <p className="error">{props.error}</p>}
         <label>
@@ -59,7 +59,7 @@ export function Connect(props: { error: string | null; onPaste: (s: Settings) =>
         )}
         <p className="fineprint">Everything stays in this browser. Signing out revokes an OAuth key.</p>
         <p className="fineprint">
-          Runs on <a href="https://github.com/BinaryBourbon/fountain">Fountain</a> ·{" "}
+          Runs on <a href="https://github.com/managoat/fountain">Fountain</a> ·{" "}
           <a href="https://github.com/managoat/table-talk">source</a>
         </p>
       </div>

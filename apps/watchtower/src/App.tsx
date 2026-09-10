@@ -589,7 +589,7 @@ function Composer(props: { busy: boolean; onSend: (text: string) => void }) {
 function Footer() {
   return (
     <footer className="footer fineprint">
-      Runs on <a href="https://github.com/BinaryBourbon/fountain">Fountain</a> ·{" "}
+      Runs on <a href="https://github.com/managoat/fountain">Fountain</a> ·{" "}
       <a href="https://github.com/managoat/watchtower">source</a>
     </footer>
   );

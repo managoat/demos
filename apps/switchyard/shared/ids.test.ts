@@ -41,7 +41,7 @@ test("a branch is namespaced under the person who asked for it", () => {
 });
 
 test("a repository lands where Fountain's own bundled skill looks first", () => {
-  expect(mountPathFor("BinaryBourbon/fountain")).toBe("/workspace/fountain");
+  expect(mountPathFor("managoat/fountain")).toBe("/workspace/fountain");
   expect(mountPathFor("fountain")).toBe("/workspace/fountain");
 });
 

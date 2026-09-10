@@ -32,7 +32,7 @@ export function Setup(props: { error: string | null; onPaste: (s: Settings) => v
         </div>
         <p className="setup-tag">
           One prompt, several brains, side by side — live streams, blind columns, your vote decides. Runs on your{" "}
-          <a href="https://github.com/BinaryBourbon/fountain">Fountain</a>.
+          <a href="https://github.com/managoat/fountain">Fountain</a>.
         </p>
         {props.error && <p className="error">{props.error}</p>}
         <label>
@@ -59,7 +59,7 @@ export function Setup(props: { error: string | null; onPaste: (s: Settings) => v
         )}
         <p className="fineprint">Everything stays in this browser. Signing out revokes an OAuth key.</p>
         <p className="fineprint">
-          Runs on <a href="https://github.com/BinaryBourbon/fountain">Fountain</a> ·{" "}
+          Runs on <a href="https://github.com/managoat/fountain">Fountain</a> ·{" "}
           <a href="https://github.com/managoat/arena">source</a>
         </p>
       </div>

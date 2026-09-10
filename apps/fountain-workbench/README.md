@@ -1,6 +1,6 @@
 # Fountain Workbench
 
-A dev workstation on the [Fountain](https://github.com/BinaryBourbon/fountain) API,
+A dev workstation on the [Fountain](https://github.com/managoat/fountain) API,
 shared between people.
 
 **Projects → work items → teammates.** A project is an environment and a

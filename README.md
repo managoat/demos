@@ -5,7 +5,7 @@ served at `<name>.demo.managoat.com` and indexed at
 [demo.managoat.com](https://demo.managoat.com).
 
 They are small, production-shaped surfaces on the
-[Fountain](https://github.com/BinaryBourbon/fountain) API — the thing each one
+[Fountain](https://github.com/managoat/fountain) API — the thing each one
 exists to show is that an app which hires agents, prompts them and renders
 what they do is an ordinary web app with no privileged access.
 

@@ -239,7 +239,7 @@ export function Projects() {
         {dropped && <p className="muted small">{dropped}</p>}
         <label>
           Notes <span className="hint">Where the code is, what it is. Shown to members, not sent to agents.</span>
-          <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="github.com/BinaryBourbon/fountain" />
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="github.com/managoat/fountain" />
         </label>
         <div className="row end">
           <button type="submit" disabled={!name.trim() || busy}>

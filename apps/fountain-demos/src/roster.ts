@@ -8,7 +8,7 @@
  * one.
  *
  * This is the second list of these apps. The first is `built_apps/0` in
- * BinaryBourbon/fountain, which renders managoat.com/built-with, and the two
+ * managoat/fountain, which renders managoat.com/built-with, and the two
  * disagreeing is the exact failure that retired the previous version of this
  * page — it ended three apps behind. The copy below is lifted from that list
  * verbatim so the wording matches, and `scripts/check-drift.ts` fetches
