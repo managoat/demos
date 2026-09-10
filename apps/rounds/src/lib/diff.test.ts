@@ -58,6 +58,6 @@ describe("parseDiff", () => {
 });
 
 test("patchFilename slugs the repo label", () => {
-  expect(patchFilename("BinaryBourbon/fountain")).toBe("mend-binarybourbon-fountain.patch");
+  expect(patchFilename("managoat/fountain")).toBe("mend-managoat-fountain.patch");
   expect(patchFilename("!!!")).toBe("mend-repo.patch");
 });

@@ -42,7 +42,7 @@ This page is the version with an agent attached.
 
 **Where Fountain comes in:** the agent needs a real computer — a shell, git, and
 chant on the PATH — and something has to hand the browser a stream of what it is
-doing. That is [Fountain](https://github.com/BinaryBourbon/fountain), and that is
+doing. That is [Fountain](https://github.com/managoat/fountain), and that is
 all it is here: the stagehand. Mend is a static page with no backend of its own;
 it talks to the Fountain API for the sandbox and to api.github.com for the pull
 request. Client patterns (OAuth, SSE, API client) follow

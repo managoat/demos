@@ -66,7 +66,7 @@ export function Runners({ client, onBack, toast, fountainUrl, refreshKey }: { cl
           <div className="small muted">
             Then put a teammate on it: right-click them → <b>Run on your own machine…</b> (or Customize → Computer → your own machine) and restart their computer. New computers land on your most recently connected online runner.{" "}
             <b>Trusted mode:</b> there is no VM or container between the agent and the machine — run it where you would hand a capable colleague a shell.{" "}
-            <a href="https://github.com/BinaryBourbon/fountain/blob/main/docs/integrations/runners.md" target="_blank" rel="noreferrer">
+            <a href="https://github.com/managoat/fountain/blob/main/docs/integrations/runners.md" target="_blank" rel="noreferrer">
               Guide
             </a>
           </div>

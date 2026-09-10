@@ -14,7 +14,7 @@ renders `dist/index.html` from `src/roster.ts` and that is the whole pipeline.
 This page existed before, fell three apps behind, and was retired to a
 redirect because a hand-kept list next to a maintained one loses. The
 maintained one is `built_apps/0` in
-[BinaryBourbon/fountain](https://github.com/BinaryBourbon/fountain), which
+[managoat/fountain](https://github.com/managoat/fountain), which
 renders [managoat.com/built-with](https://managoat.com/built-with).
 
 It is back because the two pages do different jobs — this is a directory of
@@ -38,7 +38,7 @@ not go away, so it is now watched rather than hoped about:
 
 ## Adding an app
 
-1. Add it to `built_apps/0` in BinaryBourbon/fountain — that list is the one
+1. Add it to `built_apps/0` in managoat/fountain — that list is the one
    with the long write-up and the tests.
 2. Add the same `id`, glyph, name and blurb to `DEMOS` in `src/roster.ts`.
 

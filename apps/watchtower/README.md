@@ -6,7 +6,7 @@ is tiles and sparklines; the agent does the probing, with real tools
 (`curl`, `openssl s_client`, `dig`, `traceroute`) from its own sandbox.
 
 It is a static single-page app with no backend of its own — it talks only to
-the [Fountain](https://github.com/BinaryBourbon/fountain) API, where Watchtower
+the [Fountain](https://github.com/managoat/fountain) API, where Watchtower
 runs as a teammate. The heartbeat is a Fountain **team schedule**: a cron that
 prompts the agent to patrol, every 30 minutes by default. Client patterns
 (OAuth, SSE, API client) follow [dns-desk](../dns-desk).

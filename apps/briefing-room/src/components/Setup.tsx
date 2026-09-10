@@ -33,7 +33,7 @@ export function Setup(props: { error: string | null; onPaste: (s: Settings) => v
         <p className="setup-tag">
           Tell it what you need to understand and why; a researcher with its own computer goes and reads, and comes
           back with a clean, sourced brief. Runs on your{" "}
-          <a href="https://github.com/BinaryBourbon/fountain">Fountain</a>.
+          <a href="https://github.com/managoat/fountain">Fountain</a>.
         </p>
         {props.error && <p className="error">{props.error}</p>}
         <label>

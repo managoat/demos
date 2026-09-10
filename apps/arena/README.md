@@ -6,7 +6,7 @@ blind by default, labels A/B/C until you vote. Same sandbox platform, live
 streams, your vote decides.
 
 It is a static single-page app with no backend of its own — it talks only to
-the [Fountain](https://github.com/BinaryBourbon/fountain) API, where each
+the [Fountain](https://github.com/managoat/fountain) API, where each
 contender runs as a teammate (one agent per model, hired lazily on the first
 fight and reused across rounds). Client patterns (OAuth, SSE, API client)
 follow [dns-desk](../dns-desk).

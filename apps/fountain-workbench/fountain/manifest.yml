@@ -44,7 +44,7 @@ spec:
       mount_path: /home/sprite/work/fountain-workbench
       secret_key: GITHUB_TOKEN
     # The API the workbench is built on: OpenAPI, ADRs, the SDK source.
-    - url: https://github.com/BinaryBourbon/fountain
+    - url: https://github.com/managoat/fountain
       mount_path: /home/sprite/work/fountain
       secret_key: GITHUB_TOKEN
   setup_script: |

@@ -5,7 +5,7 @@ change in plain words, review the agent's plan as a diff, approve, done. The
 zone tables stay on screen; the agent does the work.
 
 It is a static single-page app with no backend of its own — it talks only to
-the [Fountain](https://github.com/BinaryBourbon/fountain) API, where the desk
+the [Fountain](https://github.com/managoat/fountain) API, where the desk
 runs as a teammate (an agent in a sandbox with a Cloudflare token in a vault).
 Client patterns (OAuth, SSE, API client) follow
 [fountain-team](../fountain-team).
@@ -42,7 +42,7 @@ OAUTH_CLIENTS='[{"id":"dns-desk","name":"DNS Desk","redirect_uris":["http://loca
 The agent may only *read* on its own. Every mutation goes through a plan the
 owner approves — enforced today by convention (the system prompt pins it; the
 audit trail shows it), and by Fountain's approval gates once those exist
-(BinaryBourbon/fountain#643, which this app is a forcing function for).
+(managoat/fountain#643, which this app is a forcing function for).
 
 The app and the agent share three fenced blocks, parsed out of the agent's
 replies (`src/lib/protocol.ts`; the agent's side of the contract is

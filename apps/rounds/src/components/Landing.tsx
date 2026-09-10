@@ -168,7 +168,7 @@ max_open_prs: 3`}</code>
       <footer className="lp-foot">
         <p className="fineprint">
           The audit is <a href="https://intentius.io/chant/cli/audit/">chant</a>. The schedule and the computer are{" "}
-          <a href="https://github.com/BinaryBourbon/fountain">Fountain</a>. The interactive version — point it at a
+          <a href="https://github.com/managoat/fountain">Fountain</a>. The interactive version — point it at a
           repo, watch it work, take the patch — is <a href="https://github.com/managoat/mend">Mend</a>.{" "}
           <a href="https://github.com/managoat/rounds">Source</a>.
         </p>

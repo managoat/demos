@@ -32,7 +32,7 @@ export function Connect(props: { error: string | null; onPaste: (s: Settings) =>
         </div>
         <p className="setup-tag">
           Point it at a public GitHub repo; an agent clones it on its own computer and answers your questions with
-          file-and-line citations. Runs on your <a href="https://github.com/BinaryBourbon/fountain">Fountain</a>.
+          file-and-line citations. Runs on your <a href="https://github.com/managoat/fountain">Fountain</a>.
         </p>
         {props.error && <p className="error">{props.error}</p>}
         <label>

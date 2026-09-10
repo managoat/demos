@@ -6,7 +6,7 @@ with file-and-line citations that link straight back to GitHub. Watching it
 grep is half the demo.
 
 It is a static single-page app with no backend of its own — it talks only to
-the [Fountain](https://github.com/BinaryBourbon/fountain) API, where each sage
+the [Fountain](https://github.com/managoat/fountain) API, where each sage
 runs as a teammate (an agent in a sandbox with a real shell and a real git).
 Client patterns (OAuth, SSE, API client) follow
 [dns-desk](../dns-desk) /

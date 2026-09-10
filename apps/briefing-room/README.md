@@ -5,7 +5,7 @@ researcher with its own computer goes and reads real sources on the open web,
 and comes back with a clean, sourced document — not a chat transcript.
 
 It is a static single-page app with no backend of its own — it talks only to
-the [Fountain](https://github.com/BinaryBourbon/fountain) API, where the
+the [Fountain](https://github.com/managoat/fountain) API, where the
 researcher runs as a teammate (an agent in a sandbox with internet access; it
 holds no credentials of yours). Client patterns (OAuth, SSE, API client)
 follow [dns-desk](../dns-desk).

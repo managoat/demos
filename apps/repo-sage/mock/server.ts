@@ -38,7 +38,7 @@ const toolDone = (id: string, text: string) =>
 const STUDY_REPLY = `Cloned and read it. This is a small Phoenix umbrella with the API under one router.
 
 \`\`\`repo-map
-{"repo":"BinaryBourbon/fountain","default_branch":"main","description":"Run AI coding agents on their own computers, over one API","languages":[{"name":"Elixir","share":0.82},{"name":"Go","share":0.12},{"name":"TypeScript","share":0.06}],"loc":98000,"components":[{"name":"router","path":"apps/fountain/lib/fountain_web/router.ex","role":"every /api route"},{"name":"contexts","path":"apps/fountain/lib/fountain","role":"Agents, Environments, Vaults, Conversations"},{"name":"team","path":"apps/fountain/lib/fountain/team.ex","role":"teammates = conversations on the team channel"},{"name":"CLI","path":"cli","role":"the fountain command"}],"entry_points":["apps/fountain/lib/fountain/application.ex"],"how_it_works":"A Phoenix app exposes the API; conversations run agents in sandboxes and stream their output back as log events."}
+{"repo":"managoat/fountain","default_branch":"main","description":"Run AI coding agents on their own computers, over one API","languages":[{"name":"Elixir","share":0.82},{"name":"Go","share":0.12},{"name":"TypeScript","share":0.06}],"loc":98000,"components":[{"name":"router","path":"apps/fountain/lib/fountain_web/router.ex","role":"every /api route"},{"name":"contexts","path":"apps/fountain/lib/fountain","role":"Agents, Environments, Vaults, Conversations"},{"name":"team","path":"apps/fountain/lib/fountain/team.ex","role":"teammates = conversations on the team channel"},{"name":"CLI","path":"cli","role":"the fountain command"}],"entry_points":["apps/fountain/lib/fountain/application.ex"],"how_it_works":"A Phoenix app exposes the API; conversations run agents in sandboxes and stream their output back as log events."}
 \`\`\``;
 
 const ANSWER_REPLY = `Auth is a bearer API key on every request: the plug at apps/fountain/lib/fountain_web/plugs/tenant_api_auth.ex:1 hashes the key and loads the user. OAuth sign-in mints the same kind of key.
@@ -79,10 +79,10 @@ const events = eventData.map((e, i) => ({
 
 const teammate = {
   agent_id: "agent-sage",
-  name: "Sage: BinaryBourbon/fountain",
+  name: "Sage: managoat/fountain",
   agent: {
     id: "agent-sage",
-    name: "Sage: BinaryBourbon/fountain",
+    name: "Sage: managoat/fountain",
     model: "anthropic/claude-sonnet-5",
     runtime: "claude",
     environment_id: null,
@@ -91,7 +91,7 @@ const teammate = {
   },
   conversation: {
     id: "c1",
-    title: "Sage: BinaryBourbon/fountain",
+    title: "Sage: managoat/fountain",
     agent_id: "agent-sage",
     vault_id: null,
     environment_id: null,

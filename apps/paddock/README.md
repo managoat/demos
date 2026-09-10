@@ -1,7 +1,7 @@
 # Paddock
 
 **paddock.demo.managoat.com** — a computer in the cloud that stays yours, on
-the [Fountain](https://github.com/BinaryBourbon/fountain) API.
+the [Fountain](https://github.com/managoat/fountain) API.
 
 Open it and a computer starts — no form, no key, no account. Terminal 1 is
 usable straight away, and signing in later **claims that exact machine** rather
@@ -326,7 +326,7 @@ Fountain tenant of its own, with its own agent, environment, vault, sandbox and
 conversations, and the terminal on it is the terminal.
 
 What makes it work is **claimable principals**
-([fountain#1551](https://github.com/BinaryBourbon/fountain/issues/1551), ADR
+([fountain#1551](https://github.com/managoat/fountain/issues/1551), ADR
 0044). A sandbox's name contains its tenant id, so moving resources between
 accounts does not move a machine — it abandons one and builds another. A claim
 does not move anything. It records that an account is now behind the principal,

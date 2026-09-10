@@ -33,7 +33,7 @@ export function Connect(props: { error: string | null; onPaste: (s: Settings) =>
         <p className="setup-tag">
           An SRE teammate on a schedule: uptime, latency, TLS expiry and DNS for every site you name — and when
           something's red, you ask it to go dig. Runs on your{" "}
-          <a href="https://github.com/BinaryBourbon/fountain">Fountain</a>.
+          <a href="https://github.com/managoat/fountain">Fountain</a>.
         </p>
         {props.error && <p className="error">{props.error}</p>}
         <label>

@@ -1,6 +1,6 @@
 # fountain-conversations
 
-A standalone client for [Fountain](https://github.com/BinaryBourbon/fountain):
+A standalone client for [Fountain](https://github.com/managoat/fountain):
 conversations (list, start, watch an agent work turn by turn, drive it) and
 the agents, environments and vaults they run on — the user-facing pages as a
 static app on its own origin, talking only to the Fountain API with an API key
