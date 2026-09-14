@@ -179,3 +179,66 @@ test("unattributed events are rendered once in one pending group", () => {
   const html = renderToString(<Transcript {...props} turns={[]} events={events} />);
   expect(html.match(/<h2>Done<\/h2>/g)).toHaveLength(1);
 });
+
+/**
+ * The failure that reads as silence.
+ *
+ * A turn can fail before the runtime produces a single output frame — the ACP
+ * handshake refused, the sandbox out from under it — and then the whole of
+ * what Fountain has to say about it is one `stage` event whose `turn_id` is
+ * not in the `turn_id` column but inside its payload. Rendered from the output
+ * frames alone, that turn is a prompt with nothing under it, which is exactly
+ * what a turn still being thought about looks like.
+ */
+describe("Transcript failures", () => {
+  const stage = (data: Record<string, unknown>, state: string): LogEvent => ({
+    id: ++seq,
+    kind: "stage",
+    stream: "",
+    data: JSON.stringify(data),
+    stage: "turn",
+    state,
+    turn_id: null,
+    ts: "2026-09-04T12:00:00Z",
+  });
+
+  const refused = {
+    ...props,
+    turns: [{ id: "f1", prompt: "make the worktree", origin: "user", status: "failed", insertedAt: "2026-09-04T12:00:00Z" }],
+    events: [
+      stage({ mode: "run", turn_number: 1, turn_id: "f1" }, "started"),
+      stage(
+        {
+          reason:
+            'acp: {:acp_error, :initialize, %{"code" => 1001, "message" => "Codex process has exited with code 1:\\nError: failed to initialize sqlite state runtime under /home/sprite/.codex"}}',
+          turn_number: 1,
+          turn_id: "f1",
+        },
+        "failed",
+      ),
+    ],
+  };
+
+  test("a turn that produced nothing still says it failed", () => {
+    const html = renderToString(<Transcript {...refused} />);
+    expect(html).toContain("make the worktree");
+    expect(html).toContain("This turn failed on the machine.");
+  });
+
+  test("the runtime's own message is what the reader is shown", () => {
+    const html = renderToString(<Transcript {...refused} />);
+    expect(html).toContain("failed to initialize sqlite state runtime");
+    // The term Fountain wrapped it in is not something anybody can act on.
+    expect(html).not.toContain("acp_error");
+  });
+
+  test("a stage event lands on the turn it names, not in a group of its own", () => {
+    const html = renderToString(<Transcript {...refused} />);
+    // One turn on screen, not the prompt plus an orphan group under it.
+    expect(html.match(/class="turn"/g)?.length).toBe(1);
+  });
+
+  test("a turn that succeeded is left alone", () => {
+    expect(renderToString(<Transcript {...props} />)).not.toContain("This turn failed");
+  });
+});
