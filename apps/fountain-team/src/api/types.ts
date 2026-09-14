@@ -142,29 +142,6 @@ export interface Teammate {
   preview: Preview | null;
   /** summed over every conversation the agent has had on the team */
   usage_total?: Usage | null;
-  /** the teammate's own email address + phone number (flag `team_comms`); null when it has none; absent on older servers */
-  contact?: Contact | null;
-}
-
-/**
- * A teammate's own contact: an AgentMail inbox and an AgentPhone number bought
- * for it (POST /api/team/:agent_id/contact). `prompt_from_number` is the
- * owner's phone, E.164 — texts from it to `phone` arrive as prompts in the
- * teammate's thread; texts from anyone else are ignored.
- */
-export interface Contact {
-  email: string | null;
-  phone: string | null;
-  prompt_from_number: string | null;
-  /** set when STOP was received from `prompt_from_number`: texts are paused until START, or the number is changed */
-  prompt_opted_out_at?: string | null;
-  inserted_at: string;
-}
-
-/** GET /api/team/comms: may this account give teammates a contact (`enabled`, the flag), and can this instance (`configured`, the keys). */
-export interface CommsStatus {
-  enabled: boolean;
-  configured: boolean;
 }
 
 export interface Usage {

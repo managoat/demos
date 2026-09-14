@@ -8,8 +8,6 @@ import { Avatar } from "./Avatar";
 import { Markdown } from "./Markdown";
 import { SkillsTab } from "./SkillsTab";
 import { AppsTab } from "./AppsTab";
-import { ContactLine } from "./ContactLine";
-import type { ContactOffer } from "../lib/contact";
 
 type Tab = "profile" | "skills" | "apps";
 
@@ -29,10 +27,6 @@ export function Profile({
   onAgentChanged,
   onRetire,
   onRunners,
-  contactOffer = { kind: "absent" },
-  onGiveContact,
-  onReleaseContact,
-  onChangeContactNumber,
   initialTab = "profile",
 }: {
   client: FountainClient;
@@ -43,11 +37,6 @@ export function Profile({
   onRetire?: () => void;
   /** Open the Runners page — how to start `fountain runner` on a machine. */
   onRunners?: () => void;
-  /** whether "Give email & phone" is offered here (absent when the feature is off or they have one) */
-  contactOffer?: ContactOffer;
-  onGiveContact?: () => void;
-  onReleaseContact?: () => void;
-  onChangeContactNumber?: () => void;
   initialTab?: Tab;
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
@@ -387,46 +376,6 @@ export function Profile({
                 </span>
               )}
             </label>
-
-            {(teammate.contact || contactOffer.kind !== "absent") && (
-              <div className="profile-field profile-contact">
-                Email &amp; phone
-                {teammate.contact ? (
-                  <>
-                    <ContactLine contact={teammate.contact} onChangeNumber={onChangeContactNumber} />
-                    <span className="hint">
-                      Their own AgentMail inbox and AgentPhone number: from their next turn they can send, reply to and read email and send texts (
-                      <code>email_send</code>, <code>sms_send</code>, …). A text from the number above reaches them as a prompt in this thread; they
-                      answer by text with <code>sms_send</code>, not in the chat.{" "}
-                      {onReleaseContact && (
-                        <button type="button" className="linkish" onClick={onReleaseContact}>
-                          Release email &amp; phone…
-                        </button>
-                      )}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span className="muted small">None yet.</span>
-                    <div className="row">
-                      <button
-                        type="button"
-                        className="secondary small"
-                        onClick={onGiveContact}
-                        disabled={contactOffer.kind === "disabled" || !onGiveContact}
-                        title={contactOffer.kind === "disabled" ? contactOffer.reason : "Buy this teammate an AgentMail inbox and an AgentPhone number (billed)"}
-                      >
-                        Give email &amp; phone…
-                      </button>
-                      {contactOffer.kind === "disabled" && <span className="muted small">{contactOffer.reason}</span>}
-                    </div>
-                    <span className="hint">
-                      An inbox and a number of their own — billed — with tools to use them; texts from your number become prompts in this thread.
-                    </span>
-                  </>
-                )}
-              </div>
-            )}
 
             <dl className="profile-grid">
               <dt>Can do</dt>

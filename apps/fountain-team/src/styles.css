@@ -446,9 +446,7 @@ button.added:hover { color: var(--danger); border-color: color-mix(in srgb, var(
 .empty-thread .tip { margin-top: 8px; padding: 8px 12px; border-radius: 10px; background: var(--bg-1); border: 1px solid var(--border); max-width: 46ch; }
 .linkish.mono { font-family: ui-monospace, Menlo, monospace; }
 
-/* a teammate's own email + phone (team_comms) */
-.menu button.is-disabled { color: var(--muted); cursor: not-allowed; }
-.menu button.is-disabled:hover { background: transparent; }
+/* side threads on the same computer */
 .thread-strip { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--border); background: var(--bg-1); padding: 6px 20px; font-size: 13px; }
 .thread-tab-wrap { display: inline-flex; align-items: center; border-radius: 999px; }
 .thread-tab-wrap.active { background: var(--bg-2); }
@@ -462,23 +460,6 @@ button.added:hover { color: var(--danger); border-color: color-mix(in srgb, var(
 .thread-close:hover { color: var(--danger, #c33); }
 .threads-mark { color: var(--muted); font-size: 11px; }
 .threads-mark.working { color: var(--brand); }
-.contact-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--border); background: var(--bg-1); padding: 6px 20px; font-size: 13px; }
-.contact-bar .contact-line { flex: 1; }
-.contact-bar > button { flex-shrink: 0; }
-.contact-line { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.contact-line.compact { gap: 8px; }
-.copyable { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.copyable .mono { font-size: 12.5px; }
-.copyable button { padding: 1px 7px; font-size: 11px; }
-.contact-from { white-space: normal; }
-.modal.contact .cost-note { border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); border-radius: 10px; padding: 8px 10px; }
-.modal.contact label > input { margin-top: 4px; }
-.modal.contact .error-inline { display: block; margin-top: 4px; }
-.profile-contact { display: flex; flex-direction: column; gap: 8px; }
-.profile-contact .row { flex-wrap: wrap; }
-.modal.contact .consent { font-size: 13.5px; line-height: 1.45; color: var(--text); margin: 0; }
-.modal.contact .consent a { color: var(--brand); }
-.contact-paused { color: var(--warn); }
 
 /* a teammate blocked on a permission request (fountain#940) */
 .ask { align-self: flex-start; max-width: min(560px, 80%); margin: 2px 8px; border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }

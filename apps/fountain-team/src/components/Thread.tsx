@@ -9,7 +9,7 @@ import {
   type DragEvent,
   type KeyboardEvent,
 } from "react";
-import type { CommsStatus, Conversation, LogEvent, Teammate, TreeNode, Turn } from "../api/types";
+import type { Conversation, LogEvent, Teammate, TreeNode, Turn } from "../api/types";
 import { describeError, type FountainClient } from "../api/client";
 import { blocksForTurn, type Block } from "../lib/acp";
 import { loadDraft, saveDraft } from "../lib/drafts";
@@ -20,8 +20,6 @@ import { isNearBottom, TURN_WINDOW, windowTail } from "../lib/scroll";
 import { formatTime } from "./Roster";
 import { Markdown } from "./Markdown";
 import { Profile } from "./Profile";
-import { ContactLine } from "./ContactLine";
-import { contactOffer } from "../lib/contact";
 import { Activity, type ActivityFocus } from "./Activity";
 import { groupBlocks, toolsLabel, duration, type FeedItem } from "../lib/feed";
 import { asks as asksFrom, resolutions as resolutionsFrom, type PermissionAsk, type PermissionResolution } from "../lib/permissions";
@@ -72,11 +70,6 @@ interface Props {
   onAgentChanged: () => void;
   /** this is the only teammate on the team (the /create-team tip shows) */
   onlyTeammate: boolean;
-  /** whether teammates can be given an email + phone here (null: not offered) */
-  comms: CommsStatus | null;
-  onGiveContact: () => void;
-  onReleaseContact: () => void;
-  onChangeContactNumber: () => void;
   fountainUrl: string;
 }
 
@@ -113,14 +106,10 @@ export function Thread({
   onActivityChange,
   onAgentChanged,
   onlyTeammate,
-  comms,
-  onGiveContact,
-  onReleaseContact,
-  onChangeContactNumber,
   fountainUrl,
 }: Props) {
   // On a side thread, the conversation and its presence are the thread's; the
-  // person (name, agent, contact, usage) stays the teammate's.
+  // person (name, agent, usage) stays the teammate's.
   const view = thread ? viewThrough(teammate, thread) : teammate;
   const conv = view.conversation;
   const machineOffline = view.presence.state === "machine_offline";
@@ -553,14 +542,6 @@ export function Thread({
           </button>
         </nav>
       )}
-      {teammate.contact && (
-        <div className="contact-bar" role="region" aria-label={`${teammate.name}'s email and phone`}>
-          <ContactLine contact={teammate.contact} compact onChangeNumber={onChangeContactNumber} />
-          <button type="button" className="secondary small" onClick={onReleaseContact} title="Release the inbox and number upstream; mail and texts to them stop">
-            Release…
-          </button>
-        </div>
-      )}
       {profileOpen && (
         <Profile
           client={client}
@@ -574,19 +555,6 @@ export function Thread({
           onRunners={() => {
             setProfileOpen(false);
             onRunners();
-          }}
-          contactOffer={contactOffer(comms, teammate)}
-          onGiveContact={() => {
-            setProfileOpen(false);
-            onGiveContact();
-          }}
-          onReleaseContact={() => {
-            setProfileOpen(false);
-            onReleaseContact();
-          }}
-          onChangeContactNumber={() => {
-            setProfileOpen(false);
-            onChangeContactNumber();
           }}
         />
       )}

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
-import type { CommsStatus, Conversation, Teammate } from "../api/types";
-import { contactOffer } from "../lib/contact";
+import type { Conversation, Teammate } from "../api/types";
 import type { FountainClient } from "../api/client";
 import type { Prefs } from "../lib/prefs";
 import type { NotifyPermission } from "../lib/notify";
@@ -23,10 +22,7 @@ export type RowAction =
   | "retire-new"
   | "customize"
   | "computer"
-  | "report"
-  | "contact"
-  | "change-number"
-  | "release-contact";
+  | "report";
 
 interface Props {
   client: FountainClient;
@@ -51,8 +47,6 @@ interface Props {
   onRunners: () => void;
   onReport: () => void;
   connected: boolean;
-  /** whether teammates can be given an email + phone here (null: not offered) */
-  comms: CommsStatus | null;
   /** conversations blocked on a permission request — the row says so and sorts nothing else */
   waitingConvIds: ReadonlySet<string>;
   /** each teammate's side threads — more conversations on the same computer — by agent id */
@@ -87,7 +81,6 @@ export function Roster({
   onRunners,
   onReport,
   connected,
-  comms,
   waitingConvIds,
   threads,
 }: Props) {
@@ -195,7 +188,6 @@ export function Roster({
         <RowMenu
           teammate={teammates.find((t) => t.agent_id === menu.agentId) ?? null}
           prefs={prefs}
-          comms={comms}
           x={menu.x}
           y={menu.y}
           onClose={() => setMenu(null)}
@@ -302,7 +294,6 @@ function RosterRow({
 function RowMenu({
   teammate,
   prefs,
-  comms,
   x,
   y,
   onClose,
@@ -310,7 +301,6 @@ function RowMenu({
 }: {
   teammate: Teammate | null;
   prefs: Prefs;
-  comms: CommsStatus | null;
   x: number;
   y: number;
   onClose: () => void;
@@ -337,7 +327,6 @@ function RowMenu({
   const pinned = prefs.pinned.includes(teammate.agent_id);
   const muted = prefs.muted.includes(teammate.agent_id);
   const unread = teammate.unread || prefs.unread.includes(teammate.agent_id);
-  const offer = contactOffer(comms, teammate);
   // keep the menu on screen
   const left = Math.min(x, window.innerWidth - 240);
   const top = Math.min(y, window.innerHeight - 300);
@@ -371,27 +360,6 @@ function RowMenu({
       <button role="menuitem" onClick={() => onAction("history")}>
         History…
       </button>
-      {offer.kind !== "absent" && (
-        <button
-          role="menuitem"
-          onClick={() => onAction("contact")}
-          className={offer.kind === "disabled" ? "is-disabled" : ""}
-          aria-disabled={offer.kind === "disabled"}
-          title={offer.kind === "disabled" ? offer.reason : "Buy this teammate an AgentMail inbox and an AgentPhone number (billed); texts from your number become prompts"}
-        >
-          Give email &amp; phone…
-        </button>
-      )}
-      {teammate.contact && (
-        <button role="menuitem" onClick={() => onAction("change-number")} title="Replace the number whose texts reach this teammate (clears a STOP)">
-          Change the number that texts them…
-        </button>
-      )}
-      {teammate.contact && (
-        <button role="menuitem" onClick={() => onAction("release-contact")} title="Release the inbox and number upstream; mail and texts to them stop">
-          Release email &amp; phone…
-        </button>
-      )}
       <button role="menuitem" onClick={() => onAction("thread")} title="Another conversation with this teammate on the same computer, alongside the main one — same files, its own context">
         New thread…
       </button>
