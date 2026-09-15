@@ -1,3 +1,4 @@
+import type { ConversationInput } from "@managoat/fountain-app/types";
 /**
  * The Fountain API, as much of it as paddock needs. Every call carries the
  * bearer key; every error is an `ApiError` with the server's `error` string
@@ -214,14 +215,8 @@ export class FountainClient {
    * paddock's agent on the account's actual team, where every other app would
    * list it. Salon avoids the same thing for the same reason.
    */
-  startBox(input: {
-    agent_id: string;
-    prompt: string;
-    title?: string;
-    channel_id?: string;
-    environment_id?: string;
-    vault_id?: string;
-    /** The agent's own default, so this call knows whether it has to override. */
+  startBox(input: ConversationInput & {
+    /** App-only hint; omitted from the API body. */
     agentDefaultMode?: SandboxMode | null;
   }): Promise<Conversation> {
     const { agentDefaultMode, ...rest } = input;
@@ -239,7 +234,7 @@ export class FountainClient {
    * and vault (404 `sandbox_not_found`, 409 `sandbox_not_attachable`, 422
    * `sandbox_identity_mismatch`). It sits `pending` until its first prompt.
    */
-  openTab(input: { agent_id: string; sandbox_id: string; title?: string; channel_id?: string }): Promise<Conversation> {
+  openTab(input: ConversationInput & Required<Pick<ConversationInput, "sandbox_id">>): Promise<Conversation> {
     return this.json<{ data: Conversation }>("POST", "/api/conversations", input).then((r) => r.data);
   }
 

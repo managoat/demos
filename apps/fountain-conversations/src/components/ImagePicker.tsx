@@ -1,3 +1,4 @@
+import { imageMediaType } from "../lib/image-type";
 import { useRef, type ChangeEvent } from "react";
 import type { ImageInput } from "../api/types";
 
@@ -11,13 +12,14 @@ export function ImagePicker({ images, onChange }: { images: ImageInput[]; onChan
     const files = Array.from(e.target.files ?? []);
     const next = [...images];
     for (const f of files) {
-      if (f.size > MAX_BYTES) continue;
+      const mediaType = imageMediaType(f.type);
+      if (f.size > MAX_BYTES || !mediaType) continue;
       const data = await new Promise<string>((resolve) => {
         const r = new FileReader();
         r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
         r.readAsDataURL(f);
       });
-      next.push({ data, media_type: f.type || "image/png" });
+      next.push({ data, media_type: mediaType });
     }
     onChange(next);
     if (input.current) input.current.value = "";

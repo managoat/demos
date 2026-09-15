@@ -158,7 +158,7 @@ export async function open(ctx: AppContext, req: Request, projectId: string): Pr
 
   let conversationId: string;
   try {
-    const conversation = await fountain.createConversation({
+    const conversation = await fountain.createTrackConversation({
       agent_id: project.agentId,
       environment_id: project.environmentId,
       vault_id: project.vaultId,

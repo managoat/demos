@@ -1,3 +1,4 @@
+import type { ConversationInput } from "@managoat/fountain-app/types";
 /**
  * The Fountain API, as much of it as Mission Control needs. Every call
  * carries the bearer key; every error is an `ApiError` with the server's
@@ -65,7 +66,7 @@ export class FountainClient {
 
   // ── conversations: the worker fleet ───────────────────────────────────────
 
-  createConversation(input: { agent_id: string; prompt: string; title?: string }): Promise<Conversation> {
+  createConversation(input: ConversationInput): Promise<Conversation> {
     return this.json<{ data: Conversation }>("POST", "/api/conversations", input).then((r) => r.data);
   }
 

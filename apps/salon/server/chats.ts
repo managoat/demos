@@ -1,3 +1,4 @@
+import type { ConversationInput } from "@managoat/fountain-app/types";
 /**
  * Chats: a conversation on Fountain under the host's key, plus the people
  * Salon lets into it. The host pays; a guest never holds the host's key and
@@ -165,7 +166,7 @@ export async function create(ctx: AppContext, req: Request): Promise<Response> {
     agentId = made.agentId;
     connectors = made.connectors;
     const tagged = projectRow && (ctx.db.projectMembers(projectRow.id).length > 0 || user.email !== host.email) ? withAuthor(user.email, prompt) : prompt;
-    const create: Record<string, unknown> = { agent_id: agentId, prompt: tagged, channel_id: `salon:${id}`, fresh: true };
+    const create: ConversationInput = { agent_id: agentId, prompt: tagged, channel_id: `salon:${id}`, fresh: true };
     if (images) create.images = images;
     if (settings.environmentId) create.environment_id = settings.environmentId;
     if (settings.vaultId) create.vault_id = settings.vaultId;
@@ -274,7 +275,7 @@ export async function restore(ctx: AppContext, req: Request, id: string): Promis
   const client = await ownerClient(ctx, chat);
   let conversation: ConversationSummary;
   try {
-    const create: Record<string, unknown> = { agent_id: chat.agent_id, prompt, channel_id: `salon:${chat.id}`, fresh: true };
+    const create: ConversationInput = { agent_id: chat.agent_id, prompt, channel_id: `salon:${chat.id}`, fresh: true };
     if (chat.environment_id) create.environment_id = chat.environment_id;
     if (chat.vault_id) create.vault_id = chat.vault_id;
     if (chat.title) create.title = chat.title;

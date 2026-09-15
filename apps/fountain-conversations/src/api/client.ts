@@ -1,3 +1,4 @@
+import type { ConversationInput } from "@managoat/fountain-app/types";
 /**
  * The Fountain API, as much of it as this app needs. Every call carries the
  * bearer key; every error is an `ApiError` with the server's `error` string
@@ -14,7 +15,6 @@ import type {
   LogEvent,
   Me,
   SandboxDetail,
-  SandboxMode,
   Secret,
   TreeNode,
   Turn,
@@ -35,19 +35,7 @@ export class ApiError extends Error {
   }
 }
 
-export interface StartInput {
-  agent_id: string;
-  prompt?: string;
-  images?: ImageInput[];
-  environment_id?: string;
-  vault_id?: string;
-  parent_conversation_id?: string;
-  title?: string;
-  /** Attach to a machine you already have instead of provisioning one (ADR 0023). */
-  sandbox_id?: string;
-  /** Override the agent's default; ignored when `sandbox_id` is set. */
-  sandbox_mode?: SandboxMode;
-}
+export type StartInput = ConversationInput;
 
 export const THREAD_STREAMS = ["acp", "stdout", "stderr", "stage"];
 

@@ -61,7 +61,7 @@ export async function openThread(
   const channel = threadChannel(project.id, slug, project.rev);
   let conversation: Conversation;
   try {
-    conversation = await deps.fountain.createConversation({
+    conversation = await deps.fountain.createThreadConversation({
       agent_id: project.agentId,
       environment_id: project.environmentId,
       vault_id: project.vaultId,

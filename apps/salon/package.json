@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@managoat/fountain-sdk": "1.25.0",
+    "@managoat/fountain-sdk": "5.2.1",
     "@managoat/fountain-app": "workspace:*",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

@@ -1,3 +1,4 @@
+import { blockBodyText } from "@managoat/fountain-app/acp";
 /**
  * Arranging server-parsed blocks for display. The server does the parsing
  * (`?blocks=true`); the client only pairs and groups.
@@ -15,10 +16,12 @@ export interface Permission {
   expiresAt: string;
 }
 
+type DisplayBlock = Block & { body?: string | null };
+
 export type ShownBlock =
-  | (Block & { kind: "tool_use"; result?: { body: string; error: boolean } })
-  | (Block & { kind: "permission_request"; permission: Permission })
-  | Block;
+  | (DisplayBlock & { kind: "tool_use"; result?: { body: string; error: boolean } })
+  | (DisplayBlock & { kind: "permission_request"; permission: Permission })
+  | DisplayBlock;
 
 export function dataOf(ev: LogEvent): Record<string, unknown> {
   if (!ev.data) return {};
@@ -37,7 +40,8 @@ export function arrange(events: LogEvent[], visibleStreams?: Set<string>): Shown
   for (const ev of events) {
     if (ev.kind !== "output" || !ev.blocks) continue;
     if (visibleStreams && ev.stream && !visibleStreams.has(ev.stream)) continue;
-    for (const b of ev.blocks) {
+    for (const wireBlock of ev.blocks) {
+      const b: DisplayBlock = { ...wireBlock, body: blockBodyText(wireBlock.body) };
       const last = raw[raw.length - 1];
       if ((b.kind === "text" || b.kind === "thinking") && last && last.kind === b.kind) {
         last.body = (last.body ?? "") + (b.body ?? "");

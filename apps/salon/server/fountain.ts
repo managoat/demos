@@ -1,3 +1,4 @@
+import type { ConversationInput } from "@managoat/fountain-app/types";
 /**
  * Calls to Fountain from the server, with a given key. Deliberately not the
  * SDK: the server only ever forwards or lists, and it must not stamp a
@@ -233,7 +234,7 @@ export class FountainClient {
     await this.post(`/api/environments/${encodeURIComponent(id)}/secrets`, { key, value });
   }
 
-  async createConversation(body: Record<string, unknown>): Promise<ConversationSummary> {
+  async createConversation(body: ConversationInput): Promise<ConversationSummary> {
     return (await this.post<{ data: ConversationSummary }>("/api/conversations", body)).data;
   }
 

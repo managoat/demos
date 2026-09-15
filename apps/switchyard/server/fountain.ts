@@ -1,3 +1,4 @@
+import type { ConversationInput } from "@managoat/fountain-app/types";
 /**
  * Fountain, on this server's key.
  *
@@ -151,6 +152,11 @@ export class Fountain {
     return this.data("GET", `/api/conversations/${encodeURIComponent(id)}`);
   }
 
+  /** Forward an API-shaped creation request without selecting its fields. */
+  createConversation(body: ConversationInput): Promise<Conversation> {
+    return this.data("POST", "/api/conversations", body);
+  }
+
   /**
    * Open a conversation on a project's machine.
    *
@@ -161,25 +167,8 @@ export class Fountain {
    * expensive thing to get wrong in the app: it does not fail loudly, it hands
    * you a second machine.
    */
-  createConversation(body: {
-    agent_id: string;
-    environment_id?: string | null;
-    vault_id?: string | null;
-    sandbox_id?: string | null;
-    title?: string;
-    channel_id: string;
-    /**
-     * The first turn, sent in the same call.
-     *
-     * Not an optimisation. Every app in this suite that starts a *fresh*
-     * conversation sends its prompt here, and paddock sending it separately is
-     * the one difference that made provisioning a machine start answering 422.
-     * So a track's opening turn rides along with the launch that provisions
-     * the box; only an attach to a box that already exists prompts separately.
-     */
-    prompt?: string;
-  }): Promise<Conversation> {
-    return this.data("POST", "/api/conversations", {
+  createTrackConversation(body: Pick<ConversationInput, "agent_id" | "environment_id" | "vault_id" | "sandbox_id" | "title" | "channel_id" | "prompt"> & Required<Pick<ConversationInput, "channel_id">>): Promise<Conversation> {
+    return this.createConversation({
       agent_id: body.agent_id,
       ...(body.environment_id ? { environment_id: body.environment_id } : {}),
       ...(body.vault_id ? { vault_id: body.vault_id } : {}),

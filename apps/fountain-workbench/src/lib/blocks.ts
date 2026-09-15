@@ -1,3 +1,4 @@
+import { blockBodyText } from "@managoat/fountain-app/acp";
 /**
  * Arranging server-parsed blocks for display. The server does the parsing
  * (`?blocks=true`); the client only pairs and groups.
@@ -29,10 +30,12 @@ export interface Permission {
 }
 
 /** A tool_use with its tool_result tucked in, a permission request with its fate, or any other block as is. */
+type DisplayBlock = Block & { body?: string | null };
+
 export type ShownBlock =
-  | (Block & { kind: "tool_use"; result?: { body: string; error: boolean } })
-  | (Block & { kind: "permission_request"; permission: Permission })
-  | Block;
+  | (DisplayBlock & { kind: "tool_use"; result?: { body: string; error: boolean } })
+  | (DisplayBlock & { kind: "permission_request"; permission: Permission })
+  | DisplayBlock;
 
 /** Concatenate adjacent text/thinking blocks and pair tool results onto their calls. */
 export function arrange(events: LogEvent[], visibleStreams?: Set<string>): ShownBlock[] {
@@ -43,7 +46,8 @@ export function arrange(events: LogEvent[], visibleStreams?: Set<string>): Shown
   for (const ev of events) {
     if (ev.kind !== "output" || !ev.blocks) continue;
     if (visibleStreams && ev.stream && !visibleStreams.has(ev.stream)) continue;
-    for (const b of ev.blocks) {
+    for (const wireBlock of ev.blocks) {
+      const b: DisplayBlock = { ...wireBlock, body: blockBodyText(wireBlock.body) };
       const last = raw[raw.length - 1];
       if ((b.kind === "text" || b.kind === "thinking") && last && last.kind === b.kind) {
         last.body = (last.body ?? "") + (b.body ?? "");
