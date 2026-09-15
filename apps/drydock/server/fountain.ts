@@ -1,3 +1,4 @@
+import type { ConversationInput } from "@managoat/fountain-app/types";
 /**
  * Fountain, on this server's key.
  *
@@ -144,6 +145,11 @@ export class Fountain {
     return this.data("GET", `/api/conversations/${encodeURIComponent(id)}`);
   }
 
+  /** Forward an API-shaped creation request without selecting its fields. */
+  createConversation(body: ConversationInput): Promise<Conversation> {
+    return this.data("POST", "/api/conversations", body);
+  }
+
   /**
    * Open a thread: one conversation, and one machine of its own.
    *
@@ -173,15 +179,11 @@ export class Fountain {
    * was reused, and resuming would silently drop the new thread onto an old
    * machine.
    */
-  createConversation(body: {
-    agent_id: string;
-    environment_id?: string | null;
-    vault_id?: string | null;
-    title?: string;
-    channel_id: string;
-    prompt: string;
-  }): Promise<Conversation> {
-    return this.data("POST", "/api/conversations", {
+  createThreadConversation(
+    body: Pick<ConversationInput, "agent_id" | "environment_id" | "vault_id" | "title" | "channel_id" | "prompt">
+      & Required<Pick<ConversationInput, "channel_id" | "prompt">>,
+  ): Promise<Conversation> {
+    return this.createConversation({
       agent_id: body.agent_id,
       ...(body.environment_id ? { environment_id: body.environment_id } : {}),
       ...(body.vault_id ? { vault_id: body.vault_id } : {}),

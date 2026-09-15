@@ -1,3 +1,6 @@
+// API inputs come from the published SDK contract; this is a type-only export.
+export type { ConversationInput } from "@managoat/fountain-sdk";
+
 /**
  * The shapes the shared client libs read.
  *

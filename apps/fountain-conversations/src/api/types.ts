@@ -268,10 +268,7 @@ export interface TreeNode {
   parent_id: string | null;
 }
 
-export interface ImageInput {
-  data: string;
-  media_type: string;
-}
+export type ImageInput = NonNullable<import("@managoat/fountain-app/types").ConversationInput["images"]>[number];
 
 export interface Me {
   id: string;

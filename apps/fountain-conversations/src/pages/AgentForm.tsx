@@ -1,3 +1,4 @@
+import { imageMediaType } from "../lib/image-type";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useStore } from "../store";
 import { navigate, paths } from "../router";
@@ -125,13 +126,15 @@ export function AgentFormPage({ id }: { id: string | "new" }) {
 
   async function pickFile(file: File | undefined) {
     if (!file) return;
+    const mediaType = imageMediaType(file.type);
+    if (!mediaType) return toast("Choose a PNG, JPEG, GIF or WebP image.", "error");
     if (file.size > 5 * 1024 * 1024) return toast("Avatars are capped at 5 MB.", "error");
     const data = await new Promise<string>((resolve) => {
       const r = new FileReader();
       r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
       r.readAsDataURL(file);
     });
-    setPendingAvatar({ data, media_type: file.type || "image/png" });
+    setPendingAvatar({ data, media_type: mediaType });
     setRemoveAvatar(false);
     setAvatarKey((k) => k + 1);
   }

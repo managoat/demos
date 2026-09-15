@@ -1,3 +1,4 @@
+import type { ConversationInput } from "@managoat/fountain-app/types";
 /**
  * Starting a conversation on a work item — the one request that also assigns
  * the teammate.
@@ -33,8 +34,8 @@ export interface StartInput {
 }
 
 /** What the browser POSTs to `/f/<project>/api/conversations`; the server decides the rest. */
-export function startBody(projectId: string, input: StartInput): Record<string, unknown> {
-  const body: Record<string, unknown> = {
+export function startBody(projectId: string, input: StartInput): ConversationInput {
+  const body: ConversationInput = {
     agent_id: input.agent.id,
     channel_id: channelFor(projectId, input.item.id),
     fresh: true,

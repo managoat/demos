@@ -212,3 +212,8 @@ function toolOutput(u: Json): string {
 function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) + "…" : s;
 }
+
+/** Render structured plan bodies without passing objects to React as children. */
+export function blockBodyText(body: import("@managoat/fountain-sdk").Block["body"]): string {
+  return typeof body === "string" ? body : body == null ? "" : JSON.stringify(body, null, 2);
+}

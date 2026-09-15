@@ -1,3 +1,4 @@
+import type { ConversationInput } from "@managoat/fountain-app/types";
 /**
  * The Fountain API, as much of it as the team app needs. Every call carries
  * the bearer key; every error is an `ApiError` with the server's `error`
@@ -185,14 +186,8 @@ export class FountainClient {
    * 409 `sandbox_not_attachable`, 422 `sandbox_identity_mismatch` otherwise).
    * It sits `pending` until its first prompt.
    */
-  async openThread(input: {
-    agent_id: string;
-    sandbox_id: string;
-    environment_id?: string | null;
-    vault_id?: string | null;
-    title?: string | null;
-  }): Promise<Conversation> {
-    const body: Record<string, unknown> = { agent_id: input.agent_id, sandbox_id: input.sandbox_id };
+  async openThread(input: Pick<ConversationInput, "agent_id" | "sandbox_id" | "environment_id" | "vault_id" | "title"> & Required<Pick<ConversationInput, "sandbox_id">>): Promise<Conversation> {
+    const body: ConversationInput = { agent_id: input.agent_id, sandbox_id: input.sandbox_id };
     if (input.environment_id) body.environment_id = input.environment_id;
     if (input.vault_id) body.vault_id = input.vault_id;
     if (input.title) body.title = input.title;
