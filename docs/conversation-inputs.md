@@ -12,7 +12,7 @@ with a type-only import; plain-fetch servers acquire no SDK runtime behavior.
 | Paddock browser | `startBox` strips its local agent-default hint and retains the persistent-machine policy; `openTab` forwards generated inputs and requires a sandbox ID |
 | Workbench browser | `startBody` returns the generated input; work-item prompt/channel, image and join decisions remain app-owned |
 | Salon server | Create and restore build generated inputs; plain fetch keeps host-key/proxy behavior |
-| Drydock / Switchyard | `createConversation` forwards the entire generated input; separately named thread/track helpers retain ephemeral/persistent/fresh provisioning and old omission policies |
+| Drydock | `createConversation` forwards the entire generated input; a separately named thread helper retains ephemeral/fresh provisioning and old omission policies |
 | Fountain Team | Side-thread helper derives its deliberately narrow identity/title input from the generated type; its identity and omission policy stays explicit |
 | Workbench / Paddock proxies | Retain validated projections and tenant/project/machine checks. These are authorization boundaries, not generic field allowlists to widen |
 
