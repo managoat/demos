@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ConversationInput } from "@managoat/fountain-app/types";
 import { Fountain as Drydock } from "../apps/drydock/server/fountain";
-import { Fountain as Switchyard } from "../apps/switchyard/server/fountain";
 
 import { FountainClient as MissionControl } from "../apps/mission-control/src/api/client";
 import { FountainClient as Conversations } from "../apps/fountain-conversations/src/api/client";
@@ -11,7 +10,6 @@ import { FountainClient as Salon } from "../apps/salon/server/fountain";
 type Input = ConversationInput & { sandbox_id: string };
 const clients: [string, (url: string) => (input: Input) => Promise<unknown>][] = [
   ["drydock", url => input => new Drydock(url, "fixture-key").createConversation(input)],
-  ["switchyard", url => input => new Switchyard(url, "fixture-key").createConversation(input)],
   ["mission-control", url => input => new MissionControl({ baseUrl: url, apiKey: "fixture-key" }).createConversation(input)],
   ["fountain-conversations", url => input => new Conversations({ baseUrl: url, apiKey: "fixture-key" }).startConversation(input)],
   ["paddock", url => input => new Paddock(url).openTab(input)],
