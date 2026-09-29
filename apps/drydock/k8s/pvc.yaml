@@ -2,10 +2,14 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: drydock-data
-  namespace: drydock
+  namespace: managoat-demos
   labels:
     app: drydock
 spec:
+  # The volume this app had in its own namespace, before the suite moved into
+  # managoat-demos. Pinned so the claim reattaches it rather than provisioning
+  # an empty one.
+  volumeName: pvc-f058ba1e-4ac6-4381-8fc3-21ef29a82efb
   storageClassName: longhorn
   accessModes:
     - ReadWriteOnce

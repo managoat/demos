@@ -2,7 +2,7 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: drydock
-  namespace: drydock
+  namespace: managoat-demos
   labels:
     app: drydock
 spec:
@@ -21,7 +21,7 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: drydock-http
-  namespace: drydock
+  namespace: managoat-demos
   labels:
     app: drydock
 spec:

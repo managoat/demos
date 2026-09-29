@@ -2,7 +2,7 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: workbench
-  namespace: workbench
+  namespace: managoat-demos
   labels:
     app: workbench
 spec:
@@ -21,7 +21,7 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: workbench-http
-  namespace: workbench
+  namespace: managoat-demos
   labels:
     app: workbench
 spec:

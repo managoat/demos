@@ -2,7 +2,7 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: mission-control
-  namespace: mission-control
+  namespace: managoat-demos
   labels:
     app: mission-control
 spec:
@@ -21,7 +21,7 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: mission-control-http
-  namespace: mission-control
+  namespace: managoat-demos
   labels:
     app: mission-control
 spec:

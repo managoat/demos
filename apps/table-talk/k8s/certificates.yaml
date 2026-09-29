@@ -2,7 +2,7 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: table-talk-tls
-  namespace: table-talk
+  namespace: managoat-demos
 spec:
   secretName: table-talk-tls
   issuerRef:

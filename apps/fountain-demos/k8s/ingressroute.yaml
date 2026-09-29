@@ -6,7 +6,7 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: fountain-demos
-  namespace: fountain-demos
+  namespace: managoat-demos
   labels:
     app: fountain-demos
 spec:
@@ -22,7 +22,7 @@ spec:
       kind: Rule
       middlewares:
         - name: moved-to-demo-index
-          namespace: fountain-demos
+          namespace: managoat-demos
       services:
         - name: noop@internal
           kind: TraefikService
@@ -33,7 +33,7 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: fountain-demos-http
-  namespace: fountain-demos
+  namespace: managoat-demos
   labels:
     app: fountain-demos
 spec:
@@ -56,7 +56,7 @@ spec:
         - name: redirect-https
           namespace: default
         - name: moved-to-demo-index
-          namespace: fountain-demos
+          namespace: managoat-demos
       services:
         - name: noop@internal
           kind: TraefikService

@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: table-talk
-  namespace: table-talk
+  namespace: managoat-demos
   labels:
     app: table-talk
 spec:

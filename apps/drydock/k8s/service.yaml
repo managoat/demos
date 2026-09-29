@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: drydock
-  namespace: drydock
+  namespace: managoat-demos
   labels:
     app: drydock
 spec:

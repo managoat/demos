@@ -2,7 +2,7 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: workbench-tls
-  namespace: workbench
+  namespace: managoat-demos
 spec:
   secretName: workbench-tls
   issuerRef:

@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: arena
-  namespace: arena
+  namespace: managoat-demos
   labels:
     app: arena
 spec:

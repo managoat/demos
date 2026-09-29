@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: fountain-conversations
-  namespace: fountain-conversations
+  namespace: managoat-demos
   labels:
     app: fountain-conversations
 spec:

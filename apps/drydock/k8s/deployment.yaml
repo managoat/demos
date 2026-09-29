@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: drydock
-  namespace: drydock
+  namespace: managoat-demos
   labels:
     app: drydock
 spec:
