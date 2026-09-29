@@ -2,7 +2,7 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: arena-tls
-  namespace: arena
+  namespace: managoat-demos
 spec:
   secretName: arena-tls
   issuerRef:

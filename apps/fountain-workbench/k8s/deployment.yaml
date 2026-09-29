@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workbench
-  namespace: workbench
+  namespace: managoat-demos
   labels:
     app: workbench
 spec:

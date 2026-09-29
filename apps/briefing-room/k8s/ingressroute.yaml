@@ -2,7 +2,7 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: briefing-room
-  namespace: briefing-room
+  namespace: managoat-demos
   labels:
     app: briefing-room
 spec:
@@ -21,7 +21,7 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: briefing-room-http
-  namespace: briefing-room
+  namespace: managoat-demos
   labels:
     app: briefing-room
 spec:

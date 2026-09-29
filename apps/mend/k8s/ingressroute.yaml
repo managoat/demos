@@ -2,7 +2,7 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: mend
-  namespace: mend
+  namespace: managoat-demos
   labels:
     app: mend
 spec:
@@ -21,7 +21,7 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: mend-http
-  namespace: mend
+  namespace: managoat-demos
   labels:
     app: mend
 spec:

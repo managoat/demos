@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: fountain-team
-  namespace: fountain-team
+  namespace: managoat-demos
   labels:
     app: fountain-team
 spec:

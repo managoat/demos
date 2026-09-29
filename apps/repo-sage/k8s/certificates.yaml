@@ -2,7 +2,7 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: repo-sage-tls
-  namespace: repo-sage
+  namespace: managoat-demos
 spec:
   secretName: repo-sage-tls
   issuerRef:

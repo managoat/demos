@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: paddock
-  namespace: paddock
+  namespace: managoat-demos
   labels:
     app: paddock
 spec:

@@ -2,7 +2,7 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: salon-tls
-  namespace: salon
+  namespace: managoat-demos
 spec:
   secretName: salon-tls
   issuerRef:

@@ -10,7 +10,7 @@ apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
   name: moved-to-demo-index
-  namespace: fountain-demos
+  namespace: managoat-demos
 spec:
   redirectRegex:
     # Matches any path on the host, including bare "/" — the old site was one

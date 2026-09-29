@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: repo-sage
-  namespace: repo-sage
+  namespace: managoat-demos
   labels:
     app: repo-sage
 spec:

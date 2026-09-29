@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: salon
-  namespace: salon
+  namespace: managoat-demos
   labels:
     app: salon
 spec:

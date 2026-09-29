@@ -2,10 +2,14 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: workbench-data
-  namespace: workbench
+  namespace: managoat-demos
   labels:
     app: workbench
 spec:
+  # The volume this app had in its own namespace, before the suite moved into
+  # managoat-demos. Pinned so the claim reattaches it rather than provisioning
+  # an empty one.
+  volumeName: pvc-1abae247-1780-4d82-9702-70d46e643464
   storageClassName: longhorn
   accessModes:
     - ReadWriteOnce

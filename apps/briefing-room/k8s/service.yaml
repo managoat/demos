@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: briefing-room
-  namespace: briefing-room
+  namespace: managoat-demos
   labels:
     app: briefing-room
 spec:

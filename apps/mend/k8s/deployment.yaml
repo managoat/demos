@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: mend
-  namespace: mend
+  namespace: managoat-demos
   labels:
     app: mend
 spec:

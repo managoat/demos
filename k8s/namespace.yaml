@@ -1,0 +1,7 @@
+# Every app in apps/ deploys here. This directory owns the objects they would
+# otherwise each declare and fight over: the namespace itself, and the one
+# ServiceAccount the Infisical operator authenticates as.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: managoat-demos

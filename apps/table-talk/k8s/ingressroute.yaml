@@ -2,7 +2,7 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: table-talk
-  namespace: table-talk
+  namespace: managoat-demos
   labels:
     app: table-talk
 spec:
@@ -21,7 +21,7 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: table-talk-http
-  namespace: table-talk
+  namespace: managoat-demos
   labels:
     app: table-talk
 spec:

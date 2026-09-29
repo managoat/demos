@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: mission-control
-  namespace: mission-control
+  namespace: managoat-demos
   labels:
     app: mission-control
 spec:
