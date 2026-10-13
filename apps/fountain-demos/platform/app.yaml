@@ -1,0 +1,12 @@
+# fountain-demos on home-cloud's app platform (planter-apps), registered in Jake's list (Forgejo jhgaylor/apps).
+# k8s/ beside this file is rendered from it by arugula-salad/planter's platform-app
+#   node cli.mjs render apps/fountain-demos/platform --repo fountain-demos --registry ghcr.io/managoat
+# and the build pins the image in k8s/kustomization.yaml. Re-render after editing this file.
+name: fountain-demos
+port: 8080
+health: /healthz
+needs:
+  domain:
+    - demo.managoat.com
+    - demos.inevitable.fyi
+    - fountain-demos.apps.inevitable.fyi

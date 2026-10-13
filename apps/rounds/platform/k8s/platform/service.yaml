@@ -1,0 +1,15 @@
+# Generated from app.yaml by arugula-salad/planter's platform-app (the app's Service). Don't edit: the next
+# build of main renders it again. Change app.yaml, or patch it from k8s/kustomization.yaml.
+apiVersion: v1
+kind: Service
+metadata:
+  name: rounds
+  labels:
+    app.kubernetes.io/name: rounds
+spec:
+  selector:
+    app.kubernetes.io/name: rounds
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

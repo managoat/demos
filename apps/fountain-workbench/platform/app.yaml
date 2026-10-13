@@ -1,0 +1,17 @@
+# fountain-workbench on home-cloud's app platform (planter-apps), registered in Jake's list (Forgejo jhgaylor/apps).
+# k8s/ beside this file is rendered from it by arugula-salad/planter's platform-app
+#   node cli.mjs render apps/fountain-workbench/platform --repo fountain-workbench --registry ghcr.io/managoat
+# and the build pins the image in k8s/kustomization.yaml. Re-render after editing this file.
+name: fountain-workbench
+port: 8080
+health: /healthz
+# SQLite (and its WAL) on a 1Gi Longhorn volume at /data.
+volume: 1Gi
+env: { data: DATA_DIR }
+needs:
+  domain:
+    - fountain-workbench.demo.managoat.com
+    - fountain-workbench.apps.inevitable.fyi
+  # Infisical planter-apps / prod / /fountain-workbench (copied from jhgaylor-playground on the move).
+  secrets:
+    - WORKBENCH_SECRET

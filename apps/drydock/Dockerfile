@@ -11,4 +11,7 @@ COPY dist/ dist/
 ENV PORT=8080 DATA_DIR=/data STATIC_DIR=/app/dist
 EXPOSE 8080
 VOLUME ["/data"]
+# home-cloud's app platform runs a numeric non-root user (bun is 1000, the volume's group) on a
+# read-only root filesystem; /data is the volume and /tmp is writable.
+USER 1000:1000
 CMD ["bun", "server/index.ts"]

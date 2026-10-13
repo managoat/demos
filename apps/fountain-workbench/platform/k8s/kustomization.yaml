@@ -1,0 +1,32 @@
+# https://fountain-workbench.demo.managoat.com (and fountain-workbench.apps.inevitable.fyi): fountain-workbench on home-cloud's app platform, applied by Flux
+# from this directory (its pointer is in Forgejo jhgaylor/apps). platform/ is rendered from
+# ../app.yaml by arugula-salad/planter's platform-app (don't edit it; re-render after changing
+# app.yaml); this file is yours: kustomize patches go here. .github/workflows/build.yml pins newTag.
+# Every app shares the `planter-apps` namespace, which the platform owns.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: planter-apps
+resources:
+  - platform
+images:
+  - name: ghcr.io/managoat/fountain-workbench
+    # Pinned by .github/workflows/build.yml on every build of this app. `unpinned` is a placeholder
+    # that does not exist: the app does not run until CI has replaced it.
+    newTag: unpinned
+patches:
+  # What app.yaml can't say: plain settings.
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: fountain-workbench
+      spec:
+        template:
+          spec:
+            containers:
+              - name: fountain-workbench
+                env:
+                  - name: FOUNTAIN_URL
+                    value: "https://fountain.inevitable.fyi"
+                  - name: STATIC_DIR
+                    value: "/app/dist"
