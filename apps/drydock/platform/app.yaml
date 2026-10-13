@@ -1,0 +1,24 @@
+# drydock on home-cloud's app platform (planter-apps), registered in Jake's list (Forgejo jhgaylor/apps).
+# k8s/ beside this file is rendered from it by arugula-salad/planter's platform-app
+#   node cli.mjs render apps/drydock/platform --repo drydock --registry ghcr.io/managoat
+# and the build pins the image in k8s/kustomization.yaml. Re-render after editing this file.
+name: drydock
+port: 8080
+health: /healthz
+# SQLite (and its WAL) on a 1Gi Longhorn volume at /data.
+volume: 1Gi
+env: { data: DATA_DIR }
+needs:
+  domain:
+    - drydock.demo.managoat.com
+    - drydock.apps.inevitable.fyi
+  # Infisical planter-apps / prod / /drydock (copied from jhgaylor-playground on the move).
+  secrets:
+    - DRYDOCK_SECRET
+    - FOUNTAIN_API_KEY
+    - GITHUB_APP_ID
+    - GITHUB_APP_PRIVATE_KEY
+    - GITHUB_APP_SLUG
+    - GITHUB_OAUTH_CLIENT_ID
+    - GITHUB_OAUTH_CLIENT_SECRET
+    - SPRITES_TOKEN

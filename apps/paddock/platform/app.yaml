@@ -1,0 +1,18 @@
+# paddock on home-cloud's app platform (planter-apps), registered in Jake's list (Forgejo jhgaylor/apps).
+# k8s/ beside this file is rendered from it by arugula-salad/planter's platform-app
+#   node cli.mjs render apps/paddock/platform --repo paddock --registry ghcr.io/managoat
+# and the build pins the image in k8s/kustomization.yaml. Re-render after editing this file.
+name: paddock
+port: 8080
+health: /healthz
+# SQLite (and its WAL) on a 1Gi Longhorn volume at /data.
+volume: 1Gi
+env: { data: DATA_DIR }
+needs:
+  domain:
+    - paddock.demo.managoat.com
+    - paddock.apps.inevitable.fyi
+  # Infisical planter-apps / prod / /paddock (copied from jhgaylor-playground on the move).
+  secrets:
+    - FOUNTAIN_APP_KEY
+    - PADDOCK_SECRET

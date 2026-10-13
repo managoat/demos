@@ -1,0 +1,19 @@
+# mend on home-cloud's app platform (planter-apps), registered in Jake's list (Forgejo jhgaylor/apps).
+# k8s/ beside this file is rendered from it by arugula-salad/planter's platform-app
+#   node cli.mjs render apps/mend/platform --repo mend --registry ghcr.io/managoat
+# and the build pins the image in k8s/kustomization.yaml. Re-render after editing this file.
+name: mend
+port: 8080
+health: /healthz
+needs:
+  domain:
+    - mend.demo.managoat.com
+    - mend.apps.inevitable.fyi
+  # Infisical planter-apps / prod / /mend (copied from jhgaylor-playground on the move).
+  secrets:
+    - GITHUB_APP_ID
+    - GITHUB_APP_PRIVATE_KEY
+    - GITHUB_APP_SLUG
+    - GITHUB_OAUTH_CLIENT_ID
+    - GITHUB_OAUTH_CLIENT_SECRET
+    - GRANT_SECRET

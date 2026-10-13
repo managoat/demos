@@ -1,0 +1,79 @@
+# Generated from app.yaml by arugula-salad/planter's platform-app (the app). Don't edit: the next
+# build of main renders it again. Change app.yaml, or patch it from k8s/kustomization.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: drydock
+  labels:
+    app.kubernetes.io/name: drydock
+  annotations:
+    # Restart the pods when an Infisical value changes (the app reads env at startup).
+    secrets.infisical.com/auto-reload: "true"
+spec:
+  # One replica, replaced rather than rolled: the volume is ReadWriteOnce.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: drydock
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: drydock
+    spec:
+      automountServiceAccountToken: false
+      # The image runs as the numeric user 1000 (the Dockerfile's USER 1000:1000); a root or named
+      # user fails runAsNonRoot with CreateContainerConfigError.
+      securityContext:
+        runAsNonRoot: true
+        # Makes the volume group-writable by gid 1000.
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: drydock
+          image: ghcr.io/managoat/drydock
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - { name: PORT, value: "8080" }
+            - { name: HOST, value: 0.0.0.0 }
+            # Where an OpenTelemetry SDK sends traces (Tempo), and what it calls the app. An app
+            # without one ignores them.
+            - { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://tempo.tempo.svc:4318" }
+            - { name: OTEL_EXPORTER_OTLP_PROTOCOL, value: http/protobuf }
+            - { name: OTEL_SERVICE_NAME, value: drydock }
+            - { name: OTEL_RESOURCE_ATTRIBUTES, value: "service.namespace=planter-apps,deployment.environment=prod" }
+            # Where the app keeps its data (SQLite, uploads): the volume.
+            - { name: DATA_DIR, value: /data }
+          # Infisical `planter-apps-md-qs` / prod / `/drydock` (DRYDOCK_SECRET, FOUNTAIN_API_KEY, GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_APP_SLUG, GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET, SPRITES_TOKEN), as the Secret drydock-secrets.
+          envFrom:
+            - secretRef:
+                name: drydock-secrets
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: data
+          persistentVolumeClaim:
+            claimName: drydock-data

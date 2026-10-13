@@ -8,6 +8,7 @@ FROM oven/bun:1-alpine
 WORKDIR /app
 COPY server/ ./server/
 COPY dist/ ./dist/
-USER bun
+# Numeric, so Kubernetes can check runAsNonRoot (home-cloud's app platform requires it): bun is 1000.
+USER 1000:1000
 EXPOSE 8080
 CMD ["bun", "server/index.ts"]

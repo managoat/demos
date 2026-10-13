@@ -1,0 +1,16 @@
+# Generated from app.yaml by arugula-salad/planter's platform-app (volume). Don't edit: the next
+# build of main renders it again. Change app.yaml, or patch it from k8s/kustomization.yaml.
+# A Longhorn volume for the app's data, mounted at /data (DATA_DIR), replicated across nodes.
+# Removing the app from the cluster deletes it and its data; there is no backup unless you set one up.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: paddock-data
+  labels:
+    app.kubernetes.io/name: paddock
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 1Gi
