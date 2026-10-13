@@ -1,6 +1,6 @@
 # Builds the apps a push actually touched, pushes their images to
 # ghcr.io/managoat/<app>, then pins the immutable sha tags into their
-# k8s/deployment.yaml so Flux (home-cloud) rolls exactly what was built.
+# apps/<app>/platform/k8s/kustomization.yaml so home-cloud rolls exactly what was built.
 #
 # Two things are deliberate here, and both come from this being one
 # repository rather than fourteen:
@@ -12,7 +12,7 @@
 #
 #   * The pin is one job at the end, not a step inside each matrix leg.
 #     Fourteen legs each committing to main would race; one job pins every
-#     app that built and pushes once. That commit only touches k8s/, which
+#     app that built and pushes once. That commit only touches platform/k8s/, which
 #     paths-ignore excludes, so it does not retrigger this workflow.
 #
 # Multi-arch because home-cloud's k3s nodes are arm64 Lima VMs. The SPA
@@ -130,13 +130,8 @@ jobs:
         run: |
           set -euo pipefail
           for app in $(echo "$APPS" | tr -d '[]"' | tr ',' ' '); do
-            f="apps/$app/k8s/deployment.yaml"
-            if [ -f "$f" ]; then
-              sed -i -E "s#(image: ghcr\.io/${OWNER}/${app}:)(sha-[0-9a-f]+|latest)#\1sha-${GITHUB_SHA}#" "$f"
-              git add "$f"
-            fi
-            # An app on home-cloud's app platform: its image's tag in the kustomization rendered
-            # from apps/<app>/platform/app.yaml (`unpinned` until its first build).
+            # Its image's tag in the kustomization rendered from apps/<app>/platform/app.yaml
+            # (`unpinned` until its first build), which home-cloud's app platform applies.
             p="apps/$app/platform/k8s/kustomization.yaml"
             if [ -f "$p" ]; then
               sed -i -E "s#^(    newTag: ).*#\1sha-${GITHUB_SHA}#" "$p"
@@ -148,6 +143,6 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git commit -m "deploy: pin image sha-${GITHUB_SHA::7}"
           # A concurrent pin is the only thing that can have moved main here,
-          # and it only ever touches other apps' k8s files.
+          # and it only ever touches other apps' platform/k8s files.
           git pull --rebase --autostash
           git push
