@@ -29,7 +29,7 @@ import {
   type RoundContender,
   type RuntimePhase,
 } from "./lib/arena";
-import { AGENT_DESCRIPTION, agentNameFor, runtimeFor, SYSTEM_PROMPT } from "./lib/spec";
+import { acpRuntime, AGENT_DESCRIPTION, agentNameFor, runtimeFor, SYSTEM_PROMPT } from "./lib/spec";
 import { completeLoginIfCallback, revoke } from "./lib/oauth";
 import { clearSettings, loadSettings, saveSettings, type Settings } from "./lib/settings";
 import { Column, type ColumnData } from "./components/Column";
@@ -145,7 +145,7 @@ export function App() {
       .then((c) => {
         if (cancelled) return;
         setCatalog(c);
-        setSelection((cur) => (cur.length > 0 ? cur : defaultSelection(distinctModels(c.models))));
+        setSelection((cur) => (cur.length > 0 ? cur : defaultSelection(distinctModels(c.models).filter((m) => acpRuntime(m, c.runtimes)))));
       })
       .catch((err) => !cancelled && say(describeError(err)));
     return () => {
@@ -556,7 +556,7 @@ export function App() {
       if (isLive && rtForStatus === null && roundTurns.length < viewed.prompts.length && status === "done") {
         status = "waiting";
       }
-      const runtimeName = catalog ? runtimeFor(c.model, catalog.runtimes) : "claude";
+      const runtimeName = (catalog && acpRuntime(c.model, catalog.runtimes)) || "claude";
       const segments = roundTurns.map((turn) => {
         const tevents = events.filter((e) => e.turn_id === turn.id);
         return { turn, blocks: blocksForTurn(tevents, runtimeName), metrics: turnMetrics(turn, tevents, now) };
@@ -600,7 +600,7 @@ export function App() {
       />
     );
 
-  const models = catalog ? distinctModels(catalog.models) : [];
+  const models = catalog ? distinctModels(catalog.models).filter((m) => acpRuntime(m, catalog.runtimes)) : [];
   const chips = pickerKeys(models);
   const groups = groupByProvider(chips.map((k) => keyId(k)));
   const pickerLocked = activeRound !== null;

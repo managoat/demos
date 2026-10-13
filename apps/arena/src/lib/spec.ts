@@ -19,10 +19,18 @@ export const SYSTEM_PROMPT = `You are a contender in a model arena. The same pro
 
 Answer directly and well. No preamble, no restating the prompt, no "great question", no sign-off — the first word of your reply should already be the answer. If the prompt is a task, do it; if it needs code, write the code. Keep formatting simple and let substance win the round.`;
 
-/** Claude models run on claude, OpenAI on codex, the rest on opencode. */
+/**
+ * The ACP runtime a model runs on: Claude models on claude, OpenAI models on codex. This app reads the
+ * ACP stream, so nothing else is offered: Google models' only runtime, gemini, doesn't speak ACP.
+ */
+export function acpRuntime(model: string, runtimes: string[]): string | null {
+  const want = model.startsWith("anthropic/") ? "claude" : model.startsWith("openai/") ? "codex" : null;
+  return want && runtimes.includes(want) ? want : null;
+}
+
+/** The runtime for a model the picker offered; one with no ACP runtime is refused. */
 export function runtimeFor(model: string, runtimes: string[]): string {
-  const provider = model.split("/")[0] ?? "";
-  const want = provider === "anthropic" ? "claude" : provider === "openai" ? "codex" : "opencode";
-  if (runtimes.includes(want)) return want;
-  return runtimes.includes("opencode") ? "opencode" : runtimes[0] ?? want;
+  const runtime = acpRuntime(model, runtimes);
+  if (!runtime) throw new Error(`${model} has no ACP runtime on this Fountain (only Anthropic and OpenAI models do)`);
+  return runtime;
 }

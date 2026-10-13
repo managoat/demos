@@ -19,12 +19,20 @@ import {
 
 const DEFAULT_MODEL = "anthropic/claude-sonnet-5";
 
-/** Claude models run on claude, OpenAI on codex, the rest on opencode. */
+/**
+ * The ACP runtime a model runs on: Claude models on claude, OpenAI models on codex. This app reads the
+ * ACP stream, so nothing else is offered: Google models' only runtime, gemini, doesn't speak ACP.
+ */
+function acpRuntime(model: string, runtimes: string[]): string | null {
+  const want = model.startsWith("anthropic/") ? "claude" : model.startsWith("openai/") ? "codex" : null;
+  return want && runtimes.includes(want) ? want : null;
+}
+
+/** The runtime for a model the picker offered; one with no ACP runtime is refused. */
 function runtimeFor(model: string, runtimes: string[]): string {
-  const provider = model.split("/")[0] ?? "";
-  const want = provider === "anthropic" ? "claude" : provider === "openai" ? "codex" : "opencode";
-  if (runtimes.includes(want)) return want;
-  return runtimes.includes("opencode") ? "opencode" : runtimes[0] ?? want;
+  const runtime = acpRuntime(model, runtimes);
+  if (!runtime) throw new Error(`${model} has no ACP runtime on this Fountain (only Anthropic and OpenAI models do)`);
+  return runtime;
 }
 
 export function Connect(props: {
@@ -59,7 +67,10 @@ export function Connect(props: {
     () => (team ?? []).filter((t) => t.agent.name === COORDINATOR_NAME || t.name === COORDINATOR_NAME),
     [team],
   );
-  const models = useMemo(() => [...new Set(Object.values(catalog?.models ?? {}).flat())], [catalog]);
+  const models = useMemo(
+    () => [...new Set(Object.values(catalog?.models ?? {}).flat())].filter((m) => acpRuntime(m, catalog?.runtimes ?? [])),
+    [catalog],
+  );
 
   /** The worker agent, created once and reused ever after. */
   const ensureWorker = async (): Promise<string> => {
