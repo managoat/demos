@@ -12,4 +12,4 @@ images:
   - name: ghcr.io/managoat/mission-control
     # Pinned by .github/workflows/build.yml on every build of this app. `unpinned` is a placeholder
     # that does not exist: the app does not run until CI has replaced it.
-    newTag: sha-0dcb4a41daf283784112d106d8fab0e9ec9164e5
+    newTag: sha-e2aeef3e54444eae4d016a821ca9f91019cb2878
