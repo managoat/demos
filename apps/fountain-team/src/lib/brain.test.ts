@@ -16,11 +16,12 @@ describe("brains", () => {
   test("runtime follows the model's provider; gemini never picks its own (non-ACP) runtime", () => {
     expect(runtimeFor("anthropic/claude-sonnet-5", catalog.runtimes)).toBe("claude");
     expect(runtimeFor("openai/gpt-5", catalog.runtimes)).toBe("codex");
-    expect(runtimeFor("google/gemini-2.5-pro", catalog.runtimes)).toBe("opencode");
-    expect(runtimeFor("anthropic/claude-sonnet-5", ["opencode"])).toBe("opencode");
+    // gemini is in the catalog's runtimes, and still never chosen: it doesn't speak ACP.
+    expect(runtimeFor("google/gemini-2.5-pro", catalog.runtimes)).toBeNull();
+    expect(runtimeFor("anthropic/claude-sonnet-5", ["gemini"])).toBeNull();
   });
 
-  test("dedupes across runtimes, orders anthropic → openai → google, marks credentials", () => {
+  test("dedupes across runtimes, offers only ACP models (anthropic → openai), marks credentials", () => {
     const brains = brainsFrom(catalog, { anthropic_api_key: true });
     expect(brains.map((b) => b.model)).toEqual([
       "anthropic/claude-opus-5",
@@ -28,7 +29,6 @@ describe("brains", () => {
       "anthropic/claude-haiku-4-5",
       "openai/gpt-5-codex",
       "openai/gpt-5",
-      "google/gemini-2.5-pro",
     ]);
     expect(brains.find((b) => b.model === "openai/gpt-5")?.available).toBe(false);
     expect(brains.find((b) => b.provider === "anthropic")?.available).toBe(true);

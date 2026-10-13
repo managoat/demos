@@ -2,9 +2,9 @@
  * "Pick a brain" — the one choice the easy add asks for. Fountain's catalog
  * lists models per runtime; a teammate needs a model AND a runtime, and the
  * runtime is a consequence of the model for anyone who isn't tuning: Claude
- * models run on the claude runtime, OpenAI on codex, everything else on
- * opencode (gemini's own runtime does not speak ACP, so it is never chosen
- * here). Providers without an inference credential are shown but marked,
+ * models run on the claude runtime, OpenAI on codex. Nothing else is offered:
+ * Team reads the ACP stream, and Google models' only runtime, gemini, does not
+ * speak ACP. Providers without an inference credential are shown but marked,
  * and never picked as the default.
  */
 
@@ -34,27 +34,27 @@ export const CREDENTIAL_PROVIDERS: Record<string, string[]> = {
   google: ["gemini_api_key"],
 };
 
-export function runtimeFor(model: string, runtimes: string[]): string {
-  const provider = model.split("/")[0] ?? "";
-  const want = provider === "anthropic" ? "claude" : provider === "openai" ? "codex" : "opencode";
-  if (runtimes.includes(want)) return want;
-  return runtimes.includes("opencode") ? "opencode" : runtimes[0] ?? want;
+export function runtimeFor(model: string, runtimes: string[]): string | null {
+  const want = model.startsWith("anthropic/") ? "claude" : model.startsWith("openai/") ? "codex" : null;
+  return want && runtimes.includes(want) ? want : null;
 }
 
-/** Distinct models across the catalog, ordered by provider (anthropic, openai, then the rest), labelled. */
+/** Distinct models across the catalog that have an ACP runtime, Anthropic first, then OpenAI, labelled. */
 export function brainsFrom(catalog: Catalog, credentials: Record<string, boolean> = {}): Brain[] {
   const seen = new Set<string>();
   const out: Brain[] = [];
-  const order = ["claude", "codex", "opencode", "gemini"];
+  const order = ["claude", "codex"];
   const runtimes = [...order.filter((r) => catalog.models[r]), ...Object.keys(catalog.models).filter((r) => !order.includes(r))];
   for (const r of runtimes) {
     for (const model of catalog.models[r] ?? []) {
       if (seen.has(model)) continue;
       seen.add(model);
+      const runtime = runtimeFor(model, catalog.runtimes);
+      if (!runtime) continue;
       const provider = model.split("/")[0] ?? "";
       const keys = CREDENTIAL_PROVIDERS[provider] ?? [];
       const available = keys.length ? keys.some((k) => credentials[k]) : true;
-      out.push({ model, provider, runtime: runtimeFor(model, catalog.runtimes), label: labelFor(model), available });
+      out.push({ model, provider, runtime, label: labelFor(model), available });
     }
   }
   const rank = (p: string) => (p === "anthropic" ? 0 : p === "openai" ? 1 : p === "google" ? 2 : 3);
