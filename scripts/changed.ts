@@ -19,8 +19,11 @@ import { apps } from "./apps";
 /** A change to any of these rebuilds everything. */
 const SHARED = [/^packages\//, /^scripts\//, /^package\.json$/, /^bun\.lock$/, /^tsconfig(\.\w+)?\.json$/, /^\.github\/workflows\//];
 
-/** Files inside an app that cannot change its image. */
-const INERT = [/^apps\/[^/]+\/k8s\//, /^apps\/[^/]+\/README\.md$/, /^apps\/[^/]+\/LICENSE$/];
+/**
+ * Files inside an app that cannot change its image: its manifests (`k8s/`, and `platform/` for an
+ * app on home-cloud's app platform: its app.yaml and the k8s/ rendered from it), and prose.
+ */
+const INERT = [/^apps\/[^/]+\/k8s\//, /^apps\/[^/]+\/platform\//, /^apps\/[^/]+\/README\.md$/, /^apps\/[^/]+\/LICENSE$/];
 
 export function changedApps(files: string[], known: string[]): string[] {
   const relevant = files.filter((f) => !INERT.some((re) => re.test(f)));

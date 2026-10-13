@@ -31,6 +31,7 @@ on:
     branches: [main]
     paths-ignore:
       - "apps/*/k8s/**"
+      - "apps/*/platform/**"
       - "**/*.md"
 
 concurrency:
@@ -130,9 +131,17 @@ jobs:
           set -euo pipefail
           for app in $(echo "$APPS" | tr -d '[]"' | tr ',' ' '); do
             f="apps/$app/k8s/deployment.yaml"
-            [ -f "$f" ] || { echo "$app: no $f, skipping"; continue; }
-            sed -i -E "s#(image: ghcr\.io/${OWNER}/${app}:)(sha-[0-9a-f]+|latest)#\1sha-${GITHUB_SHA}#" "$f"
-            git add "$f"
+            if [ -f "$f" ]; then
+              sed -i -E "s#(image: ghcr\.io/${OWNER}/${app}:)(sha-[0-9a-f]+|latest)#\1sha-${GITHUB_SHA}#" "$f"
+              git add "$f"
+            fi
+            # An app on home-cloud's app platform: its image's tag in the kustomization rendered
+            # from apps/<app>/platform/app.yaml (`unpinned` until its first build).
+            p="apps/$app/platform/k8s/kustomization.yaml"
+            if [ -f "$p" ]; then
+              sed -i -E "s#^(    newTag: ).*#\1sha-${GITHUB_SHA}#" "$p"
+              git add "$p"
+            fi
           done
           git diff --cached --quiet && { echo "already pinned"; exit 0; }
           git config user.name "github-actions[bot]"

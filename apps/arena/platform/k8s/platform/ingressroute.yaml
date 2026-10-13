@@ -1,0 +1,98 @@
+# Generated from app.yaml by arugula-salad/planter's platform-app (https://arena.apps.inevitable.fyi). Don't edit: the next
+# build of main renders it again. Change app.yaml, or patch it from k8s/kustomization.yaml.
+# https://arena.apps.inevitable.fyi, with port 80 redirected, on the fleet's certificate for *.apps.inevitable.fyi
+# (planter-apps-wildcard-inevitable). *.inevitable.fyi resolves to the cluster, so there is no DNS step either.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: arena-inevitable
+  labels:
+    app.kubernetes.io/name: arena
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`arena.apps.inevitable.fyi`)
+      kind: Rule
+      services:
+        - name: arena
+          port: 80
+  tls:
+    secretName: planter-apps-wildcard-inevitable
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: arena-inevitable-http
+  labels:
+    app.kubernetes.io/name: arena
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`arena.apps.inevitable.fyi`)
+      kind: Rule
+      middlewares:
+        # home-cloud's shared redirect middleware.
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: arena
+          port: 80
+---
+# https://arena.demo.managoat.com: custom domains, with port 80 redirected. home-cloud admits
+# these routes only once it has granted each host to arena: the app's registration in
+# arugula-salad/planter-apps asks for it (planter writes the annotation platform.arugula.io/domains at Go
+# live), its A record (or CNAME) points at 38.42.123.76, and the pull request home-cloud's domain
+# provisioner opens for it is merged. Then cert-manager proves it over HTTP-01.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: arena-custom
+  labels:
+    app.kubernetes.io/name: arena
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`arena.demo.managoat.com`)
+      kind: Rule
+      services:
+        - name: arena
+          port: 80
+  tls:
+    secretName: arena-custom-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: arena-custom-http
+  labels:
+    app.kubernetes.io/name: arena
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`arena.demo.managoat.com`)
+      kind: Rule
+      middlewares:
+        # home-cloud's shared redirect middleware.
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: arena
+          port: 80
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: arena-custom-tls
+  labels:
+    app.kubernetes.io/name: arena
+spec:
+  secretName: arena-custom-tls
+  issuerRef:
+    name: letsencrypt-http01
+    kind: ClusterIssuer
+  dnsNames:
+    - arena.demo.managoat.com

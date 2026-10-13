@@ -1,0 +1,259 @@
+# Generated from app.yaml by arugula-salad/planter's platform-app (needs.telemetry). Don't edit: the next
+# build of main renders it again. Change app.yaml, or patch it from k8s/kustomization.yaml.
+# A Grafana dashboard for fountain-team, "fountain-team (planter-apps)": requests, errors and latency as Traefik
+# sees them, the pods' memory and CPU, their logs, and the app's traces (if it sends any; see the
+# OTEL_ variables in deployment.yaml). Grafana loads every ConfigMap labelled grafana_dashboard: "1".
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fountain-team-dashboard
+  labels:
+    app.kubernetes.io/name: fountain-team
+    grafana_dashboard: "1"
+data:
+  fountain-team.json: |
+    {
+      "uid": "planter-fountain-team",
+      "title": "fountain-team (planter-apps)",
+      "tags": [
+        "planter-apps"
+      ],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "links": [
+        {
+          "title": "https://fountain-team.apps.arugula.io",
+          "url": "https://fountain-team.apps.arugula.io",
+          "type": "link",
+          "targetBlank": true
+        }
+      ],
+      "panels": [
+        {
+          "id": 1,
+          "title": "Requests by status",
+          "type": "timeseries",
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (code) (rate(traefik_service_requests_total{service=~\"planter-apps-fountain-team-[0-9a-f]+@kubernetescrd\"}[$__rate_interval]))",
+              "legendFormat": "{{code}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 2,
+          "title": "Server errors",
+          "type": "timeseries",
+          "gridPos": {
+            "x": 12,
+            "y": 0,
+            "w": 6,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(rate(traefik_service_requests_total{service=~\"planter-apps-fountain-team-[0-9a-f]+@kubernetescrd\", code=~\"5..\"}[$__rate_interval])) / sum(rate(traefik_service_requests_total{service=~\"planter-apps-fountain-team-[0-9a-f]+@kubernetescrd\"}[$__rate_interval]))",
+              "legendFormat": "5xx",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 3,
+          "title": "Latency",
+          "type": "timeseries",
+          "gridPos": {
+            "x": 18,
+            "y": 0,
+            "w": 6,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "histogram_quantile(0.5, sum by (le) (rate(traefik_service_request_duration_seconds_bucket{service=~\"planter-apps-fountain-team-[0-9a-f]+@kubernetescrd\"}[$__rate_interval])))",
+              "legendFormat": "p50",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(traefik_service_request_duration_seconds_bucket{service=~\"planter-apps-fountain-team-[0-9a-f]+@kubernetescrd\"}[$__rate_interval])))",
+              "legendFormat": "p95",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 4,
+          "title": "Memory",
+          "type": "timeseries",
+          "gridPos": {
+            "x": 0,
+            "y": 8,
+            "w": 12,
+            "h": 7
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"planter-apps\", pod=~\"fountain-team-[a-z0-9]+-[a-z0-9]{5}\", container=\"fountain-team\"})",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 5,
+          "title": "CPU",
+          "type": "timeseries",
+          "gridPos": {
+            "x": 12,
+            "y": 8,
+            "w": 12,
+            "h": 7
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"planter-apps\", pod=~\"fountain-team-[a-z0-9]+-[a-z0-9]{5}\", container=\"fountain-team\"}[$__rate_interval]))",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 6,
+          "title": "Logs",
+          "type": "logs",
+          "gridPos": {
+            "x": 0,
+            "y": 15,
+            "w": 24,
+            "h": 10
+          },
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "expr": "{namespace=\"planter-apps\", app=\"fountain-team\"}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "title": "Traces",
+          "type": "table",
+          "gridPos": {
+            "x": 0,
+            "y": 25,
+            "w": 24,
+            "h": 8
+          },
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "tempo",
+                "uid": "tempo"
+              },
+              "queryType": "traceql",
+              "query": "{resource.service.name=\"fountain-team\"}",
+              "limit": 20,
+              "refId": "A"
+            }
+          ]
+        }
+      ]
+    }

@@ -1,0 +1,11 @@
+# mission-control on home-cloud's app platform (planter-apps), registered in Jake's list (Forgejo jhgaylor/apps).
+# k8s/ beside this file is rendered from it by arugula-salad/planter's platform-app
+#   node cli.mjs render apps/mission-control/platform --repo mission-control --registry ghcr.io/managoat
+# and the build pins the image in k8s/kustomization.yaml. Re-render after editing this file.
+name: mission-control
+port: 8080
+health: /healthz
+needs:
+  domain:
+    - mission-control.demo.managoat.com
+    - mission-control.apps.inevitable.fyi

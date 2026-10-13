@@ -1,0 +1,11 @@
+# repo-sage on home-cloud's app platform (planter-apps), registered in Jake's list (Forgejo jhgaylor/apps).
+# k8s/ beside this file is rendered from it by arugula-salad/planter's platform-app
+#   node cli.mjs render apps/repo-sage/platform --repo repo-sage --registry ghcr.io/managoat
+# and the build pins the image in k8s/kustomization.yaml. Re-render after editing this file.
+name: repo-sage
+port: 8080
+health: /healthz
+needs:
+  domain:
+    - repo-sage.demo.managoat.com
+    - repo-sage.apps.inevitable.fyi

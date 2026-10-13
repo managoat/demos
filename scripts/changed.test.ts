@@ -37,6 +37,10 @@ describe("changedApps", () => {
     expect(changedApps(["apps/not-an-app/x.ts"], KNOWN)).toEqual([]);
   });
 
+  test("an app's platform/ (app.yaml and what is rendered from it) rebuilds nothing", () => {
+    expect(changedApps(["apps/arena/platform/app.yaml", "apps/arena/platform/k8s/kustomization.yaml"], KNOWN)).toEqual([]);
+  });
+
   test("k8s changes do not suppress a real change in the same push", () => {
     expect(changedApps(["apps/salon/k8s/service.yaml", "apps/salon/src/main.tsx"], KNOWN)).toEqual(["salon"]);
   });
