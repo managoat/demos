@@ -18,7 +18,7 @@ spec:
       containers:
         - name: web
           # Pinned to an immutable sha tag by .github/workflows/build.yml.
-          image: ghcr.io/managoat/arena:sha-e4e0104f5d4520f2e285e1e7ef9d2b2f0eb6a413
+          image: ghcr.io/managoat/arena:sha-66e34f95b9350ade9d39a5bbef46422457418ae5
           ports:
             - containerPort: 8080
           readinessProbe:
