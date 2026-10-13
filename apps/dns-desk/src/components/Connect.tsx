@@ -8,10 +8,11 @@ import { describeError, type FountainClient } from "../api/client";
 import type { Catalog, Teammate, Vault } from "../api/types";
 import { AGENT_DESCRIPTION, AGENT_NAME, SYSTEM_PROMPT, TOKEN_KEY } from "../lib/spec";
 
-/** Claude models run on claude, OpenAI on codex, the rest on opencode. */
+/** Claude models run on claude, OpenAI on codex, Google on gemini, the rest on opencode where it exists. */
 function runtimeFor(model: string, runtimes: string[]): string {
   const provider = model.split("/")[0] ?? "";
-  const want = provider === "anthropic" ? "claude" : provider === "openai" ? "codex" : "opencode";
+  const want =
+    provider === "anthropic" ? "claude" : provider === "openai" ? "codex" : provider === "google" ? "gemini" : "opencode";
   if (runtimes.includes(want)) return want;
   return runtimes.includes("opencode") ? "opencode" : runtimes[0] ?? want;
 }

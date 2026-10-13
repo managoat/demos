@@ -19,10 +19,11 @@ export const SYSTEM_PROMPT = `You are a contender in a model arena. The same pro
 
 Answer directly and well. No preamble, no restating the prompt, no "great question", no sign-off — the first word of your reply should already be the answer. If the prompt is a task, do it; if it needs code, write the code. Keep formatting simple and let substance win the round.`;
 
-/** Claude models run on claude, OpenAI on codex, the rest on opencode. */
+/** Claude models run on claude, OpenAI on codex, Google on gemini, the rest on opencode where it exists. */
 export function runtimeFor(model: string, runtimes: string[]): string {
   const provider = model.split("/")[0] ?? "";
-  const want = provider === "anthropic" ? "claude" : provider === "openai" ? "codex" : "opencode";
+  const want =
+    provider === "anthropic" ? "claude" : provider === "openai" ? "codex" : provider === "google" ? "gemini" : "opencode";
   if (runtimes.includes(want)) return want;
   return runtimes.includes("opencode") ? "opencode" : runtimes[0] ?? want;
 }
