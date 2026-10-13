@@ -1,0 +1,11 @@
+# dns-desk on home-cloud's app platform (planter-apps), registered in Jake's list (Forgejo jhgaylor/apps).
+# k8s/ beside this file is rendered from it by arugula-salad/planter's platform-app
+#   node cli.mjs render apps/dns-desk/platform --repo dns-desk --registry ghcr.io/managoat
+# and the build pins the image in k8s/kustomization.yaml. Re-render after editing this file.
+name: dns-desk
+port: 8080
+health: /healthz
+needs:
+  domain:
+    - dns-desk.demo.managoat.com
+    - dns-desk.apps.inevitable.fyi

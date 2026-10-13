@@ -1,0 +1,61 @@
+# Generated from app.yaml by arugula-salad/planter's platform-app (the app). Don't edit: the next
+# build of main renders it again. Change app.yaml, or patch it from k8s/kustomization.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: watchtower
+  labels:
+    app.kubernetes.io/name: watchtower
+spec:
+  # Stateless: two replicas, rolled.
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: watchtower
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: watchtower
+    spec:
+      automountServiceAccountToken: false
+      # The image runs as the numeric user 1000 (the Dockerfile's USER 1000:1000); a root or named
+      # user fails runAsNonRoot with CreateContainerConfigError.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: watchtower
+          image: ghcr.io/managoat/watchtower
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - { name: PORT, value: "8080" }
+            - { name: HOST, value: 0.0.0.0 }
+            # Where an OpenTelemetry SDK sends traces (Tempo), and what it calls the app. An app
+            # without one ignores them.
+            - { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://tempo.tempo.svc:4318" }
+            - { name: OTEL_EXPORTER_OTLP_PROTOCOL, value: http/protobuf }
+            - { name: OTEL_SERVICE_NAME, value: watchtower }
+            - { name: OTEL_RESOURCE_ATTRIBUTES, value: "service.namespace=planter-apps,deployment.environment=prod" }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi

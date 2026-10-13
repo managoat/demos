@@ -1,0 +1,11 @@
+# briefing-room on home-cloud's app platform (planter-apps), registered in Jake's list (Forgejo jhgaylor/apps).
+# k8s/ beside this file is rendered from it by arugula-salad/planter's platform-app
+#   node cli.mjs render apps/briefing-room/platform --repo briefing-room --registry ghcr.io/managoat
+# and the build pins the image in k8s/kustomization.yaml. Re-render after editing this file.
+name: briefing-room
+port: 8080
+health: /healthz
+needs:
+  domain:
+    - briefing-room.demo.managoat.com
+    - briefing-room.apps.inevitable.fyi
