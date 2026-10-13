@@ -76,10 +76,23 @@ Push to `main`. `.github/workflows/build.yml` works out which apps the push
 actually touched (`scripts/changed.ts` — an app's own directory rebuilds that
 app; anything under `packages/` or the root toolchain rebuilds all of them),
 builds and pushes multi-arch images to `ghcr.io/managoat/<name>`, then pins
-the immutable sha tags into each `apps/<name>/k8s/deployment.yaml` in **one**
-commit. Flux in [jhgaylor/home-cloud](https://github.com/jhgaylor/home-cloud)
-reconciles one `GitRepository` over this repo with a `Kustomization` per app
-pointed at `apps/<name>/k8s`.
+the immutable sha tags in **one** commit. Apps deploy one of two ways:
+
+- **On home-cloud's app platform** (arena, briefing-room, dns-desk,
+  fountain-conversations, fountain-team, mission-control, repo-sage,
+  table-talk, watchtower): `apps/<name>/platform/app.yaml` says what the app
+  needs, and `apps/<name>/platform/k8s/` is rendered from it by
+  arugula-salad/planter's platform-app
+  (`node cli.mjs render apps/<name>/platform --repo <name> --registry ghcr.io/managoat`;
+  re-render after editing `app.yaml`). CI pins the image in its
+  `kustomization.yaml`. The app's pointer is in Forgejo `jhgaylor/apps`, and it
+  runs in the shared `planter-apps` namespace as a non-root user on a
+  read-only filesystem (hence `nginx-unprivileged`).
+- **Its own Kustomization** (the rest): CI pins
+  `apps/<name>/k8s/deployment.yaml`, and Flux in
+  [jhgaylor/home-cloud](https://github.com/jhgaylor/home-cloud) reconciles one
+  `GitRepository` over this repo with a `Kustomization` per app pointed at
+  `apps/<name>/k8s`.
 
 Adding an app means: a directory under `apps/`, a `Dockerfile` and `k8s/`
 beside it, a `Kustomization` in home-cloud's `chant/src/apps.ts`, an entry in
