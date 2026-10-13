@@ -12,7 +12,7 @@ images:
   - name: ghcr.io/managoat/drydock
     # Pinned by .github/workflows/build.yml on every build of this app. `unpinned` is a placeholder
     # that does not exist: the app does not run until CI has replaced it.
-    newTag: sha-f262a6975d788a37fffed1e254c44d7fe7357734
+    newTag: sha-bf5d1e7deeb51ef045c73bcfc2994e9a250116fb
 patches:
   # What app.yaml can't say: plain settings, and more memory than the platform's default.
   - patch: |-

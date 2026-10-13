@@ -12,4 +12,4 @@ images:
   - name: ghcr.io/managoat/arena
     # Pinned by .github/workflows/build.yml on every build of this app. `unpinned` is a placeholder
     # that does not exist: the app does not run until CI has replaced it.
-    newTag: sha-e2aeef3e54444eae4d016a821ca9f91019cb2878
+    newTag: sha-bf5d1e7deeb51ef045c73bcfc2994e9a250116fb
