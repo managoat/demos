@@ -2,7 +2,8 @@
  * The apps in this repo, read off the filesystem.
  *
  * The one list nothing can disagree with: a directory under `apps/` with a
- * `k8s/` beside it is an app the cluster runs. CI's build matrix, the
+ * `k8s/` beside it (or `platform/k8s/`, for an app on home-cloud's app
+ * platform) is an app the cluster runs. CI's build matrix, the
  * typecheck fan-out and fountain-demos' drift check all derive from this
  * rather than keeping their own copy — which is the thing that went wrong
  * when these were fourteen repositories.
@@ -15,7 +16,7 @@ const ROOT = new URL("..", import.meta.url).pathname;
 export interface App {
   name: string;
   dir: string;
-  /** Deployed by the cluster — has k8s manifests of its own. */
+  /** Deployed by the cluster — has k8s manifests of its own, or the platform's. */
   deployed: boolean;
   /** Has a Dockerfile, so CI builds and pushes an image for it. */
   built: boolean;
@@ -27,7 +28,9 @@ export function apps(): App[] {
     .map((e) => ({
       name: e.name,
       dir: join(ROOT, "apps", e.name),
-      deployed: existsSync(join(ROOT, "apps", e.name, "k8s", "kustomization.yaml")),
+      deployed:
+        existsSync(join(ROOT, "apps", e.name, "k8s", "kustomization.yaml")) ||
+        existsSync(join(ROOT, "apps", e.name, "platform", "k8s", "kustomization.yaml")),
       built: existsSync(join(ROOT, "apps", e.name, "Dockerfile")),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
