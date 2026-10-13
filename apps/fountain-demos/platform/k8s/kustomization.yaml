@@ -12,4 +12,4 @@ images:
   - name: ghcr.io/managoat/fountain-demos
     # Pinned by .github/workflows/build.yml on every build of this app. `unpinned` is a placeholder
     # that does not exist: the app does not run until CI has replaced it.
-    newTag: unpinned
+    newTag: sha-f262a6975d788a37fffed1e254c44d7fe7357734
