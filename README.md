@@ -21,7 +21,6 @@ what they do is an ordinary web app with no privileged access.
 | [fountain-workbench](apps/fountain-workbench) | fountain-workbench.demo.managoat.com | Projects → work items → the agents pulled into them. Bun server. |
 | [mend](apps/mend) | mend.demo.managoat.com | An audit of a public repo's CI, manifests and rulesets. Bun server. |
 | [mission-control](apps/mission-control) | mission-control.demo.managoat.com | Plan, approve, fan out over a fleet of sandboxes. |
-| [paddock](apps/paddock) | paddock.demo.managoat.com | A computer in the cloud that stays yours. Terminal tabs as threads on one box. Bun server. |
 | [repo-sage](apps/repo-sage) | repo-sage.demo.managoat.com | Chat with any public GitHub repo, cited to file:line. |
 | [rounds](apps/rounds) | rounds.demo.managoat.com | Mend's ambient sibling: repositories on a schedule. Bun server. |
 | [salon](apps/salon) | salon.demo.managoat.com | Multiplayer chat — the host's Fountain account pays. Bun server. |
