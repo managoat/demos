@@ -169,10 +169,6 @@ export function describeError(err: unknown): string {
         return "The sage is still working on the last question — wait for it to finish.";
       case "provisioning":
         return "The sage's computer is still starting — try again shortly.";
-      case "subscription_required":
-        return "An active Fountain subscription is required.";
-      case "sandbox_quota_exceeded":
-        return "You are at your Fountain sandbox limit — retire a sage (or end another conversation) first.";
       case "not_found":
         return "Not found.";
       default:

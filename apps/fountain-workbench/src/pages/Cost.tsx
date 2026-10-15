@@ -8,16 +8,16 @@
  * boundary a member crosses, and a bill does not belong on the far side of it.
  *
  * Two requests, because they cost very different amounts. `/api/me/cost` is
- * one call upstream and paints immediately: the bill, and where the work went
- * over all time. `/api/me/cost/period` is a call per conversation and arrives
- * behind it: the same projects measured in turn hours over the bill's own
- * window, which is the same unit and the same window as the bill, and so is a
- * division of it rather than a second number next to it.
+ * one call upstream and paints immediately: where the work went over all
+ * time, in tokens. `/api/me/cost/period` is a call per conversation and
+ * arrives behind it: the same projects measured in turn hours over the
+ * calendar month. Fountain is self-hosted and keeps no bill, so neither is a
+ * dollar figure.
  */
 import { useEffect, useMemo, useState } from "react";
 import { api, type Cost as CostDto, type ItemCost, type ItemPeriodCost, type PeriodCost, type ProjectCost, type ProjectPeriodCost } from "../lib/api";
 import { describeError } from "../lib/errors";
-import { formatCompact, formatDay, formatHours, formatTime, formatTurnTime, formatUsd } from "../lib/format";
+import { formatCompact, formatDay, formatTime, formatTurnTime } from "../lib/format";
 import { href } from "../router";
 import { isClosed } from "../lib/workbench";
 import { ItemStatusPill } from "../components/ItemStatus";
@@ -94,9 +94,7 @@ export function CostView({ cost, period, periodError, email }: { cost: CostDto; 
 
   // The scale every bar is drawn against, and the whole each share is of.
   const top = useMemo(() => (period ? Math.max(1, ...rows.map((r) => r.per?.seconds ?? 0)) : Math.max(1, ...cost.projects.map(tokens))), [rows, cost, period]);
-  const accountSeconds = period?.accountTurnHours != null ? period.accountTurnHours * 3600 : null;
-  // Fountain's figure when there is one; ours otherwise, which at least sums the same way.
-  const whole = period ? (accountSeconds && accountSeconds > 0 ? accountSeconds : period.measured.seconds) : tokens(cost.total);
+  const whole = period ? period.measured.seconds : tokens(cost.total);
 
   const projectRow = ({ project: p, per }: { project: ProjectCost; per: ProjectPeriodCost | null }) => {
     const isOpen = open.has(p.id);
@@ -117,13 +115,13 @@ export function CostView({ cost, period, periodError, email }: { cost: CostDto; 
           <span className="spacer" />
           {per ? <span className="mono small">{formatTurnTime(per.seconds)}</span> : <span className="mono small">{formatCompact(tokens(p))} tok</span>}
         </div>
-        <div className="meter" title={period ? `${share}% of the turn hours on your account this period` : `${share}% of the tokens on your account`}>
+        <div className="meter" title={period ? `${share}% of the turn hours measured across your projects this month` : `${share}% of the tokens on your account`}>
           <span style={{ width: `${Math.round((size / top) * 100)}%` }} />
         </div>
         <div className="cost-sub muted small">
           {per ? (
             <>
-              {share}% of {accountSeconds != null ? `your ${formatHours(accountSeconds / 3600)}` : "what is measured here"} this period · {per.turns} turn{per.turns === 1 ? "" : "s"} · {formatCompact(tokens(per))} tok
+              {share}% of what is measured here this month · {per.turns} turn{per.turns === 1 ? "" : "s"} · {formatCompact(tokens(per))} tok
             </>
           ) : (
             <>
@@ -159,11 +157,6 @@ export function CostView({ cost, period, periodError, email }: { cost: CostDto; 
     </li>
   );
 
-  const b = cost.billing;
-  const usage = b?.usage;
-  // What the bill covers that no project of the caller's accounts for. The
-  // difference of two figures over the same window, not a third measurement.
-  const unattributed = accountSeconds != null ? Math.max(0, accountSeconds - (period?.measured.seconds ?? 0)) : null;
   const missing = period ? period.fanout.dropped + period.fanout.failed : 0;
 
   return (
@@ -178,37 +171,6 @@ export function CostView({ cost, period, periodError, email }: { cost: CostDto; 
         </a>
       </div>
 
-      <div className="card stack">
-        <div className="row">
-          <h2 className="h2">The bill</h2>
-          <span className="spacer" />
-          {b?.status && <span className={`pill ${b.status === "past_due" ? "failed" : b.status === "active" || b.status === "comped" ? "running" : ""}`}>{b.status}</span>}
-        </div>
-
-        {!b ? (
-          <p className="muted">
-            {cost.billingUnavailable === "disabled"
-              ? "This Fountain has billing switched off, so there is no bill to show. What follows is still where the work went."
-              : "Fountain would not report your billing just now. What follows is still where the work went."}
-          </p>
-        ) : (
-          <>
-            <div className="cost-stats">
-              <Stat label="Plan" value={b.plan?.name ?? "—"} sub={b.plan?.monthly_cents === undefined ? undefined : `${formatUsd(b.plan.monthly_cents)}/mo, flat`} />
-              <Stat label="Turn hours" value={formatHours(usage?.turn_hours)} sub={usage?.turn_hours_included ? `of ${usage.turn_hours_included} included` : undefined} />
-              <Stat label="Sandbox minutes" value={usage?.sandbox_minutes === undefined ? "—" : formatCompact(usage.sandbox_minutes)} sub="active time, parked excluded" />
-              <Stat label="Turns" value={usage?.turns === undefined ? "—" : formatCompact(usage.turns)} sub={usage?.conversations === undefined ? undefined : `over ${usage.conversations} conversation${usage.conversations === 1 ? "" : "s"}`} />
-            </div>
-            <p className="muted small">
-              {b.period?.start && b.period?.end ? `${formatDay(b.period.start)} → ${formatDay(b.period.end)}. ` : ""}
-              {b.period?.source === "calendar_month" ? "No invoice period reported, so this is the calendar month — these numbers do not line up with an invoice." : "The period Stripe is invoicing."}
-              {b.cancel_at_period_end && b.current_period_end ? ` Cancels at the end of it, ${formatDay(b.current_period_end)}.` : ""}
-              {b.status === "trialing" && b.trial_ends_at ? ` Trial ends ${formatDay(b.trial_ends_at)}.` : ""}
-            </p>
-          </>
-        )}
-      </div>
-
       <div className="row section">
         <h2 className="h2">Where the turn hours went</h2>
         <span className="spacer" />
@@ -217,9 +179,9 @@ export function CostView({ cost, period, periodError, email }: { cost: CostDto; 
             {formatDay(period.period.start)} → {formatDay(period.period.end)}
           </span>
         ) : periodError ? (
-          <span className="muted small">this period: unavailable</span>
+          <span className="muted small">this month: unavailable</span>
         ) : (
-          <span className="muted small">measuring this period…</span>
+          <span className="muted small">measuring this month…</span>
         )}
       </div>
 
@@ -232,30 +194,21 @@ export function CostView({ cost, period, periodError, email }: { cost: CostDto; 
         <ul className="cost-list">{rows.map(projectRow)}</ul>
       )}
 
-      {unattributed !== null && (
-        <p className="muted small elsewhere">
-          Plus {formatTurnTime(unattributed)} on your account that no project of yours accounts for — your team page, your own threads, work in someone else's workbench project. That is Fountain's {formatHours(accountSeconds! / 3600)} for the
-          period less the {formatTurnTime(period!.measured.seconds)} measured above, not a third reading.
-        </p>
-      )}
-
-      {cost.elsewhere.conversations > 0 && unattributed === null && (
+      {cost.elsewhere.conversations > 0 && (
         <p className="muted small elsewhere">
           Plus {cost.elsewhere.conversations} conversation{cost.elsewhere.conversations === 1 ? "" : "s"} on your Fountain account that belong to no project of yours — {formatCompact(tokens(cost.elsewhere))} tokens over {cost.elsewhere.turns} turn
-          {cost.elsewhere.turns === 1 ? "" : "s"}. Your team page, your own threads, work in someone else's workbench project. They are on the same bill.
+          {cost.elsewhere.turns === 1 ? "" : "s"}. Your own threads, work in someone else's workbench project, other apps on the same key.
         </p>
       )}
 
       <div className="card stack tight cost-note">
         <p className="strong small">What is measured, and over what</p>
         <p className="muted small">
-          The hours above are measured from each turn's own start and end, clipped to the billing period and summed the way Fountain's own meter sums them — so a project's hours really are a share of the account's, in the same unit over the same
-          window.{b?.plan?.monthly_cents === undefined ? "" : ` The plan itself is a flat ${formatUsd(b.plan.monthly_cents)} a month however the work splits, so this is where the work went, not a dollar figure per project.`}
+          The hours above are measured from each turn's own start and end, clipped to the calendar month (UTC) and summed, so two conversations each running an hour are two hours. Fountain keeps no bill, so this is where the
+          work went, not a dollar figure per project.
         </p>
         <p className="muted small">
-          Token counts are a second unit and are not what the plan charges for: per project they are lifetime running totals, and per period they count the turns that finished inside it. Sandbox minutes are the other half of the bill and
-          Fountain attributes them to nothing, so neither does this page.
-          {period?.period.source === "calendar_month" ? " There is no invoiced period on this account, so the window is the calendar month and there is no account figure to be a share of." : ""}
+          Token counts are a second unit: per project they are lifetime running totals, and per month they count the turns that finished inside it.
         </p>
         {missing > 0 && (
           <p className="muted small">
@@ -266,16 +219,6 @@ export function CostView({ cost, period, periodError, email }: { cost: CostDto; 
         )}
         {periodError && <p className="muted small">The per-period breakdown could not be read: {periodError} The all-time token totals above still stand.</p>}
       </div>
-    </div>
-  );
-}
-
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="cost-stat">
-      <div className="muted small">{label}</div>
-      <div className="cost-stat-value">{value}</div>
-      {sub && <div className="muted small">{sub}</div>}
     </div>
   );
 }

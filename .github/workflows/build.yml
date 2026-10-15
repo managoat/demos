@@ -15,9 +15,10 @@
 #     app that built and pushes once. That commit only touches platform/k8s/, which
 #     paths-ignore excludes, so it does not retrigger this workflow.
 #
-# Multi-arch because home-cloud's k3s nodes are arm64 Lima VMs. The SPA
-# bundles are built on the runner (bun), so the docker stage is just
-# nginx/bun + dist/ and needs no QEMU-side compile.
+# home-cloud's k3s nodes are all amd64, so amd64 is the image that runs. The
+# arm64 variant is kept because it costs next to nothing: the SPA bundles are
+# built on the runner (bun), so the docker stage is just nginx/bun + dist/ and
+# needs no QEMU-side compile, and the images stay runnable on an arm64 machine.
 name: build
 
 on:

@@ -1,17 +1,16 @@
 /**
  * Fountain runs an *agent*; Salon offers *settings*. This is the seam.
  *
- * A chat's settings are a model, some skills and some connectors
+ * A chat's settings are a model and some skills
  * (shared/settings.ts). For each distinct combination one agent is derived,
- * named `Salon · Opus 5 · gmail, pdf`, and found again on the next chat by
+ * named `Salon · Opus 5 · pdf`, and found again on the next chat by
  * `metadata.salon.key` — a hash of the whole tuple (`derivedKey`) — so the
  * host's agent list does not grow by one per chat. The agent gets:
  *
  *   - the runtime the model's provider implies (anthropic → claude, …);
  *   - a system prompt written for a chat room, plus the note about the
  *     `[from someone]` tags (shared/author.ts);
- *   - the chosen skills as skills.sh installs, and the chosen connectors as
- *     `mcp_servers` (server/connectors.ts);
+ *   - the chosen skills as skills.sh installs;
  *   - Salon itself as an MCP server (`salon`, server/mcp.ts) so the model can
  *     start a game — on the claude runtime, which is the one that writes an
  *     `http` server with headers into its config, and only when this server
@@ -28,7 +27,6 @@
 import { modelLabel, runtimeFor } from "../shared/models";
 import { canonical, derivedKey, type ChatSettings } from "../shared/settings";
 import { skillById, skillEntry } from "../shared/skills";
-import { attach, resolveConnectors, type ChosenConnector } from "./connectors";
 import type { AgentSummary, FountainClient } from "./fountain";
 
 export const ROOM_PROMPT =
@@ -85,21 +83,11 @@ export function salonServer(publicUrl: string): Record<string, unknown> {
 
 export interface Materialised {
   agentId: string;
-  /** The connectors that were attached, with the names the header shows. */
-  connectors: ChosenConnector[];
   /** True when an agent was created for this pick (rather than found). */
   created: boolean;
 }
 
 export async function agentFor(client: FountainClient, settings: ChatSettings, publicUrl: string | null, project: ProjectContext | null = null): Promise<Materialised> {
-  // Connectors are resolved first: a stale or unusable one is refused before anything else is asked of Fountain.
-  let connectors: ChosenConnector[] = [];
-  let mcpServers: Record<string, unknown> = {};
-  if (settings.connectorIds.length > 0) {
-    const [held, catalog] = await Promise.all([client.connections(), client.catalog()]);
-    ({ mcpServers, chosen: connectors } = attach(settings.connectorIds, resolveConnectors(held?.connections ?? [], held?.providers ?? [], catalog)));
-  }
-
   const runtime = runtimeFor(settings.model);
   const games = runtime === "claude" && publicUrl ? salonServer(publicUrl) : null;
   const system = `${ROOM_PROMPT}\n\n${SALON_NOTE}${project ? `\n\n${codeNote(project)}` : ""}${games ? `\n\n${GAMES_NOTE}` : ""}`;
@@ -114,14 +102,13 @@ export async function agentFor(client: FountainClient, settings: ChatSettings, p
     if (games && held?.url !== games.url) patch.mcp_servers = { ...(existing.mcp_servers ?? {}), salon: games };
     if (existing.system !== system) patch.system = system;
     if (Object.keys(patch).length) await client.updateAgent(existing.id, patch);
-    return { agentId: existing.id, connectors, created: false };
+    return { agentId: existing.id, created: false };
   }
 
   const skills = settings.skills.map(skillById).flatMap((s) => (s ? [skillEntry(s)] : []));
-  const parts = [...Object.keys(mcpServers), ...settings.skills].sort();
+  const parts = [...settings.skills].sort();
   // Fountain keeps agent names unique, and an environment is part of the key: name it, or the second pick is refused.
   if (settings.environmentId) parts.push(`on ${project?.name ?? settings.environmentId.slice(0, 8)}`);
-  if (games) mcpServers = { ...mcpServers, salon: games };
   const body: Record<string, unknown> = {
     name: `Salon · ${modelLabel(settings.model)}${parts.length ? ` · ${parts.join(", ")}` : ""}`.slice(0, 200),
     runtime,
@@ -130,9 +117,9 @@ export async function agentFor(client: FountainClient, settings: ChatSettings, p
     metadata: { salon: { key, tuple: JSON.parse(canonical(settings)) as unknown } },
   };
   if (skills.length) body.skills = skills;
-  if (Object.keys(mcpServers).length) body.mcp_servers = mcpServers;
+  if (games) body.mcp_servers = { salon: games };
   const made = await client.createAgent(body);
-  return { agentId: made.id, connectors, created: true };
+  return { agentId: made.id, created: true };
 }
 
 export function salonKey(a: AgentSummary): string | null {

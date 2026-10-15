@@ -31,18 +31,10 @@ export function Home() {
     saveSettings(s);
   }, []);
 
-  // A remembered project the account no longer has is dropped quietly, like a connector.
+  // A remembered project the account no longer has is dropped quietly.
   useEffect(() => {
     if (settings.projectId && projects.length && !projects.some((p) => p.id === settings.projectId)) setSettings({ ...settings, projectId: null });
   }, [projects]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // A remembered connector that is gone from the account, or cannot be used, is dropped quietly.
-  useEffect(() => {
-    if (!menu) return;
-    const usable = new Set(menu.connectors.items.filter((c) => c.usable).map((c) => c.id));
-    const connectorIds = settings.connectorIds.filter((id) => usable.has(id));
-    if (connectorIds.length !== settings.connectorIds.length) setSettings({ ...settings, connectorIds });
-  }, [menu]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const project = settings.projectId ? (projects.find((p) => p.id === settings.projectId) ?? null) : null;
 
@@ -94,8 +86,8 @@ export function Home() {
         attachments={attachments}
         left={
           <>
-            <AddMenu settings={settings} menu={menu} menuError={menuError} onChange={setSettings} extras={extras} onExtras={setExtras} onAttach={() => composer.current?.pickFiles()} projects={projects} onProjectsChanged={() => void refreshProjects()} />
-            <Chips settings={settings} menu={menu} extras={extras} onChange={setSettings} onExtras={setExtras} projects={projects} />
+            <AddMenu settings={settings} menuError={menuError} onChange={setSettings} extras={extras} onExtras={setExtras} onAttach={() => composer.current?.pickFiles()} projects={projects} onProjectsChanged={() => void refreshProjects()} />
+            <Chips settings={settings} extras={extras} onChange={setSettings} onExtras={setExtras} projects={projects} />
           </>
         }
         right={<ModelPill settings={settings} menu={menu} onChange={setSettings} />}

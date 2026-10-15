@@ -40,7 +40,7 @@
  * handed the owner's credentials by a panel that only meant to list what is
  * plugged in. Keys are kept, and keys are what a reader is asking about.
  */
-import type { Agent, Conversation } from "../types";
+import type { Agent } from "../types";
 
 // ── the permission policy in force ───────────────────────────────────────
 
@@ -230,12 +230,6 @@ export function skillsCaveat(sandboxStatus: string | null | undefined): string |
 export function describeMode(mode: string | null | undefined): { label: string; note: string | null } {
   if (mode === "ephemeral") return { label: "ephemeral", note: "This conversation's own machine, reclaimed when the conversation ends." };
   return { label: mode ?? "—", note: null };
-}
-
-/** The other conversations sharing this computer, newest first, this one dropped. */
-export function cotenants(conversationId: string, all: Conversation[], sandboxId: string | null | undefined): Conversation[] {
-  if (!sandboxId) return [];
-  return all.filter((c) => c.sandbox_id === sandboxId && c.id !== conversationId);
 }
 
 // ── the panel itself: open or shut, and how wide ─────────────────────────

@@ -10,11 +10,6 @@ export function describeError(err: unknown): string {
     case "sandbox_busy":
     case "sandbox_at_capacity":
       return "It is busy with another message — try again in a moment.";
-    case "sandbox_quota_exceeded":
-      return "The host has as many chats running as their Fountain plan allows. Retire one to start another.";
-    case "insufficient_credits":
-    case "subscription_required":
-      return "The host's Fountain balance is empty, so this chat cannot spend. They can top up on Fountain.";
     case "fleet_full":
     case "provisioning":
       return "Still getting things ready — try again in a moment.";
@@ -29,12 +24,6 @@ export function describeError(err: unknown): string {
       return "Your session has ended. Sign in again.";
     case "rate_limited":
       return "Slow down — Fountain rate-limited that request.";
-    case "connector_not_found":
-      return "That connection is not on your Fountain any more. Turn it off in Connectors and try again.";
-    case "connector_unusable":
-      return "That connection cannot be used in a Salon chat yet.";
-    case "connections_not_enabled":
-      return "Connectors are not switched on for this Fountain account.";
     case "bad_invite":
       return "That invite link is not valid any more.";
     case "github_not_configured":

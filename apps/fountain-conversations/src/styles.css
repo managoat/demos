@@ -382,8 +382,6 @@ details.stage > summary::-webkit-details-marker { display: none; }
 .them-label { display: inline-flex; align-items: center; gap: 6px; }
 .them-avatar { display: inline-flex; align-items: center; }
 .them-avatar .glyph { font-size: 14px; }
-.readonly-banner { padding: 10px 16px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--warn) 12%, var(--bg-1)); font-size: 13px; color: var(--text-2); }
-.readonly-banner a { color: var(--brand); }
 
 @media (max-width: 900px) {
   .menu { display: inline-flex; }

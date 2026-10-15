@@ -8,10 +8,6 @@ export function describeError(err: unknown): string {
         return "That conversation is still working on its last prompt.";
       case "sandbox_busy":
         return "That computer is busy with another conversation's turn.";
-      case "sandbox_quota_exceeded":
-        return "You are at your concurrent-sandbox limit. Retire a conversation or wait for one to finish.";
-      case "subscription_required":
-        return "This account needs an active subscription to start conversations.";
       case "provisioning":
         return "The sandbox is still coming up — try again in a moment.";
       case "sandbox_not_found":

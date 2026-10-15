@@ -21,6 +21,6 @@
     "typescript": "^5.8.0"
   },
   "dependencies": {
-    "@managoat/fountain-sdk": "5.2.1"
+    "@managoat/fountain-sdk": "9.0.0"
   }
 }

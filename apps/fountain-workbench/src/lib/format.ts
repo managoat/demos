@@ -52,12 +52,6 @@ export function formatTurnTime(seconds: number | null | undefined): string {
   return formatHours(seconds / 3600);
 }
 
-/** Fountain prices plans in USD cents, and shows whole dollars when it can (`Fountain.Plans.format_usd/1`). */
-export function formatUsd(cents: number | null | undefined): string {
-  if (cents === null || cents === undefined || !Number.isFinite(cents)) return "—";
-  return cents % 100 === 0 ? `$${cents / 100}` : `$${(cents / 100).toFixed(2)}`;
-}
-
 /** A conversation's display line: its title, else a trimmed first prompt, else the id. */
 export function conversationLabel(c: { title?: string | null; id: string }, firstPrompt?: string | null): string {
   if (c.title) return c.title;

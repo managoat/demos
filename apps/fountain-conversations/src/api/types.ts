@@ -1,13 +1,5 @@
 // Shapes as served by the Fountain API (docs/api.md).
 
-export interface Runner {
-  id: string | null;
-  name: string | null;
-  hostname: string | null;
-  online: boolean;
-  path: string | null;
-}
-
 /** Every conversation gets a sandbox of its own, so `ephemeral` is the only mode. */
 export type SandboxMode = "ephemeral";
 export type SandboxStatus = "pending" | "starting" | "ready" | "suspended" | "terminated" | "failed";
@@ -24,8 +16,6 @@ export interface Sandbox {
   vault_id?: string | null;
   mode?: SandboxMode;
   url: string | null;
-  /** Where a runner-backed sandbox lives; null for hosted providers. */
-  runner?: Runner | null;
 }
 
 /** A conversation as its sandbox lists it (`GET /api/sandboxes/:id`). */
@@ -73,29 +63,6 @@ export interface Conversation {
   usage_total?: { input: number; output: number };
   inserted_at: string;
   updated_at: string;
-}
-
-/**
- * `GET /api/account/billing` — null when the server runs with billing disabled.
- * Credits are the product (ADR 0031): there is no subscription status any more.
- */
-export interface Billing {
-  /** True for an account an operator made free; it spends regardless of balance. */
-  comped: boolean | null;
-  has_stripe_customer: boolean;
-  sandbox_cap: number | null;
-  /** Null when this deployment has credits off; nothing gates prompts then. */
-  credits: Credits | null;
-}
-
-export interface Credits {
-  /** May be negative: an in-flight turn that crosses zero finishes. */
-  balance_cents: number;
-  expiring_cents: number;
-  expires_at: string | null;
-  purchased_cents: number;
-  turn_hour_cents: number;
-  packs_cents: number[];
 }
 
 export interface Agent {
@@ -203,7 +170,6 @@ export interface Catalog {
   model_providers: string[];
   sandbox_providers: { enabled: string[]; default: string };
   package_managers: string[];
-  avatar: { bases: string[]; moods: string[] };
 }
 
 export interface Turn {

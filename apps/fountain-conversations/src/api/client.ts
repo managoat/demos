@@ -19,7 +19,6 @@ import type {
   TreeNode,
   Turn,
   Vault,
-  Billing,
 } from "./types";
 import { readSse, type SseMessage } from "../lib/sse";
 import type { Settings } from "../lib/settings";
@@ -48,20 +47,6 @@ export class FountainClient {
 
   me(): Promise<Me> {
     return this.json<Me>("GET", "/api/auth/me");
-  }
-
-  /**
-   * The account's billing state, or null where the server runs with billing
-   * disabled (404 `billing_disabled`) or the key lacks the scope (403) —
-   * both mean "nothing is gating prompts here".
-   */
-  async billing(): Promise<Billing | null> {
-    try {
-      return (await this.json<{ data: Billing }>("GET", "/api/account/billing")).data;
-    } catch (err) {
-      if (err instanceof ApiError && (err.status === 404 || err.status === 403)) return null;
-      throw err;
-    }
   }
 
   // ── conversations ───────────────────────────────────────────────────────
@@ -175,10 +160,6 @@ export class FountainClient {
 
   deleteAvatar(id: string): Promise<void> {
     return this.json<void>("DELETE", `/api/agents/${id}/avatar`);
-  }
-
-  async generateAvatar(base: string, mood: string): Promise<ImageInput> {
-    return (await this.json<{ data: ImageInput }>("POST", "/api/avatars/generate", { base, mood })).data;
   }
 
   async getEnvironment(id: string): Promise<Environment> {
@@ -321,20 +302,12 @@ export function describeError(err: unknown): string {
         return "A turn is already running — wait for it, or interrupt.";
       case "provisioning":
         return "The conversation is still provisioning — try again shortly.";
-      case "insufficient_credits":
-        return "Your credit balance is spent — buy credits to send a prompt.";
-      case "sandbox_quota_exceeded":
-        return err.message || "You are at your concurrent sandbox limit. Terminate a conversation before starting another.";
       case "conversation_terminated":
         return "Conversation is terminated and can't be resumed.";
       case "no_agent":
         return "Conversation has no agent — can't resume.";
       case "sandbox_probe_failed":
         return "Couldn't reach the sandbox provider to wake the conversation — try again shortly.";
-      case "runner_offline":
-        return "This conversation's machine is offline — it wakes when the runner reconnects.";
-      case "no_runner_online":
-        return "This agent runs on a self-hosted runner and none of yours is connected. Start `fountain runner` on the machine and try again.";
       case "account_suspended":
         return "This account is suspended.";
       case "parent_conversation_not_found":

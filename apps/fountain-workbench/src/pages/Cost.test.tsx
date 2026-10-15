@@ -7,13 +7,6 @@ const bucket = (conversations: number, turns: number, input: number, output: num
 const per = (conversations: number, turns: number, seconds: number, input: number, output: number) => ({ conversations, turns, seconds, input, output });
 
 const full: Cost = {
-  billing: {
-    status: "active",
-    period: { start: "2026-08-01T00:00:00Z", end: "2026-09-01T00:00:00Z", source: "subscription" },
-    plan: { name: "Team", slug: "team", monthly_cents: 9900, included_turn_hours: 100 },
-    usage: { conversations: 12, turns: 40, turn_hours: 7.5, turn_hours_included: 100, sandbox_minutes: 900 },
-  },
-  billingUnavailable: null,
   projects: [
     {
       id: "p1",
@@ -32,11 +25,10 @@ const full: Cost = {
   total: bucket(5, 10, 1_200_120, 600_055, "2026-08-13T00:00:00Z"),
 };
 
-/** What `/api/me/cost/period` adds a beat later: the same projects, in the bill's unit and window. */
+/** What `/api/me/cost/period` adds a beat later: the same projects, in turn time over the month. */
 const period: PeriodCost = {
-  period: { start: "2026-08-01T00:00:00Z", end: "2026-09-01T00:00:00Z", source: "subscription" },
+  period: { start: "2026-08-01T00:00:00Z", end: "2026-09-01T00:00:00Z" },
   measuredTo: "2026-08-24T00:00:00Z",
-  accountTurnHours: 7.5,
   projects: [
     {
       id: "p1",
@@ -55,13 +47,11 @@ const period: PeriodCost = {
 };
 
 describe("the cost view", () => {
-  test("the bill is the account's, in the units Fountain charges in", () => {
+  test("there is no bill to show, and the page does not invent one", () => {
     const html = renderToStaticMarkup(<CostView cost={full} email="alice@example.com" />);
     expect(html).toContain("alice@example.com");
-    expect(html).toContain("Team");
-    expect(html).toContain("$99/mo, flat");
-    expect(html).toContain("7.5 h");
-    expect(html).toContain("of 100 included");
+    expect(html).not.toContain("The bill");
+    expect(html).toContain("not a dollar figure");
   });
 
   test("a project reads as tokens, turns and a share of the account", () => {
@@ -74,7 +64,7 @@ describe("the cost view", () => {
     expect(html).toContain("shared with 2");
     // The per-period measurement costs a request per conversation, so the page
     // says it is coming rather than waiting for it or pretending it is here.
-    expect(html).toContain("measuring this period…");
+    expect(html).toContain("measuring this month…");
   });
 
   test("the biggest project is already broken down, deleted items included", () => {
@@ -102,40 +92,18 @@ describe("the cost view", () => {
   test("what is not attributable is counted, not dropped", () => {
     const html = renderToStaticMarkup(<CostView cost={full} email="alice@example.com" />);
     expect(html).toContain("belong to no project of yours");
-    // And the page never claims the breakdown divides the invoice.
-    expect(html).toContain("Fountain attributes them to nothing, so neither does this page");
-    expect(html).toContain("flat $99 a month");
   });
 
-  test("billing switched off says so, and the breakdown still stands", () => {
-    const off: Cost = { ...full, billing: null, billingUnavailable: "disabled" };
-    const html = renderToStaticMarkup(<CostView cost={off} email="alice@example.com" />);
-    expect(html).toContain("billing switched off");
-    expect(html).toContain("Fountain");
-    expect(html).toContain("1.8M tok");
-    // No plan means no claim about a plan.
-    expect(html).not.toContain("a month however the work splits");
-  });
-
-  test("once the period arrives a project reads in turn hours, as a share of the account's own figure", () => {
+  test("once the month arrives a project reads in turn hours, as a share of what is measured", () => {
     const html = renderToStaticMarkup(<CostView cost={full} period={period} email="alice@example.com" />);
-    // 6300 s of work, against Fountain's 7.5 h for the same window.
+    // 6300 s of work, the only project measured.
     expect(html).toContain("1.8 h");
-    expect(html).toContain("23% of your 7.5 h this period");
+    expect(html).toContain("100% of what is measured here this month");
     // The lifetime figure is still there, said to be lifetime.
     expect(html).toContain("All time: 1.8M tok over 6 turns");
     // Per work item, in the same unit.
     expect(html).toContain("1.5 h");
     expect(html).toContain("15 min");
-  });
-
-  test("what the account was billed for that no project accounts for is the difference, not a third reading", () => {
-    const html = renderToStaticMarkup(<CostView cost={full} period={period} email="alice@example.com" />);
-    // 7.5 h billed less the 1.8 h measured here.
-    expect(html).toContain("Plus 5.8 h on your account that no project of yours accounts for");
-    expect(html).toContain("not a third reading");
-    // The lifetime-token version of that sentence is gone: one window at a time.
-    expect(html).not.toContain("belong to no project of yours");
   });
 
   test("what the fan-out could not read is named, not quietly missing", () => {
@@ -148,20 +116,11 @@ describe("the cost view", () => {
 
   test("a period that could not be read leaves the all-time view standing and says why", () => {
     const html = renderToStaticMarkup(<CostView cost={full} periodError="Fountain timed out." email="alice@example.com" />);
-    expect(html).toContain("this period: unavailable");
+    expect(html).toContain("this month: unavailable");
     expect(html).toContain("could not be read: Fountain timed out.");
     // Still the lifetime breakdown, unchanged.
     expect(html).toContain("1.8M tok");
     expect(html).toContain("belong to no project of yours");
-  });
-
-  test("with no invoiced period the window is the calendar month, and there is no account figure to be a share of", () => {
-    const loose: PeriodCost = { ...period, period: { ...period.period, source: "calendar_month" }, accountTurnHours: null };
-    const html = renderToStaticMarkup(<CostView cost={full} period={loose} email="alice@example.com" />);
-    expect(html).toContain("no invoiced period on this account");
-    // A share of what was measured here, never of an account total nobody reported.
-    expect(html).toContain("of what is measured here this period");
-    expect(html).not.toContain("no project of yours accounts for");
   });
 
   test("owning nothing is a sentence, not an empty page", () => {

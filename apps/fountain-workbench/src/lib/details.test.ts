@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import type { Agent, Conversation } from "../types";
+import type { Agent } from "../types";
 import {
   BUNDLED_SKILLS,
-  cotenants,
   describeMode,
   effectivePolicy,
   mcpServersOf,
@@ -149,15 +148,5 @@ describe("the computer", () => {
   test("the mode is described in the workbench's terms", () => {
     expect(describeMode("ephemeral").note).toContain("reclaimed");
     expect(describeMode(null)).toEqual({ label: "—", note: null });
-  });
-
-  test("cotenants are the others on the same computer", () => {
-    const convs = [
-      { id: "c1", sandbox_id: "sb1" },
-      { id: "c2", sandbox_id: "sb1" },
-      { id: "c3", sandbox_id: "sb2" },
-    ] as Conversation[];
-    expect(cotenants("c1", convs, "sb1").map((c) => c.id)).toEqual(["c2"]);
-    expect(cotenants("c1", convs, null)).toEqual([]);
   });
 });

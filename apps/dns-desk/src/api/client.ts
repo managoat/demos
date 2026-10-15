@@ -173,8 +173,6 @@ export function describeError(err: unknown): string {
         return "The desk is still working on the last request.";
       case "provisioning":
         return "The desk's computer is still starting — try again shortly.";
-      case "subscription_required":
-        return "An active Fountain subscription is required.";
       case "vault_not_allowed":
         return "That agent may not use that vault.";
       case "not_found":

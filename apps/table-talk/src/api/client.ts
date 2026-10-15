@@ -171,8 +171,6 @@ export function describeError(err: unknown): string {
         return "The analyst's computer is still starting — try again shortly.";
       case "conversation_terminated":
         return "That analysis has ended — drop the file again to start fresh.";
-      case "subscription_required":
-        return "An active Fountain subscription is required.";
       case "not_found":
         return "Not found.";
       default:

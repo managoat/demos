@@ -67,11 +67,10 @@ describe("skills", () => {
 
 describe("settings", () => {
   test("parses, trims and sorts", () => {
-    const s = parseSettings({ model: " anthropic/claude-sonnet-5 ", skills: ["pptx", "pdf", "pdf"], connectorIds: ["b", " a "], environmentId: "" });
+    const s = parseSettings({ model: " anthropic/claude-sonnet-5 ", skills: ["pptx", "pdf", "pdf"], environmentId: "" });
     if (typeof s === "string") throw new Error(s);
     expect(s.model).toBe("anthropic/claude-sonnet-5");
     expect(s.skills).toEqual(["pdf", "pptx"]);
-    expect(s.connectorIds).toEqual(["a", "b"]);
     expect(s.environmentId).toBeNull();
     expect(s.presetId).toBeNull();
   });
@@ -79,7 +78,7 @@ describe("settings", () => {
     expect(typeof parseSettings({ model: "gpt" })).toBe("string");
     expect(typeof parseSettings({ model: "mistral/large" })).toBe("string");
     expect(parseSettings({ model: "anthropic/claude-opus-5", skills: ["cooking"] })).toMatch(/cooking/);
-    expect(typeof parseSettings({ model: "anthropic/claude-opus-5", connectorIds: "c1" })).toBe("string");
+    expect(typeof parseSettings({ model: "anthropic/claude-opus-5", skills: "pdf" })).toBe("string");
     expect(typeof parseSettings(null)).toBe("string");
     // The runtime is not a setting any more; an old browser sending one is fine.
     expect(typeof parseSettings({ runtime: "claude", model: "anthropic/claude-opus-5" })).not.toBe("string");
@@ -87,9 +86,9 @@ describe("settings", () => {
 });
 
 describe("derivedKey", () => {
-  const base = { ...DEFAULT_SETTINGS, skills: ["pdf", "xlsx"], connectorIds: ["c1", "c2"] };
+  const base = { ...DEFAULT_SETTINGS, skills: ["pdf", "xlsx"] };
   test("is stable and order-insensitive", () => {
-    expect(derivedKey(base)).toBe(derivedKey({ ...base, skills: ["xlsx", "pdf"], connectorIds: ["c2", "c1", "c1"] }));
+    expect(derivedKey(base)).toBe(derivedKey({ ...base, skills: ["xlsx", "pdf", "pdf"] }));
     expect(derivedKey(base)).toMatch(/^salon:v2:[0-9a-f]{16}$/);
     // Pinned: a change here orphans every derived agent in the wild.
     expect(derivedKey(DEFAULT_SETTINGS)).toBe(`salon:v2:${fnv1a64(canonical(DEFAULT_SETTINGS))}`);
@@ -97,7 +96,7 @@ describe("derivedKey", () => {
     expect(derivedKey(DEFAULT_SETTINGS)).toBe("salon:v2:" + fnv1a64('{"runtime":"claude","model":"anthropic/claude-opus-5","skills":[],"connectors":[],"preset":null,"environment":null,"vault":null}'));
   });
   test("changes with any part of the tuple", () => {
-    const keys = [base, { ...base, model: "anthropic/claude-sonnet-5" }, { ...base, skills: ["pdf"] }, { ...base, connectorIds: ["c1"] }, { ...base, presetId: "p" }, { ...base, environmentId: "e" }, { ...base, vaultId: "v" }].map(derivedKey);
+    const keys = [base, { ...base, model: "anthropic/claude-sonnet-5" }, { ...base, skills: ["pdf"] }, { ...base, presetId: "p" }, { ...base, environmentId: "e" }, { ...base, vaultId: "v" }].map(derivedKey);
     expect(new Set(keys).size).toBe(keys.length);
   });
   test("fnv1a64 matches the reference vectors", () => {

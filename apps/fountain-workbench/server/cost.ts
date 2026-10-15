@@ -2,45 +2,38 @@
  * What the work cost, for the person who pays for it.
  *
  * Every conversation in a project runs on the project *owner's* Fountain key
- * (README, "Sharing") — the owner's agents, computers and bill — including
+ * (README, "Sharing") — the owner's agents and computers — including
  * conversations a member started. So the owner is the only person who can be
  * charged and, until this route, the only person who could not see what for.
  *
  * This is an account route, not a project one, and deliberately not behind
  * `server/proxy.ts`. The proxy is the boundary a member crosses into the
- * owner's Fountain; a bill is not something to put on the far side of it.
+ * owner's Fountain; an account's usage is not something to put on the far side of it.
  * What this answers is the *caller's own* account, on the caller's own key,
  * broken down over the projects the caller owns. A member of someone else's
  * project learns nothing about that owner's spend here: their key holds none
  * of it, and only projects they own are enumerated.
  *
- * Two sets of numbers, kept apart on purpose, because they do not add up to
- * each other:
- *
- *   - **The bill** — Fountain's `GET /api/account/billing`: the plan, and the
- *     turn hours and sandbox minutes used over the period Stripe invoices.
- *     Account-wide. Fountain attributes it to nothing, so neither do we.
+ * Fountain is self-hosted and keeps no bill (no credits, no plan, no
+ * `/api/account/billing`), so what this reports is where the work went, not
+ * what it was charged:
  *
  *   - **The breakdown** — the conversation list: each conversation carries
  *     `usage_total` (input and output tokens) and `turn_count`, and carries
  *     the work item it belongs to in its `channel_id`. Summing those by
  *     `workbench:<project>/<item>/<tag>` is where the work went, per project
- *     and per work item.
+ *     and per work item. A lifetime figure: a conversation reports a running
+ *     total, not a per-period one. `lastActiveAt` is served per bucket so a
+ *     reader can see which projects are live.
  *
- * The breakdown is a lifetime figure — a conversation reports a running total,
- * not a per-period one — while the bill covers one period, and tokens are not
- * the unit either is denominated in. Dividing the invoice by token share would
- * be a number we made up, so we do not: the view shows both and says which is
- * which. `lastActiveAt` is served per bucket so a reader can see for themselves
- * which projects were live inside the period.
- *
- * `period` below closes both of those gaps, at a price, which is why it is a
- * second route rather than more of the first. See its own comment.
+ * `period` below measures the same projects in turn hours over the calendar
+ * month, at a price, which is why it is a second route rather than more of
+ * the first. See its own comment.
  */
 import { parseChannel } from "../shared/channel";
 import { parseItemStatus, type ItemStatus } from "../shared/status";
 import { authenticate, userClient, type AppContext } from "./context";
-import type { Billing, ConversationSummary, FountainClient, TurnSummary } from "./fountain";
+import type { ConversationSummary, FountainClient, TurnSummary } from "./fountain";
 import { HttpError, json } from "./http";
 
 /** What one project, or one work item, used. */
@@ -68,10 +61,6 @@ export interface ProjectCostDto extends CostBucket {
 }
 
 export interface CostDto {
-  /** The account's bill, or null when this Fountain has billing switched off. */
-  billing: Billing | null;
-  /** Why there is no bill: `disabled` (Fountain said 404) or `error` (it would not say). */
-  billingUnavailable: "disabled" | "error" | null;
   /** The caller's own projects, biggest first. Projects shared *with* the caller are not theirs to see the cost of. */
   projects: ProjectCostDto[];
   /** Conversations on the account that belong to no project of the caller's: their Fountain use outside the workbench. */
@@ -99,15 +88,7 @@ export async function show(ctx: AppContext, req: Request): Promise<Response> {
   const user = await authenticate(ctx, req);
   const client = await userClient(ctx, user);
 
-  // Sub-conversations spend too, so `roots_only` is false: every conversation
-  // on the key counts, and each one's channel says where it belongs.
-  const [billed, listed] = await Promise.allSettled([client.billing(), client.conversations({ roots_only: "false" })]);
-  if (listed.status === "rejected") {
-    throw new HttpError(502, "fountain_error", "Fountain would not list your conversations, so there is nothing to break down. Is your key still valid? Sign in again to refresh it.");
-  }
-
-  const billing = billed.status === "fulfilled" ? billed.value : null;
-  const billingUnavailable: CostDto["billingUnavailable"] = billing ? null : billed.status === "fulfilled" ? "disabled" : "error";
+  const listed = await listAll(client);
 
   // Only projects the caller owns: theirs is the key the work ran on.
   const owned = ctx.db.projectsFor(user.email).filter((p) => p.owner_email === user.email);
@@ -120,7 +101,7 @@ export async function show(ctx: AppContext, req: Request): Promise<Response> {
 
   const elsewhere = bucket();
   const total = bucket();
-  for (const c of listed.value) {
+  for (const c of listed) {
     add(total, c);
     const ref = parseChannel(c.channel_id);
     const entry = ref ? projects.get(ref.projectId) : null;
@@ -141,34 +122,23 @@ export async function show(ctx: AppContext, req: Request): Promise<Response> {
 
   const byCost = (a: CostBucket, b: CostBucket) => tokens(b) - tokens(a) || b.turns - a.turns;
   const out = [...projects.values()].map((e) => ({ ...e.dto, items: [...e.items.values()].sort(byCost) })).sort(byCost);
-  return json({ data: { billing, billingUnavailable, projects: out, elsewhere, total } satisfies CostDto });
+  return json({ data: { projects: out, elsewhere, total } satisfies CostDto });
 }
 
-// ── the same breakdown, in the bill's unit and over the bill's window ─────
+// ── the same breakdown, in turn hours over this month ────────────────────
 //
-// `show` above answers two questions with numbers that cannot be held next to
-// each other: the bill is turn hours over one period, the breakdown is tokens
-// over all time. This route answers the question that was actually being
-// asked — *what did this project cost me this month* — by measuring the one
-// thing that is both attributable and billed.
+// `show` above answers in lifetime tokens. This route answers the question
+// that is usually being asked — *what did this project take this month* — in
+// turn time, the one measure that is attributable per conversation.
 //
 // A `Turn` carries `started_at` and `ended_at`, and a conversation carries the
-// work item in its `channel_id`. Summing turn intervals clipped to the billing
-// period, grouped by channel, is per-project turn hours over the bill's own
-// window: the same unit and the same window, so it *is* a division of the
-// account figure rather than a second, unrelated measurement.
+// work item in its `channel_id`. Summing turn intervals clipped to the
+// calendar month, grouped by channel, is per-project turn hours.
 //
-// The arithmetic deliberately mirrors Fountain's own meter
-// (`Fountain.Billing.turn_hours_used/2` over `SandboxUsage.turn_seconds_for_user/3`):
-// each turn's interval clipped to the period and *summed*, not unioned — two
-// conversations each running an hour on one sandbox are two hours of work
-// (ADR 0023) — a still-running turn accruing only as far as now, never to a
-// period end that has not happened, and a turn with no `started_at` counting
-// for nothing. One difference we cannot close: Fountain drops providers it
-// does not pay for (a tenant's own `runner`) and the API does not say which
-// provider a turn ran on, so on an account using `runner` this measures
-// slightly more than the meter does. `accountTurnHours` is Fountain's own
-// figure, carried here rather than derived, so the two are visibly separate.
+// Each turn's interval is clipped to the window and *summed*, not unioned —
+// two conversations each running an hour are two hours of work — a
+// still-running turn accruing only as far as now, never to a month end that
+// has not happened, and a turn with no `started_at` counting for nothing.
 //
 // The price is the reason this is not folded into `show`: turns are per
 // conversation and the endpoint takes no window, so this is one request per
@@ -176,8 +146,7 @@ export async function show(ctx: AppContext, req: Request): Promise<Response> {
 // and each reports what it did rather than quietly shrinking the answer:
 //
 //   - Only conversations in projects the caller *owns* are fetched. What ran
-//     elsewhere on the account is the bill's figure minus this one, which is
-//     subtraction, not 200 more round trips.
+//     elsewhere on the account is `show`'s `elsewhere` bucket, in tokens.
 //   - A conversation whose last activity predates the period, or which was
 //     created after it, cannot hold a turn inside it. Skipped without asking.
 //   - Turns are cached per conversation against `turn_count` + last activity,
@@ -193,7 +162,7 @@ const FANOUT_CONCURRENCY = 8;
 /** The most conversations one answer will fan out over. Beyond it the page is told what was left out. */
 const FANOUT_MAX = 400;
 
-/** A turn reduced to what a bill needs: milliseconds, and end-of-turn tokens. */
+/** A turn reduced to what the measure needs: milliseconds, and end-of-turn tokens. */
 interface PeriodTurn {
   started: number;
   /** Null while the turn is still running. */
@@ -257,12 +226,10 @@ export interface FanoutDto {
 }
 
 export interface PeriodCostDto {
-  /** The bill's own period, or the calendar month when this Fountain has billing switched off. */
-  period: { start: string; end: string; source: string };
+  /** The calendar month (UTC) the measurement covers. */
+  period: { start: string; end: string };
   /** Where measuring stops: the period's end, or now while the period is still running. */
   measuredTo: string;
-  /** Fountain's account-wide turn hours for this window — the figure these are a share of. Null with no bill. */
-  accountTurnHours: number | null;
   /** The caller's own projects, most turn time first. */
   projects: ProjectPeriodDto[];
   /** Every project above, summed: the part of the account this workbench can account for. */
@@ -274,24 +241,32 @@ function periodBucket(): PeriodBucket {
   return { conversations: 0, turns: 0, seconds: 0, input: 0, output: 0 };
 }
 
-/**
- * The window to measure over. Fountain falls back to the calendar month when
- * an account has no invoiced period (`period.source: "calendar_month"`), and
- * so do we when it reports no period at all — with no `accountTurnHours` to
- * be a share of, which the page says.
- */
-function windowOf(billing: Billing | null): { start: string; end: string; source: string } {
-  const start = billing?.period?.start;
-  const end = billing?.period?.end;
-  if (start && end && Number.isFinite(Date.parse(start)) && Number.isFinite(Date.parse(end))) {
-    return { start, end, source: billing?.period?.source ?? "subscription" };
-  }
-  const now = new Date();
+/** The window to measure over: the calendar month (UTC) that `nowMs` falls in. */
+function windowOf(nowMs: number): { start: string; end: string } {
+  const now = new Date(nowMs);
   return {
     start: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString(),
     end: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString(),
-    source: "calendar_month",
   };
+}
+
+/** The clock the period is read against. Swappable so a test can sit at a known day of the month. */
+let clock: () => number = () => Date.now();
+
+/** For tests: measure as if it were `at` (epoch ms), or the real clock again with no argument. */
+export function setCostClock(at?: number): void {
+  clock = at === undefined ? () => Date.now() : () => at;
+}
+
+/** Every conversation on the key, sub-conversations included, or a 502 that says why there is nothing to break down. */
+async function listAll(client: FountainClient): Promise<ConversationSummary[]> {
+  try {
+    // Sub-conversations spend too, so `roots_only` is false: every conversation
+    // on the key counts, and each one's channel says where it belongs.
+    return await client.conversations({ roots_only: "false" });
+  } catch {
+    throw new HttpError(502, "fountain_error", "Fountain would not list your conversations, so there is nothing to break down. Is your key still valid? Sign in again to refresh it.");
+  }
 }
 
 /** When a conversation was last touched, by whichever field this Fountain filled in. */
@@ -304,7 +279,7 @@ function distil(turns: TurnSummary[]): PeriodTurn[] {
   const out: PeriodTurn[] = [];
   for (const t of turns) {
     const started = t.started_at ? Date.parse(t.started_at) : NaN;
-    // Fountain's meter requires a start too: a turn that never ran bills nothing.
+    // A turn with no start never ran, and counts for nothing.
     if (!Number.isFinite(started)) continue;
     const ended = t.ended_at ? Date.parse(t.ended_at) : NaN;
     out.push({ started, ended: Number.isFinite(ended) ? ended : null, input: t.usage?.input ?? 0, output: t.usage?.output ?? 0 });
@@ -377,17 +352,14 @@ export async function period(ctx: AppContext, req: Request): Promise<Response> {
   const user = await authenticate(ctx, req);
   const client = await userClient(ctx, user);
 
-  const [billed, listed] = await Promise.allSettled([client.billing(), client.conversations({ roots_only: "false" })]);
-  if (listed.status === "rejected") {
-    throw new HttpError(502, "fountain_error", "Fountain would not list your conversations, so there is nothing to break down. Is your key still valid? Sign in again to refresh it.");
-  }
-  const billing = billed.status === "fulfilled" ? billed.value : null;
+  const listed = await listAll(client);
 
-  const win = windowOf(billing);
+  const nowMs = clock();
+  const win = windowOf(nowMs);
   const startMs = Date.parse(win.start);
   const endMs = Date.parse(win.end);
   // Never measure into a period that has not happened yet.
-  const ceilingMs = Math.min(endMs, Date.now());
+  const ceilingMs = Math.min(endMs, nowMs);
 
   const owned = ctx.db.projectsFor(user.email).filter((p) => p.owner_email === user.email);
   const projects = new Map<string, { dto: ProjectPeriodDto; items: Map<string, ItemPeriodDto> }>();
@@ -399,7 +371,7 @@ export async function period(ctx: AppContext, req: Request): Promise<Response> {
 
   const tally: FanoutDto = { candidates: 0, fetched: 0, cached: 0, skipped: 0, dropped: 0, failed: 0 };
   const candidates: { conv: ConversationSummary; projectId: string; itemId: string }[] = [];
-  for (const c of listed.value) {
+  for (const c of listed) {
     const ref = parseChannel(c.channel_id);
     if (!ref || !projects.has(ref.projectId)) continue;
     tally.candidates += 1;
@@ -448,7 +420,6 @@ export async function period(ctx: AppContext, req: Request): Promise<Response> {
     data: {
       period: win,
       measuredTo: new Date(ceilingMs).toISOString(),
-      accountTurnHours: billing?.usage?.turn_hours ?? null,
       projects: out,
       measured,
       fanout: tally,

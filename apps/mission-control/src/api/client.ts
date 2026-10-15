@@ -192,18 +192,12 @@ export function describeError(err: unknown): string {
         return "The coordinator is still working on the last message.";
       case "provisioning":
         return "That computer is still starting — try again shortly.";
-      case "sandbox_quota_exceeded": {
-        const limit = typeof err.body?.limit === "number" ? err.body.limit : null;
-        return limit === null
-          ? "Your account is at its concurrent-computer limit."
-          : `Your account allows ${limit} concurrent computer${limit === 1 ? "" : "s"}.`;
-      }
+      case "fleet_full":
+        return "Fountain has no room for another computer right now.";
       case "conversation_terminated":
         return "That conversation has been terminated.";
       case "no_turn_running":
         return "Nothing is running to interrupt.";
-      case "subscription_required":
-        return "An active Fountain subscription is required.";
       case "not_found":
         return "Not found.";
       default:

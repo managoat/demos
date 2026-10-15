@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { formatCompact, formatHours, formatUsd } from "./format";
+import { formatCompact, formatHours } from "./format";
 
 test("compact counts", () => {
   expect(formatCompact(0)).toBe("0");
@@ -16,10 +16,4 @@ test("turn hours read as minutes under the hour", () => {
   expect(formatHours(0.25)).toBe("15 min");
   expect(formatHours(7.53)).toBe("7.5 h");
   expect(formatHours(undefined)).toBe("—");
-});
-
-test("plan prices are whole dollars when they divide", () => {
-  expect(formatUsd(9900)).toBe("$99");
-  expect(formatUsd(2950)).toBe("$29.50");
-  expect(formatUsd(undefined)).toBe("—");
 });

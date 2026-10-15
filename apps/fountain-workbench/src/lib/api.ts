@@ -155,20 +155,8 @@ export interface Me {
 }
 
 // ── cost (server/cost.ts) ────────────────────────────────────────────────
-// Your own account and the projects you own. The bill is account-wide and
-// period-scoped; the breakdown is per project and lifetime. They are two
-// different measurements of two different things, so the view never adds them.
-
-/** Fountain's `GET /api/account/billing` document, passed through as it comes — hence snake_case. */
-export interface Billing {
-  status?: string | null;
-  trial_ends_at?: string | null;
-  current_period_end?: string | null;
-  cancel_at_period_end?: boolean;
-  period?: { start?: string; end?: string; source?: string };
-  plan?: { name?: string; slug?: string; monthly_cents?: number; included_turn_hours?: number };
-  usage?: { conversations?: number; turns?: number; turn_hours?: number; turn_hours_included?: number; turn_hours_remaining?: number; sandbox_minutes?: number };
-}
+// Your own account and the projects you own: where the work went, per
+// project and lifetime, in tokens. Fountain keeps no bill to set it against.
 
 export interface CostBucket {
   conversations: number;
@@ -193,21 +181,19 @@ export interface ProjectCost extends CostBucket {
 }
 
 export interface Cost {
-  billing: Billing | null;
-  billingUnavailable: "disabled" | "error" | null;
   projects: ProjectCost[];
   elsewhere: CostBucket;
   total: CostBucket;
 }
 
-// The same projects, in the bill's unit over the bill's window: turn seconds
+// The same projects, in turn time over the calendar month: turn seconds
 // summed from each turn's own timestamps. A second request because it costs a
 // round trip per conversation, so the view above paints without waiting for it.
 
 export interface PeriodBucket {
   conversations: number;
   turns: number;
-  /** Turn time inside the window, clipped to it exactly as Fountain's meter clips it. */
+  /** Turn time inside the window, each turn clipped to it. */
   seconds: number;
   /** Tokens on turns that ended inside the window. */
   input: number;
@@ -237,10 +223,8 @@ export interface CostFanout {
 }
 
 export interface PeriodCost {
-  period: { start: string; end: string; source: string };
+  period: { start: string; end: string };
   measuredTo: string;
-  /** Fountain's own account-wide turn hours for the same window. Null when there is no bill. */
-  accountTurnHours: number | null;
   projects: ProjectPeriodCost[];
   measured: PeriodBucket;
   fanout: CostFanout;

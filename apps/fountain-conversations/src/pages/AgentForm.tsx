@@ -34,9 +34,6 @@ export function AgentFormPage({ id }: { id: string | "new" }) {
   const [allowedVaults, setAllowedVaults] = useState<string[] | null>(null);
   const [pendingAvatar, setPendingAvatar] = useState<ImageInput | null>(null);
   const [removeAvatar, setRemoveAvatar] = useState(false);
-  const [avatarBase, setAvatarBase] = useState("robot");
-  const [avatarMood, setAvatarMood] = useState("serious");
-  const [generating, setGenerating] = useState(false);
   const [avatarKey, setAvatarKey] = useState(0);
 
   useEffect(() => {
@@ -111,19 +108,6 @@ export function AgentFormPage({ id }: { id: string | "new" }) {
     }
   }
 
-  async function generate() {
-    setGenerating(true);
-    try {
-      const img = await client.generateAvatar(avatarBase, avatarMood);
-      setPendingAvatar(img);
-      setRemoveAvatar(false);
-    } catch (err) {
-      toast(describeError(err), "error");
-    } finally {
-      setGenerating(false);
-    }
-  }
-
   async function pickFile(file: File | undefined) {
     if (!file) return;
     const mediaType = imageMediaType(file.type);
@@ -168,21 +152,6 @@ export function AgentFormPage({ id }: { id: string | "new" }) {
                 Upload
                 <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden onChange={(e) => void pickFile(e.target.files?.[0])} />
               </label>
-              <div className="row">
-                <select className="compact" value={avatarBase} onChange={(e) => setAvatarBase(e.target.value)}>
-                  {catalog?.avatar.bases.map((b) => (
-                    <option key={b}>{b}</option>
-                  ))}
-                </select>
-                <select className="compact" value={avatarMood} onChange={(e) => setAvatarMood(e.target.value)}>
-                  {catalog?.avatar.moods.map((m) => (
-                    <option key={m}>{m}</option>
-                  ))}
-                </select>
-                <button type="button" className="secondary small" disabled={generating} onClick={() => void generate()}>
-                  {generating ? "Generating…" : "Generate"}
-                </button>
-              </div>
               {(pendingAvatar || (agent?.avatar_media_type && !removeAvatar)) && (
                 <button
                   type="button"
