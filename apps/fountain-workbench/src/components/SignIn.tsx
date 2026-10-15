@@ -37,7 +37,7 @@ export function SignIn({ fountainUrl, error: initialError, onSignedIn }: Props) 
         <h1>Workbench</h1>
         <p className="muted">
           Projects, the work in them, and the agents you pull in to do it — shared with the people you invite. Everyone signs in with{" "}
-          <strong>{host || "Fountain"}</strong>; a project's conversations run on its owner's account.
+          <strong>{host || "Managoat"}</strong>; a project's conversations run on its owner's account.
         </p>
 
         <button
@@ -55,9 +55,9 @@ export function SignIn({ fountainUrl, error: initialError, onSignedIn }: Props) 
             }
           }}
         >
-          {signingIn ? "Redirecting…" : "Sign in with Fountain"}
+          {signingIn ? "Redirecting…" : "Sign in with Managoat"}
         </button>
-        <p className="muted small">Opens Fountain to approve access; you come back signed in. The key it mints is kept by this workbench for your projects, and shows under Account → API keys.</p>
+        <p className="muted small">Opens Managoat to approve access; you come back signed in. The key it mints is kept by this workbench for your projects, and shows under Account → API keys.</p>
 
         {!showPaste ? (
           <button type="button" className="linklike" onClick={() => setShowPaste(true)}>

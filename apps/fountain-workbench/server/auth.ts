@@ -28,19 +28,19 @@ export async function me(ctx: AppContext, req: Request): Promise<Response> {
 export async function signIn(ctx: AppContext, req: Request): Promise<Response> {
   const body = await readJson(req);
   const apiKey = str(body.apiKey, 2000).trim();
-  if (!apiKey) throw new HttpError(400, "missing_key", "A Fountain API key is required.");
+  if (!apiKey) throw new HttpError(400, "missing_key", "A Managoat API key is required.");
 
   let who: { id: string; email: string };
   try {
     who = await new FountainClient(ctx.config.fountainUrl, apiKey).me();
   } catch (err) {
     if (err instanceof FountainHttpError && (err.status === 401 || err.status === 403)) {
-      throw new HttpError(401, "bad_key", "Fountain rejected that key.");
+      throw new HttpError(401, "bad_key", "Managoat rejected that key.");
     }
     throw new HttpError(502, "fountain_unreachable", `Could not reach ${ctx.config.fountainUrl} to verify the key.`);
   }
   const email = who.email.trim().toLowerCase();
-  if (!email) throw new HttpError(502, "no_email", "Fountain did not say who the key belongs to.");
+  if (!email) throw new HttpError(502, "no_email", "Managoat did not say who the key belongs to.");
 
   ctx.db.upsertUser(email, who.id ?? null, await ctx.cipher.encrypt(apiKey));
   const token = randomToken();
@@ -78,7 +78,7 @@ export async function myResources(ctx: AppContext, req: Request): Promise<Respon
   const client = await userClient(ctx, user);
   const [envs, vaults, agents] = await Promise.all([client.fetch("/api/environments"), client.fetch("/api/vaults"), client.fetch("/api/agents")]);
   if (!envs.ok || !vaults.ok || !agents.ok) {
-    throw new HttpError(502, "fountain_error", "Fountain would not list your environments, vaults and agents. Is your key still valid? Sign in again to refresh it.");
+    throw new HttpError(502, "fountain_error", "Managoat would not list your environments, vaults and agents. Is your key still valid? Sign in again to refresh it.");
   }
   const e = (await envs.json()) as { data?: unknown[] };
   const v = (await vaults.json()) as { data?: unknown[] };

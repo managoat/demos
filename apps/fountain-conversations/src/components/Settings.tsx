@@ -39,11 +39,11 @@ export function SettingsScreen({ initial, error: initialError, onConnected, onCa
       <form className="settings-card" onSubmit={submit}>
         <h1>Conversations</h1>
         <p className="muted">
-          Start, watch and drive Fountain conversations. This app talks only to the Fountain
+          Start, watch and drive Managoat conversations. This app talks only to the Managoat
           API; the URL and key stay in this browser.
         </p>
         <label>
-          Fountain URL
+          Managoat URL
           <input
             type="url"
             required
@@ -69,10 +69,10 @@ export function SettingsScreen({ initial, error: initialError, onConnected, onCa
             }
           }}
         >
-          {signingIn ? "Redirecting…" : "Sign in with Fountain"}
+          {signingIn ? "Redirecting…" : "Sign in with Managoat"}
         </button>
         <p className="muted small">
-          Opens Fountain to approve access; you come back signed in. Nothing to copy.
+          Opens Managoat to approve access; you come back signed in. Nothing to copy.
         </p>
 
         {!showPaste ? (

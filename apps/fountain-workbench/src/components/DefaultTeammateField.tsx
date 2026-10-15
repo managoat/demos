@@ -43,11 +43,11 @@ export function DefaultTeammateField({
         {hint && <span className="hint">{hint}</span>}
         {!fit.ok ? (
           <p className="muted small">
-            {solo.name} is the only agent on your Fountain, and it {fit.reason} — so new work here asks every time.
+            {solo.name} is the only agent on your Managoat, and it {fit.reason} — so new work here asks every time.
           </p>
         ) : value === solo.id ? (
           <p className="muted small">
-            New work starts with <strong>{solo.name}</strong> ({solo.runtime}), the only agent on your Fountain.{" "}
+            New work starts with <strong>{solo.name}</strong> ({solo.runtime}), the only agent on your Managoat.{" "}
             <button type="button" className="linklike" onClick={() => onChange("")}>
               Ask every time instead
             </button>
@@ -70,7 +70,7 @@ export function DefaultTeammateField({
     <label>
       Default teammate {hint && <span className="hint">{hint}</span>}
       <select value={value} onChange={(e) => onChange(e.target.value)} disabled={!loaded || team.length === 0}>
-        <option value="">{loaded && team.length === 0 ? "No agents on your Fountain" : "Ask every time"}</option>
+        <option value="">{loaded && team.length === 0 ? "No agents on your Managoat" : "Ask every time"}</option>
         {team.map((a) => {
           const fit = agentFits(a, project);
           return (
@@ -83,7 +83,7 @@ export function DefaultTeammateField({
       </select>
       {/* A default this project cannot run is no default: every picker ignores
           it and falls back to asking, so the field says so rather than looking set. */}
-      {loaded && value && !picked && <span className="hint">That teammate is no longer on your Fountain, so new work asks every time until you pick another.</span>}
+      {loaded && value && !picked && <span className="hint">That teammate is no longer on your Managoat, so new work asks every time until you pick another.</span>}
       {picked && pickedFit && !pickedFit.ok && (
         <span className="hint">
           {picked.name} {pickedFit.reason}, so new work asks every time until you pick another.

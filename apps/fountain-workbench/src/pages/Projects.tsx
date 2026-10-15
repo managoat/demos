@@ -158,11 +158,11 @@ export function Projects() {
         <h1>Projects</h1>
         <div className="row">
           {/* Your bill and where it went. Only the owner pays, so only the owner's own account is here. */}
-          <a className="button secondary small" href={href.cost()} title="Your Fountain bill, and the projects you own that it paid for">
+          <a className="button secondary small" href={href.cost()} title="Your Managoat bill, and the projects you own that it paid for">
             Cost
           </a>
-          <button className="secondary small" onClick={recover} title="Rebuild projects from the workbench conversations on your Fountain account">
-            Recover from Fountain
+          <button className="secondary small" onClick={recover} title="Rebuild projects from the workbench conversations on your Managoat account">
+            Recover from Managoat
           </button>
         </div>
       </div>
@@ -170,7 +170,7 @@ export function Projects() {
       {legacy && (
         <div className="card stack tight notice">
           <p className="strong">This browser has {legacy.projects.length} project{legacy.projects.length === 1 ? "" : "s"} from before the workbench had accounts.</p>
-          <p className="muted small">Import them to your account here — their conversations on Fountain will line up, since the ids are kept. The local copy is cleared afterwards.</p>
+          <p className="muted small">Import them to your account here — their conversations on Managoat will line up, since the ids are kept. The local copy is cleared afterwards.</p>
           <div className="row">
             <button className="small" onClick={importLegacy}>
               Import {legacy.projects.length} project{legacy.projects.length === 1 ? "" : "s"}
@@ -211,7 +211,7 @@ export function Projects() {
         <h2 className="h2">New project</h2>
         <label>
           Name
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Fountain" required />
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Storefront" required />
         </label>
         <EnvVaultFields
           environments={resources?.environments ?? []}

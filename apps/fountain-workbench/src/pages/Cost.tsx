@@ -196,7 +196,7 @@ export function CostView({ cost, period, periodError, email }: { cost: CostDto; 
 
       {cost.elsewhere.conversations > 0 && (
         <p className="muted small elsewhere">
-          Plus {cost.elsewhere.conversations} conversation{cost.elsewhere.conversations === 1 ? "" : "s"} on your Fountain account that belong to no project of yours — {formatCompact(tokens(cost.elsewhere))} tokens over {cost.elsewhere.turns} turn
+          Plus {cost.elsewhere.conversations} conversation{cost.elsewhere.conversations === 1 ? "" : "s"} on your Managoat account that belong to no project of yours — {formatCompact(tokens(cost.elsewhere))} tokens over {cost.elsewhere.turns} turn
           {cost.elsewhere.turns === 1 ? "" : "s"}. Your own threads, work in someone else's workbench project, other apps on the same key.
         </p>
       )}
@@ -204,7 +204,7 @@ export function CostView({ cost, period, periodError, email }: { cost: CostDto; 
       <div className="card stack tight cost-note">
         <p className="strong small">What is measured, and over what</p>
         <p className="muted small">
-          The hours above are measured from each turn's own start and end, clipped to the calendar month (UTC) and summed, so two conversations each running an hour are two hours. Fountain keeps no bill, so this is where the
+          The hours above are measured from each turn's own start and end, clipped to the calendar month (UTC) and summed, so two conversations each running an hour are two hours. Managoat keeps no bill, so this is where the
           work went, not a dollar figure per project.
         </p>
         <p className="muted small">
@@ -213,7 +213,7 @@ export function CostView({ cost, period, periodError, email }: { cost: CostDto; 
         {missing > 0 && (
           <p className="muted small">
             {period!.fanout.dropped > 0 ? `${period!.fanout.dropped} conversation${period!.fanout.dropped === 1 ? "" : "s"} fell past the ceiling on how many one page load will measure. ` : ""}
-            {period!.fanout.failed > 0 ? `Fountain would not answer for ${period!.fanout.failed} more. ` : ""}
+            {period!.fanout.failed > 0 ? `Managoat would not answer for ${period!.fanout.failed} more. ` : ""}
             Their hours are missing from the figures above.
           </p>
         )}

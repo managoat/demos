@@ -55,7 +55,7 @@ export function EgressSection({ conversationId, lastActiveAt, feed }: { conversa
         // The proxy has already checked the conversation is the project's,
         // so a 404 here is a Fountain without the endpoint, not a missing
         // conversation. Say that; the panel shows it on every thread otherwise.
-        setError(errorCode(err) === "not_found" ? "This Fountain has no egress log to read — it predates the feature." : describeError(err));
+        setError(errorCode(err) === "not_found" ? "This Managoat has no egress log to read — it predates the feature." : describeError(err));
       } finally {
         setBusy(false);
       }

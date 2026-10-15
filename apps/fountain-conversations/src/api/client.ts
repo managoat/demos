@@ -328,12 +328,12 @@ export function describeError(err: unknown): string {
         if (err.status === 401) return "That API key was not accepted.";
         if (err.status === 410) return "That conversation is gone — start a new one.";
         if (err.status === 429) return "Too many requests — slow down a little.";
-        if (err.status === 503) return "Fountain could not reach the sandbox provider — try again shortly.";
+        if (err.status === 503) return "Managoat could not reach the sandbox provider — try again shortly.";
         return err.message;
     }
   }
   if (err instanceof TypeError) {
-    return "Could not reach Fountain. Check the URL, and that API_CORS_ORIGINS on the server includes this site.";
+    return "Could not reach Managoat. Check the URL, and that API_CORS_ORIGINS on the server includes this site.";
   }
   return err instanceof Error ? err.message : String(err);
 }

@@ -577,7 +577,7 @@ async function retire(ctx: AppContext, project: ProjectRow, itemId: string, keys
 }
 
 function reason(err: unknown): string {
-  if (err instanceof FountainHttpError) return `Fountain answered ${err.status}.`;
+  if (err instanceof FountainHttpError) return `Managoat answered ${err.status}.`;
   if (err instanceof HttpError) return err.message;
   return err instanceof Error ? err.message : String(err);
 }

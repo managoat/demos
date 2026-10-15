@@ -265,7 +265,7 @@ async function listAll(client: FountainClient): Promise<ConversationSummary[]> {
     // on the key counts, and each one's channel says where it belongs.
     return await client.conversations({ roots_only: "false" });
   } catch {
-    throw new HttpError(502, "fountain_error", "Fountain would not list your conversations, so there is nothing to break down. Is your key still valid? Sign in again to refresh it.");
+    throw new HttpError(502, "fountain_error", "Managoat would not list your conversations, so there is nothing to break down. Is your key still valid? Sign in again to refresh it.");
   }
 }
 

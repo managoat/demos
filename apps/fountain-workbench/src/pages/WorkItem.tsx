@@ -151,7 +151,7 @@ export function WorkItem({ itemId }: { itemId: string }) {
         <h2 className="h2">Teammates</h2>
         {team.length === 0 && (
           <p className="muted small">
-            No agents on {project.ownerEmail}'s Fountain yet. <a href={href.team(project.id)}>See the team</a>.
+            No agents on {project.ownerEmail}'s Managoat yet. <a href={href.team(project.id)}>See the team</a>.
           </p>
         )}
         <ul className="member-list">
@@ -240,8 +240,8 @@ export function WorkItem({ itemId }: { itemId: string }) {
                 className="danger small"
                 title={
                   comp.live
-                    ? `Retire this computer and take it out of "${item.title}". Its conversations stay on Fountain; put it back below.`
-                    : `Take this computer out of "${item.title}". Its conversations stay on Fountain; put it back below.`
+                    ? `Retire this computer and take it out of "${item.title}". Its conversations stay on Managoat; put it back below.`
+                    : `Take this computer out of "${item.title}". Its conversations stay on Managoat; put it back below.`
                 }
                 onConfirm={() => void removeComputers(item.id, [comp.key])}
               />
@@ -285,7 +285,7 @@ export function WorkItem({ itemId }: { itemId: string }) {
             {item.removedComputers.length} computer{item.removedComputers.length === 1 ? "" : "s"} removed from this item
           </summary>
           <p className="muted small">
-            Out of this item, not gone: their conversations are still on {project.ownerEmail}'s Fountain, and what they spent is still on the bill.
+            Out of this item, not gone: their conversations are still on {project.ownerEmail}'s Managoat, and what they spent is still on the bill.
           </p>
           <ul className="member-list">
             {item.removedComputers.map((r) => (

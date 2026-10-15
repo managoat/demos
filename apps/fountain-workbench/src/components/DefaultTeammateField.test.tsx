@@ -38,7 +38,7 @@ describe("the default teammate field", () => {
     const out = html({ agents: [coder], value: "a1" });
     expect(out).not.toContain("<select");
     expect(out).toContain("Coder");
-    expect(out).toContain("the only agent on your Fountain");
+    expect(out).toContain("the only agent on your Managoat");
     expect(out).toContain("Ask every time instead");
   });
 
@@ -62,16 +62,16 @@ describe("the default teammate field", () => {
   });
 
   test("no agents at all says so, once the list has actually arrived", () => {
-    expect(html({ agents: [] })).toContain("No agents on your Fountain");
+    expect(html({ agents: [] })).toContain("No agents on your Managoat");
     // Before it has, an empty list is not news — and the select stays disabled.
     const loading = html({ agents: [], loaded: false });
-    expect(loading).not.toContain("No agents on your Fountain");
+    expect(loading).not.toContain("No agents on your Managoat");
     expect(loading).toContain("disabled");
   });
 
   test("a default that cannot run says so rather than looking set", () => {
     // Gone from the owner's Fountain…
-    expect(html({ value: "a9" })).toContain("no longer on your Fountain");
+    expect(html({ value: "a9" })).toContain("no longer on your Managoat");
     // …and still there, but outside this project's computer.
     expect(html({ agents: [coder, scribe, fussy], value: "a3", project: { environmentId: "e1", vaultId: null } })).toContain("asks every time until you pick another");
   });

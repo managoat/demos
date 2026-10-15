@@ -217,7 +217,7 @@ export function DetailsPanel({ conversationId, onClose }: { conversationId: stri
                 <li key={`${s.name}-${i}`}>
                   <code>{s.name}</code>{" "}
                   {s.bundled ? (
-                    <span className="tag" title="Fountain writes this onto every sprite; it is in no teammate's definition">bundled</span>
+                    <span className="tag" title="Managoat writes this onto every sprite; it is in no teammate's definition">bundled</span>
                   ) : s.source === "github" ? (
                     <span className="muted">
                       {s.repo}

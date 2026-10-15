@@ -44,7 +44,7 @@ export function People() {
       <h2 className="h2 section">People</h2>
       <div className="card stack tight">
         <p className="muted small">
-          Everyone here sees the same work items and conversations. Conversations run on <strong>{isOwner ? "your" : `${project.ownerEmail}'s`}</strong> Fountain account — its agents, its computers, its bill.
+          Everyone here sees the same work items and conversations. Conversations run on <strong>{isOwner ? "your" : `${project.ownerEmail}'s`}</strong> Managoat account — its agents, its computers, its bill.
         </p>
         <ul className="member-list">
           <li className="member-row">
@@ -86,7 +86,7 @@ export function People() {
             </button>
           </form>
         )}
-        {isOwner && <p className="muted small">They sign in with Fountain using that email, and the project is there.</p>}
+        {isOwner && <p className="muted small">They sign in with Managoat using that email, and the project is there.</p>}
       </div>
 
       {isOwner && (

@@ -209,11 +209,11 @@ function settled(outcome: string | null, optionId: string | null, options: Choic
     case "answered":
       return label ? `Answered — ${label}.` : "Answered.";
     case "timeout":
-      return "Nobody answered in five minutes, so Fountain refused it.";
+      return "Nobody answered in five minutes, so Managoat refused it.";
     case "turn_ended":
       return "The turn ended before anyone answered.";
     default:
       return `Closed — ${outcome}.`;
   }
-  return said ?? "Expired — Fountain refuses a request nobody answers in five minutes.";
+  return said ?? "Expired — Managoat refuses a request nobody answers in five minutes.";
 }
