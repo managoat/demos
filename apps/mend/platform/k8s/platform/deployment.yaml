@@ -42,7 +42,7 @@ spec:
             - { name: OTEL_EXPORTER_OTLP_PROTOCOL, value: http/protobuf }
             - { name: OTEL_SERVICE_NAME, value: mend }
             - { name: OTEL_RESOURCE_ATTRIBUTES, value: "service.namespace=planter-apps,deployment.environment=prod" }
-          # Infisical `planter-apps-md-qs` / prod / `/mend` (GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_APP_SLUG, GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET, GRANT_SECRET), as the Secret mend-secrets.
+          # Infisical `planter-apps-md-qs` / prod / `/mend` (GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_APP_SLUG, GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET), as the Secret mend-secrets.
           envFrom:
             - secretRef:
                 name: mend-secrets

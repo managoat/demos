@@ -10,10 +10,6 @@ import { normalizeKey, type AppConfig } from "./github";
 export interface Config {
   /** Null when the App is not configured — /gh then answers 503. */
   app: AppConfig | null;
-  /** HMAC secret for grants. Null disables grant issuing. */
-  grantSecret: string | null;
-  /** Origins allowed to call /gh cross-origin. Same-origin needs no entry. */
-  allowedOrigins: string[];
   /** Public app slug, for the "install it" link. */
   slug: string | null;
 }
@@ -38,11 +34,6 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
 
   return {
     app: complete ? { appId: appId!, privateKey: privateKey!, clientId: clientId!, clientSecret: clientSecret! } : null,
-    grantSecret: trim(env.GRANT_SECRET) ?? null,
-    allowedOrigins: (env.ALLOWED_ORIGINS ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean),
     slug: trim(env.GITHUB_APP_SLUG) ?? null,
   };
 }

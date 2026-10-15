@@ -112,7 +112,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
  */
 function githubConfig(env: Record<string, string | undefined>): GitHubAppConfig | null {
   // `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_APP_PRIVATE_KEY` are what cantor,
-  // rounds and salon take, and therefore what the Infisical folder these are
+  // mend and salon take, and therefore what the Infisical folder these are
   // read from is keyed by. The shorter aliases are accepted because they are
   // the names somebody types from memory into a local `.env`.
   //

@@ -21,7 +21,7 @@ const routes = buildRoutes(config);
 if (!config.app) {
   console.warn(
     "github app not configured — /gh endpoints will answer 503 and the app falls back to pasted tokens. " +
-      "Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET and GRANT_SECRET.",
+      "Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET.",
   );
 }
 

@@ -7,11 +7,8 @@
  * installation of the App, which is a far broader credential than anything it
  * hands out.
  *
- * What it hands out instead:
- *   - a **user token**, from "Sign in with GitHub", which acts as the person
- *     and can only touch what they can touch;
- *   - an **installation token**, scoped to one repository and good for an
- *     hour, for the unattended case where no person is present.
+ * What it hands out instead is a **user token**, from "Sign in with GitHub",
+ * which acts as the person and can only touch what they can touch.
  */
 import crypto from "node:crypto";
 
@@ -114,45 +111,4 @@ export async function exchangeCode(
 
 export async function viewer(token: string, deps: Deps = {}): Promise<{ login: string }> {
   return gh<{ login: string }>(`${deps.api ?? API}/user`, token, {}, deps.fetchImpl);
-}
-
-/** Whether this person may push to this repo — the check before we mint anything for it. */
-export async function canPush(token: string, slug: string, deps: Deps = {}): Promise<boolean> {
-  try {
-    const repo = await gh<{ permissions?: { push?: boolean } }>(`${deps.api ?? API}/repos/${slug}`, token, {}, deps.fetchImpl);
-    return repo.permissions?.push === true;
-  } catch (err) {
-    if (err instanceof GitHubError && err.status === 404) return false;
-    throw err;
-  }
-}
-
-/**
- * An installation token for one repository, good for an hour.
- *
- * Scoped deliberately: `repositories` limits it to the single repo even when
- * the installation covers many, so an unattended agent holding it cannot
- * reach anything else the person installed the App on.
- */
-export async function installationToken(cfg: AppConfig, slug: string, deps: Deps = {}): Promise<{ token: string; expiresAt: string }> {
-  const api = deps.api ?? API;
-  const jwt = appJwt(cfg.appId, cfg.privateKey);
-  const [owner, repo] = slug.split("/") as [string, string];
-  let installation: { id: number };
-  try {
-    installation = await gh<{ id: number }>(`${api}/repos/${slug}/installation`, jwt, {}, deps.fetchImpl);
-  } catch (err) {
-    if (err instanceof GitHubError && err.status === 404) {
-      throw new GitHubError(`The GitHub App is not installed on ${slug}.`, 404);
-    }
-    throw err;
-  }
-  const token = await gh<{ token: string; expires_at: string }>(
-    `${api}/app/installations/${installation.id}/access_tokens`,
-    jwt,
-    { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ repositories: [repo], owner }) },
-    deps.fetchImpl,
-  );
-  if (!token?.token) throw new GitHubError("GitHub returned no token", 502);
-  return { token: token.token, expiresAt: token.expires_at };
 }

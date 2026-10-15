@@ -52,7 +52,7 @@ describe("the static half", () => {
   });
 
   test("with no app configured, /gh degrades to 503 rather than breaking the page", async () => {
-    const res = await fetch(`${base}/gh/token`, { method: "POST", body: "{}" });
+    const res = await fetch(`${base}/gh/callback?code=x`);
     expect(res.status).toBe(503);
     const app = await (await fetch(`${base}/gh/app`)).json();
     expect((app as { configured: boolean }).configured).toBe(false);
