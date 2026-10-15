@@ -12,7 +12,7 @@ images:
   - name: ghcr.io/managoat/fountain-workbench
     # Pinned by .github/workflows/build.yml on every build of this app. `unpinned` is a placeholder
     # that does not exist: the app does not run until CI has replaced it.
-    newTag: sha-a1f023d3a952498629fb1b418a44be18c27eceb2
+    newTag: sha-042ddec2b6e0f1d9d93ef085ee182e48b5714703
 patches:
   # What app.yaml can't say: plain settings.
   - patch: |-
