@@ -12,4 +12,4 @@ images:
   - name: ghcr.io/managoat/table-talk
     # Pinned by .github/workflows/build.yml on every build of this app. `unpinned` is a placeholder
     # that does not exist: the app does not run until CI has replaced it.
-    newTag: sha-ec236c47ba27f1429b8d5c760022b62b4ee1c64e
+    newTag: sha-9d4ac2159f9e5e3e8c9ca46c9f4aea894b7256e1
