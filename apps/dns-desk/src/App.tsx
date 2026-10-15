@@ -1,14 +1,15 @@
 /**
- * DNS Desk: one dedicated teammate, two views of its one conversation —
+ * DNS Desk: one dedicated agent, two views of its one conversation —
  * Zones (the latest dns-state) and Activity (requests, plans, decisions).
+ * The conversation is the one bound to the `dns-desk` channel (lib/desk.ts).
  * The desk protocol itself lives in lib/protocol.ts; the agent's rules in
- * lib/spec.ts. Streaming/reconnect follows jhgaylor/fountain-team.
+ * lib/spec.ts.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { describeError, FountainClient } from "./api/client";
-import type { LogEvent, TeamEvent, Teammate, Turn } from "./api/types";
+import type { Agent, Conversation, LogEvent, StreamEvent, Turn } from "./api/types";
 import { assistantText } from "./lib/acp";
-import { clearDeskId, loadDeskId, saveDeskId } from "./lib/desk";
+import { CHANNEL, clearDesk, loadDesk, presenceLabel, saveDesk, type DeskRef } from "./lib/desk";
 import { completeLoginIfCallback, revoke } from "./lib/oauth";
 import { clearSettings, loadSettings, saveSettings, type Settings } from "./lib/settings";
 import { foldConversation, parseDecision, pendingPlan, stripBlocks, type DeskView } from "./lib/protocol";
@@ -23,11 +24,12 @@ type Phase = "boot" | "setup" | "connect" | "desk";
 
 export function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [deskId, setDeskId] = useState<string | null>(null);
+  const [desk, setDesk] = useState<DeskRef | null>(null);
   const [phase, setPhase] = useState<Phase>("boot");
   const [setupError, setSetupError] = useState<string | null>(null);
 
-  const [teammate, setTeammate] = useState<Teammate | null>(null);
+  const [agent, setAgent] = useState<Agent | null>(null);
+  const [conversation, setConversation] = useState<Conversation | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [events, setEvents] = useState<LogEvent[]>([]);
   const [connected, setConnected] = useState(false);
@@ -36,7 +38,7 @@ export function App() {
   const [toast, setToast] = useState<string | null>(null);
 
   const client = useMemo(() => (settings ? new FountainClient(settings) : null), [settings]);
-  const convId = teammate?.conversation.id ?? null;
+  const convId = conversation?.id ?? null;
   const convIdRef = useRef<string | null>(null);
   convIdRef.current = convId;
 
@@ -69,46 +71,51 @@ export function App() {
   // Settings arrived (boot, OAuth callback, or a pasted key): pick the screen.
   useEffect(() => {
     if (!settings) return;
-    const desk = loadDeskId(settings.baseUrl);
-    setDeskId(desk);
-    setPhase(desk ? "desk" : "connect");
+    const stored = loadDesk(settings.baseUrl);
+    setDesk(stored);
+    setPhase(stored ? "desk" : "connect");
   }, [settings]);
 
   const signOut = useCallback(() => {
     if (settings?.via === "oauth") void revoke(settings.baseUrl, settings.apiKey);
     clearSettings();
     setSettings(null);
-    setDeskId(null);
-    setTeammate(null);
+    setDesk(null);
+    setAgent(null);
+    setConversation(null);
     setPhase("setup");
   }, [settings]);
 
   const changeDesk = useCallback(() => {
-    if (settings) clearDeskId(settings.baseUrl);
-    setDeskId(null);
-    setTeammate(null);
+    if (settings) clearDesk(settings.baseUrl);
+    setDesk(null);
+    setAgent(null);
+    setConversation(null);
     setPhase("connect");
   }, [settings]);
 
   // ── the desk's conversation ───────────────────────────────────────────────
 
-  const refreshTeammate = useCallback(async () => {
-    if (!client || !deskId) return;
+  const refreshDesk = useCallback(async () => {
+    if (!client || !desk) return;
     try {
-      setTeammate(await client.getTeammate(deskId));
+      const [a, c] = await Promise.all([client.getAgent(desk.agentId), client.findConversation(desk.agentId, desk.vaultId, CHANNEL)]);
+      setAgent(a);
+      setConversation(c);
     } catch (err) {
-      // The teammate is gone (removed in Fountain) — back to connect.
-      setTeammate(null);
-      if (settings) clearDeskId(settings.baseUrl);
-      setDeskId(null);
+      // The agent is gone (deleted in Fountain) — back to connect.
+      setAgent(null);
+      setConversation(null);
+      if (settings) clearDesk(settings.baseUrl);
+      setDesk(null);
       setPhase("connect");
       say(describeError(err));
     }
-  }, [client, deskId, settings, say]);
+  }, [client, desk, settings, say]);
 
   useEffect(() => {
-    if (phase === "desk") void refreshTeammate();
-  }, [phase, refreshTeammate]);
+    if (phase === "desk") void refreshDesk();
+  }, [phase, refreshDesk]);
 
   const reloadThread = useCallback(async () => {
     if (!client || !convId) return;
@@ -128,7 +135,7 @@ export function App() {
   // ── stream: append live events, resync on turn boundaries ────────────────
 
   useEffect(() => {
-    if (!client || phase !== "desk" || !deskId) return;
+    if (!client || phase !== "desk" || !desk) return;
     const ctrl = new AbortController();
     let lastEventId: string | null = null;
     let backoff = 1000;
@@ -136,34 +143,32 @@ export function App() {
 
     const connect = () => {
       if (stopped) return;
-      void client.streamTeam({
+      void client.streamEvents({
         lastEventId,
         streams: STREAMS,
         signal: ctrl.signal,
         onOpen: () => {
           setConnected(true);
           backoff = 1000;
-          void refreshTeammate();
+          void refreshDesk();
           void reloadThread();
         },
         onMessage: (msg) => {
           if (msg.id) lastEventId = msg.id;
-          if (msg.event === "team") {
-            void refreshTeammate();
+          if (msg.event === "conversations") {
+            // The list changed — possibly a new conversation on the desk's
+            // channel (a fresh computer): re-point.
+            void refreshDesk();
             return;
           }
-          let ev: TeamEvent;
+          let ev: StreamEvent;
           try {
-            ev = JSON.parse(msg.data) as TeamEvent;
+            ev = JSON.parse(msg.data) as StreamEvent;
           } catch {
             return;
           }
           if (msg.id) ev.id = Number(msg.id);
-          if (ev.conversation_id !== convIdRef.current) {
-            // A new conversation for our agent (fresh computer): re-point.
-            if (ev.agent_id === deskId) void refreshTeammate();
-            return;
-          }
+          if (ev.conversation_id !== convIdRef.current) return;
           setEvents((es) => (es.some((e) => e.id === ev.id) ? es : [...es, ev]));
           if (ev.kind === "stage" && ev.stage === "turn") {
             void client.listTurns(ev.conversation_id).then(setTurns).catch(() => undefined);
@@ -183,11 +188,11 @@ export function App() {
       stopped = true;
       ctrl.abort();
     };
-  }, [client, phase, deskId, refreshTeammate, reloadThread]);
+  }, [client, phase, desk, refreshDesk, reloadThread]);
 
   // ── derived: replies per turn, the folded desk view ──────────────────────
 
-  const runtime = teammate?.conversation.runtime ?? "claude";
+  const runtime = conversation?.runtime ?? agent?.runtime ?? "claude";
   const thread = useMemo(() => {
     const sorted = [...turns].sort((a, b) => a.turn_number - b.turn_number);
     const byTurn = new Map<string, LogEvent[]>();
@@ -214,18 +219,19 @@ export function App() {
 
   const send = useCallback(
     async (text: string) => {
-      if (!client || !deskId || !text.trim()) return;
+      if (!client || !desk || !text.trim()) return;
       setBusy(true);
       try {
-        await client.sendMessage(deskId, text.trim());
-        await Promise.all([refreshTeammate(), reloadThread()]);
+        const conv = await client.sendOnChannel({ agent_id: desk.agentId, vault_id: desk.vaultId, channel_id: CHANNEL, prompt: text.trim() });
+        setConversation(conv);
+        await reloadThread();
       } catch (err) {
         say(describeError(err));
       } finally {
         setBusy(false);
       }
     },
-    [client, deskId, refreshTeammate, reloadThread, say],
+    [client, desk, reloadThread, say],
   );
 
   const decide = useCallback(
@@ -253,14 +259,14 @@ export function App() {
         }}
       />
     );
-  if (phase === "connect" || !deskId)
+  if (phase === "connect" || !desk)
     return (
       <Connect
         client={client}
         onSignOut={signOut}
-        onReady={(agentId) => {
-          saveDeskId(settings.baseUrl, agentId);
-          setDeskId(agentId);
+        onReady={(ref) => {
+          saveDesk(settings.baseUrl, ref);
+          setDesk(ref);
           setPhase("desk");
         }}
       />
@@ -282,7 +288,7 @@ export function App() {
         </nav>
         <div className="head-status">
           <span className={connected ? "dot on" : "dot"} title={connected ? "live" : "reconnecting"} />
-          <span className="fineprint">{working ? "working…" : teammate?.presence.label ?? "…"}</span>
+          <span className="fineprint">{working ? "working…" : agent ? presenceLabel(conversation) : "…"}</span>
           <button className="linkish" onClick={changeDesk}>
             change desk
           </button>

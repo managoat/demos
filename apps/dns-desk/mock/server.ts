@@ -1,6 +1,6 @@
 /**
  * A tiny mock Fountain, for developing DNS Desk without a live server:
- * one teammate, one conversation, canned turns that walk the whole protocol
+ * one agent, one conversation, canned turns that walk the whole protocol
  * (state → plan → approve → result → fresh state). Run with `bun run mock`,
  * start the app with `FOUNTAIN_PROXY=http://localhost:8787 bun run dev`,
  * and paste any string as the API key with http://localhost:5174 as the URL.
@@ -42,15 +42,8 @@ const events = turns.map((t, i) => ({
   ts: now,
 }));
 
-const teammate = {
-  agent_id: "agent-dns",
-  name: "dns-desk",
-  agent: { id: "agent-dns", name: "dns-desk", model: "anthropic/claude-sonnet-5", runtime: "claude", environment_id: null, allowed_vault_ids: null, allowed_environment_ids: null },
-  conversation: { id: "c1", title: null, agent_id: "agent-dns", vault_id: "v1", environment_id: null, runtime: "claude", acp: true, status: "idle", turn_count: turns.length, last_active_at: now, unread: false, inserted_at: now, updated_at: now },
-  presence: { state: "online", label: "online" },
-  unread: false,
-  last_turn: null,
-};
+const agent = { id: "agent-dns", name: "dns-desk", model: "anthropic/claude-sonnet-5", runtime: "claude", environment_id: null, allowed_vault_ids: null, allowed_environment_ids: null };
+const conversation = { id: "c1", title: null, agent_id: "agent-dns", vault_id: "v1", environment_id: null, runtime: "claude", acp: true, status: "idle", turn_count: turns.length, last_active_at: now, unread: false, inserted_at: now, updated_at: now };
 
 const json = (data: unknown) => Response.json({ data });
 
@@ -59,14 +52,16 @@ Bun.serve({
   idleTimeout: 120,
   routes: {
     "/api/auth/me": json({ id: "u1", email: "dev@example.com", role: "user" }),
-    "/api/team": json([teammate]),
-    "/api/team/agent-dns": json(teammate),
+    "/api/agents": json([agent]),
+    "/api/agents/agent-dns": json(agent),
+    "/api/conversations": (req: Request) =>
+      req.method === "POST" ? Response.json({ data: conversation, meta: { resumed: true } }) : json([conversation]),
+    "/api/conversations/c1/prompts": () => Response.json({ status: "queued" }),
     "/api/conversations/c1/turns": json(turns.map(({ reply: _r, ...t }) => t)),
     "/api/conversations/c1/events": () =>
       Response.json({ data: events, meta: { has_more: false, next_cursor: null } }),
     "/api/conversations/c1/read": new Response(null, { status: 204 }),
-    "/api/team/agent-dns/messages": () => Response.json({ status: "queued", conversation_id: "c1" }),
-    "/api/team/stream": () =>
+    "/api/events/stream": () =>
       new Response(
         new ReadableStream({
           start(controller) {
