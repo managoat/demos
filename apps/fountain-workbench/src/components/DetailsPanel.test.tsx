@@ -90,9 +90,8 @@ describe("the details panel", () => {
   test("lists the skills on the machine, not just the ones on the teammate", () => {
     current = store();
     const html = render();
-    // Fountain writes these onto every sprite; a list without them is short.
+    // Fountain writes this onto every sprite; a list without it is short.
     expect(html).toContain("fountain");
-    expect(html).toContain("create-team");
     expect(html).toContain("bundled");
     expect(html).toContain("house-style");
     expect(html).toContain("anthropics/skills@v2");
@@ -111,8 +110,6 @@ describe("the details panel", () => {
     // The panel renders key names; it must never render a value, whatever the
     // proxy handed it. Its own placeholder is the only thing a value can be.
     expect(html).not.toContain("withheld by the workbench");
-    // And it says what it cannot show at all.
-    expect(html).toContain("Buzz identity");
   });
 
   test("shows the policy in force, merged, and explains that it is merged", () => {

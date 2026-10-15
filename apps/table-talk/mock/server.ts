@@ -1,6 +1,6 @@
 /**
  * A tiny mock Fountain, for developing Table Talk without a live server:
- * one analyst teammate, one dataset conversation whose canned turns walk the
+ * one analyst agent, one dataset conversation whose canned turns walk the
  * whole protocol (hand-off → report with all three chart kinds → follow-up).
  * Run with `bun run mock`, start the app with
  * `FOUNTAIN_PROXY=http://localhost:8788 bun run dev`, and open
@@ -93,22 +93,14 @@ const conversation = {
   updated_at: now,
 };
 
-const teammate = {
-  agent_id: "agent-tt",
+const agent = {
+  id: "agent-tt",
   name: "table-talk",
-  agent: {
-    id: "agent-tt",
-    name: "table-talk",
-    model: "anthropic/claude-sonnet-5",
-    runtime: "claude",
-    environment_id: null,
-    allowed_vault_ids: null,
-    allowed_environment_ids: null,
-  },
-  conversation,
-  presence: { state: "online", label: "online" },
-  unread: false,
-  last_turn: null,
+  model: "anthropic/claude-sonnet-5",
+  runtime: "claude",
+  environment_id: null,
+  allowed_vault_ids: null,
+  allowed_environment_ids: null,
 };
 
 const json = (data: unknown) => Response.json({ data });
@@ -117,15 +109,16 @@ Bun.serve({
   port: 8788,
   idleTimeout: 120,
   routes: {
-    "/api/team": json([teammate]),
-    "/api/team/agent-tt": json(teammate),
+    "/api/agents": json([agent]),
+    "/api/agents/agent-tt": json(agent),
+    "/api/conversations": (req: Request) =>
+      req.method === "POST" ? Response.json({ data: conversation, meta: { resumed: false } }, { status: 201 }) : json([conversation]),
+    "/api/conversations/c1/prompts": () => Response.json({ status: "queued" }),
     "/api/conversations/c1": json(conversation),
     "/api/conversations/c1/turns": json(turns),
     "/api/conversations/c1/events": () => Response.json({ data: events, meta: { has_more: false, next_cursor: null } }),
     "/api/conversations/c1/read": new Response(null, { status: 204 }),
-    "/api/team/agent-tt/messages": () => Response.json({ status: "queued", conversation_id: "c1" }),
-    "/api/team/agent-tt/conversations": () => Response.json({ data: conversation }, { status: 201 }),
-    "/api/team/stream": () =>
+    "/api/events/stream": () =>
       new Response(
         new ReadableStream({
           start(controller) {

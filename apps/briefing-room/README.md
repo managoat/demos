@@ -6,8 +6,9 @@ and comes back with a clean, sourced document — not a chat transcript.
 
 It is a static single-page app with no backend of its own — it talks only to
 the [Fountain](https://github.com/managoat/fountain) API, where the
-researcher runs as a teammate (an agent in a sandbox with internet access; it
-holds no credentials of yours). Client patterns (OAuth, SSE, API client)
+researcher runs as an agent in a sandbox with internet access (it holds no
+credentials of yours), on one conversation bound to the `briefing-room`
+channel. Client patterns (OAuth, SSE, API client)
 follow [dns-desk](../dns-desk).
 
 ## Run it
@@ -18,10 +19,12 @@ bun run dev        # http://localhost:5175
 ```
 
 On first load, enter your Fountain URL and **Sign in with Fountain** (OAuth
-code + PKCE; the token is an API key), or paste an API key. Then either pick a
-teammate already running the `briefing-room` agent, or let the app hire one:
-it creates the agent with the built-in operating rules and adds it to your
-team. No vault, no environment — the researcher only reads the public web.
+code + PKCE; the token is an API key), or paste an API key. Then either pick
+an existing `briefing-room` agent, or let the app create one with the
+built-in operating rules. The first brief opens the researcher's conversation
+(`POST /api/conversations` with `channel_id: "briefing-room"`); later ones
+resume it, and a retired machine is replaced the same way. No vault, no
+environment — the researcher only reads the public web.
 
 Server-side requirements, same as any external Fountain client:
 
@@ -68,7 +71,7 @@ an "ask again for the full brief" button.
 
 The conversation is the system of record. The library rail — every brief
 ever produced, searchable, newest first — is folded from the conversation's
-turns on load and kept live over one `GET /api/team/stream` SSE connection
+turns on load and kept live over one `GET /api/events/stream` SSE connection
 (reconnecting with `Last-Event-ID`; the server's 60 s idle close is normal).
 Nothing derived is stored anywhere else.
 
@@ -87,7 +90,7 @@ start the app through the dev proxy
 library with a brief, an analyst's note, and a revision.
 
 No state outside the browser: settings in `localStorage`
-(`briefing-room.settings`), the chosen teammate per Fountain URL
+(`briefing-room.settings`), the chosen agent per Fountain URL
 (`briefing-room.analyst`).
 
 ## License

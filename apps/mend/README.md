@@ -61,8 +61,9 @@ code + PKCE; the token is an API key), or paste an API key. Then name a repo —
 `owner/name`, or a URL on `github.com`, `gitlab.com` or `codeberg.org` —
 public, or private with a read token (see below). The app hires one mender per
 repo (an agent named
-`Mend: host/owner/name`, added to your team), sends it off to audit, and
-remembers the pairing per Fountain URL in this browser.
+`Mend: host/owner/name`), opens its conversation on the `mend` channel with
+the audit as the first turn, and remembers the pairing per Fountain URL in this
+browser. Retiring a mender terminates that conversation.
 
 Server-side requirements, same as any external Fountain client:
 
@@ -120,10 +121,10 @@ only**. It needs read access and nothing more — the mender never pushes.
 
 Two consequences worth knowing:
 
-- **A vault can only be bound when the teammate is created.** Attaching a token
-  to a repo you have already added rebuilds the mender, which starts a fresh
-  thread; the old conversation is kept in Fountain but leaves the view. The app
-  says so before it does it.
+- **A vault binds when a conversation opens.** Attaching a token to a repo you
+  have already added ends the mender's conversation and opens a new one that
+  audits again, which starts a fresh thread; the old conversation is kept in
+  Fountain but leaves the view. The app says so before it does it.
 - **The pull request is a separate credential.** It is opened from your browser
   with your own token, so for a private repo that token needs access too —
   `repo` scope rather than `public_repo`.
@@ -214,7 +215,7 @@ to re-audit rather than committing a file it cannot vouch for. Opening a PR is
 GitHub-only; on GitLab and Codeberg you get the patch.
 
 The conversation is the system of record: the report, the plan and the patch
-are all derived from turns + blocks on load, and from one `/api/team/stream`
+are all derived from turns + blocks on load, and from one `/api/events/stream`
 SSE connection while live. The clone and the branch persist on the mender's
 computer between messages.
 

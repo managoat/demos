@@ -47,32 +47,6 @@ export interface Agent {
   metadata?: Record<string, unknown> | null;
 }
 
-export type PresenceState =
-  | "machine_offline"
-  | "working"
-  | "starting"
-  | "online"
-  | "asleep"
-  | "away"
-  | "failed"
-  | "offline";
-
-export interface Teammate {
-  agent_id: string;
-  name: string;
-  agent: Agent;
-  conversation: Conversation;
-  presence: { state: PresenceState; label: string };
-  unread: boolean;
-  last_turn: {
-    id: string;
-    turn_number: number;
-    prompt: string;
-    status: string;
-    inserted_at: string;
-  } | null;
-}
-
 export interface Turn {
   id: string;
   turn_number: number;

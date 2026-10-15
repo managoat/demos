@@ -7,10 +7,12 @@ grep is half the demo.
 
 It is a static single-page app with no backend of its own — it talks only to
 the [Fountain](https://github.com/managoat/fountain) API, where each sage
-runs as a teammate (an agent in a sandbox with a real shell and a real git).
-Client patterns (OAuth, SSE, API client) follow
-[dns-desk](../dns-desk) /
-[fountain-team](../fountain-team).
+runs as an agent named `Sage: owner/name` in a sandbox with a real shell and
+a real git, on one conversation bound to the `repo-sage` channel
+(`POST /api/conversations` with that `channel_id` resumes it, or opens one when
+the machine was retired). Retiring a sage ends that conversation and deletes
+the agent. Client patterns (OAuth, SSE, API client) follow
+[dns-desk](../dns-desk).
 
 ## Run it
 
@@ -21,8 +23,8 @@ bun run dev        # http://localhost:5175
 
 On first load, enter your Fountain URL and **Sign in with Fountain** (OAuth
 code + PKCE; the token is an API key), or paste an API key. Then name a repo —
-`owner/name` or a GitHub URL, public repos only. The app hires one sage per
-repo (an agent named `Sage: owner/name`, added to your team), sends it off to
+`owner/name` or a GitHub URL, public repos only. The app creates one sage per
+repo (an agent named `Sage: owner/name`), sends it off to
 study, and remembers the pairing per Fountain URL in this browser.
 
 Server-side requirements, same as any external Fountain client:
@@ -68,7 +70,7 @@ the link degrades to a single line or the whole file). Inline `path:line`
 mentions in the prose are linkified against the same repo.
 
 The conversation is the system of record: the dossier and every answer are
-derived from turns + blocks on load and from one `/api/team/stream` SSE
+derived from turns + blocks on load and from one `/api/events/stream` SSE
 connection while live. The clone persists on the sage's computer between
 questions — new questions never re-clone.
 

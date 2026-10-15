@@ -1,6 +1,6 @@
 # managoat/demos
 
-The Fountain demo suite. Sixteen apps, one per directory under `apps/`, each
+The Fountain demo suite. Twelve apps, one per directory under `apps/`, each
 served at `<name>.demo.managoat.com` and indexed at
 [demo.managoat.com](https://demo.managoat.com).
 
@@ -17,15 +17,12 @@ what they do is an ordinary web app with no privileged access.
 | [drydock](apps/drydock) | drydock.demo.managoat.com | Conductor for cloud machines: a thread is a repo clone on a machine of its own, with a real terminal. |
 | [fountain-conversations](apps/fountain-conversations) | fountain-conversations.demo.managoat.com | A client for the conversations surface: chat, timeline and raw views. |
 | [fountain-demos](apps/fountain-demos) | demo.managoat.com | The suite's own index, at the parent of every host it lists. |
-| [fountain-team](apps/fountain-team) | fountain-team.demo.managoat.com | Your agents as teammates in a messaging app. |
 | [fountain-workbench](apps/fountain-workbench) | fountain-workbench.demo.managoat.com | Projects → work items → the agents pulled into them. Bun server. |
 | [mend](apps/mend) | mend.demo.managoat.com | An audit of a public repo's CI, manifests and rulesets. Bun server. |
 | [mission-control](apps/mission-control) | mission-control.demo.managoat.com | Plan, approve, fan out over a fleet of sandboxes. |
 | [repo-sage](apps/repo-sage) | repo-sage.demo.managoat.com | Chat with any public GitHub repo, cited to file:line. |
-| [rounds](apps/rounds) | rounds.demo.managoat.com | Mend's ambient sibling: repositories on a schedule. Bun server. |
 | [salon](apps/salon) | salon.demo.managoat.com | Multiplayer chat — the host's Fountain account pays. Bun server. |
 | [table-talk](apps/table-talk) | table-talk.demo.managoat.com | Drop a CSV, get charts and plain-English answers. |
-| [watchtower](apps/watchtower) | watchtower.demo.managoat.com | Scheduled uptime, TLS and DNS patrols by an SRE teammate. |
 
 The name is load-bearing in four places at once: it is the directory, the host
 label, the OAuth client id registered on the Fountain server, and the image at
@@ -61,9 +58,8 @@ app keeps a short `src/lib/<name>.ts` that binds its own id and re-exports, so
 imports inside an app read exactly as they did when it was its own repository,
 and its `localStorage` keys are unchanged.
 
-Two apps deliberately keep their own copy, and both say so in the file:
-fountain-team's ACP parser also reads `session/request_permission`, and
-salon's `settings.ts` is chat settings rather than the credential store.
+One app deliberately keeps its own copy, and says so in the file: salon's
+`settings.ts` is chat settings rather than the credential store.
 
 What is *not* shared: each app's `spec.ts` and `protocol.ts`. Those are the
 prompt contract — what the app asks the agent for and how it reads the answer

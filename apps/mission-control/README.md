@@ -7,7 +7,7 @@ get one synthesized report at the end.
 
 It is a static single-page app with no backend of its own — it talks only to
 the [Fountain](https://github.com/managoat/fountain) API. The coordinator
-runs as a teammate; every worker is a plain `POST /api/conversations`, one
+runs on one conversation bound to the `mission-control` channel; every worker is a plain `POST /api/conversations`, one
 fresh computer each; the whole fleet streams back on a single
 `GET /api/events/stream?blocks=true` connection. Client patterns (OAuth, SSE,
 API client) follow [dns-desk](../dns-desk).
@@ -20,11 +20,12 @@ bun run dev        # http://localhost:5179
 ```
 
 On first load, enter your Fountain URL and **Sign in with Fountain** (OAuth
-code + PKCE; the token is an API key), or paste an API key. Then either pick a
-`Mission Control` teammate already on your team, or let the app assemble the
-crew: it creates the coordinator (plans and synthesizes, never executes) and a
-`Mission Worker` agent (launched once per task) with the built-in operating
-rules, and adds the coordinator to your team.
+code + PKCE; the token is an API key), or paste an API key. Then either pick an
+existing `Mission Control` agent, or let the app assemble the crew: it creates
+the coordinator (plans and synthesizes, never executes) and a `Mission Worker`
+agent (launched once per task) with the built-in operating rules. The first
+message opens the coordinator's conversation (`POST /api/conversations` with
+`channel_id: "mission-control"`); later ones resume it.
 
 Server-side requirements, same as any external Fountain client:
 

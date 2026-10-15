@@ -1,6 +1,6 @@
 /**
  * A tiny mock Fountain, for developing Mission Control without a live server:
- * one coordinator teammate with a plan awaiting approval on one mission and a
+ * one coordinator agent with a plan awaiting approval on one mission and a
  * second mission in flight (two workers: one working, one done). Run with
  * `bun run mock`, start the app with `FOUNTAIN_PROXY=http://localhost:8791
  * bun run dev`, and open http://localhost:5179/dev-seed.html once.
@@ -105,22 +105,15 @@ const conv = (id: string, status: string, agentId: string, title: string | null 
 });
 
 const coordinator = {
-  agent_id: "agent-coord",
+  id: "agent-coord",
   name: "Mission Control",
-  agent: {
-    id: "agent-coord",
-    name: "Mission Control",
-    model: "anthropic/claude-sonnet-5",
-    runtime: "claude",
-    environment_id: null,
-    allowed_vault_ids: null,
-    allowed_environment_ids: null,
-  },
-  conversation: conv("c-coord", "idle", "agent-coord", "Mission Control"),
-  presence: { state: "online", label: "online" },
-  unread: false,
-  last_turn: null,
+  model: "anthropic/claude-sonnet-5",
+  runtime: "claude",
+  environment_id: null,
+  allowed_vault_ids: null,
+  allowed_environment_ids: null,
 };
+const coordConv = { ...conv("c-coord", "idle", "agent-coord", "Mission Control"), channel_id: "mission-control" };
 
 const workerAgent = {
   id: "agent-worker",
@@ -145,15 +138,19 @@ Bun.serve({
     "/api/agents": (req: Request) => {
       const q = new URL(req.url).searchParams.get("search") ?? "";
       if (req.method === "POST") return json(workerAgent);
-      return json("Mission Worker".toLowerCase().includes(q.toLowerCase()) || q === "" ? [workerAgent] : []);
+      return json([coordinator, workerAgent].filter((a) => a.name.toLowerCase().includes(q.toLowerCase())));
     },
-    "/api/team": (req: Request) => (req.method === "POST" ? json(coordinator) : json([coordinator])),
-    "/api/team/agent-coord": json(coordinator),
-    "/api/team/agent-coord/messages": () => Response.json({ status: "queued", conversation_id: "c-coord" }),
-    "/api/conversations": (req: Request) => {
-      if (req.method === "POST") return json(conv(`w${nextConv++}`, "pending", "agent-worker"));
+    "/api/agents/agent-coord": json(coordinator),
+    "/api/conversations": async (req: Request) => {
+      if (req.method === "POST") {
+        const body = (await req.json()) as { channel_id?: string };
+        if (body.channel_id === "mission-control") return Response.json({ data: coordConv, meta: { resumed: true } });
+        return json(conv(`w${nextConv++}`, "pending", "agent-worker"));
+      }
+      if (new URL(req.url).searchParams.get("channel_id") === "mission-control") return json([coordConv]);
       return json([conv("w1", "idle", "agent-worker"), conv("w2", "running", "agent-worker")]);
     },
+    "/api/conversations/c-coord/prompts": () => Response.json({ status: "queued" }),
     "/api/conversations/c-coord/turns": json(coordTurns.map(({ reply: _r, ...t }) => t)),
     "/api/conversations/c-coord/events": () => page(eventsOf(coordTurns)),
     "/api/conversations/c-coord/read": new Response(null, { status: 204 }),

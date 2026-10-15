@@ -30,7 +30,7 @@ const BUILT_WITH = "https://managoat.com/built-with";
  * managoat/fountain, which is what renders built-with — so an app can
  * only be listed here once it is listed there, and writing a blurb locally
  * would just move the drift to the other comparison. Naming the exception is
- * the honest version: the check stays strict for the other twelve, and the
+ * the honest version: the check stays strict for the rest, and the
  * gap is a line of code somebody has to delete rather than a silence.
  *
  * salon: live at salon.demo.managoat.com since it shipped, never added to

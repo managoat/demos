@@ -1,5 +1,4 @@
 // Shapes as served by the Fountain API — the subset Mend uses.
-// Ported from jhgaylor/dns-desk / jhgaylor/fountain-team.
 
 export interface Conversation {
   id: string;
@@ -30,32 +29,6 @@ export interface Agent {
   metadata?: Record<string, unknown> | null;
 }
 
-export type PresenceState =
-  | "machine_offline"
-  | "working"
-  | "starting"
-  | "online"
-  | "asleep"
-  | "away"
-  | "failed"
-  | "offline";
-
-export interface Teammate {
-  agent_id: string;
-  name: string;
-  agent: Agent;
-  conversation: Conversation;
-  presence: { state: PresenceState; label: string };
-  unread: boolean;
-  last_turn: {
-    id: string;
-    turn_number: number;
-    prompt: string;
-    status: string;
-    inserted_at: string;
-  } | null;
-}
-
 export interface Turn {
   id: string;
   turn_number: number;
@@ -78,10 +51,9 @@ export interface LogEvent {
   ts: string;
 }
 
-/** A team-stream event: the log event plus the ids to route it. */
-export interface TeamEvent extends LogEvent {
+/** An `/api/events/stream` event: the log event plus the conversation it belongs to. */
+export interface StreamEvent extends LogEvent {
   conversation_id: string;
-  agent_id: string | null;
 }
 
 export interface Me {

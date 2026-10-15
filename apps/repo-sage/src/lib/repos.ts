@@ -46,7 +46,7 @@ export function removeRepo(baseUrl: string, repo: string): void {
   save(store);
 }
 
-/** Drop entries whose agent is gone from the team (the roster is the truth). */
+/** Drop entries whose agent is gone (the agent list is the truth). */
 export function reconcileRepos(baseUrl: string, live: Record<string, string>): void {
   const store = load();
   const entry = store[baseUrl] ?? { repos: {} };

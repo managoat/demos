@@ -1,13 +1,13 @@
 /**
  * Arena: one prompt to several brains at once, each in its own Fountain
  * conversation, streaming into equal columns. Contenders are hired lazily
- * (agent + teammate per model), reused across rounds; rounds and votes live
- * in localStorage; everything shown is derived from turns + events.
- * Streaming/reconnect follows jhgaylor/dns-desk.
+ * (one agent per model, its conversation bound to the `arena` channel), reused
+ * across rounds; rounds and votes live in localStorage; everything shown is
+ * derived from turns + events. Streaming/reconnect follows jhgaylor/dns-desk.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, describeError, FountainClient } from "./api/client";
-import type { Catalog, LogEvent, TeamEvent, Teammate, Turn } from "./api/types";
+import type { Agent, Catalog, LogEvent, StreamEvent, Turn } from "./api/types";
 import { blocksForTurn } from "./lib/acp";
 import {
   columnStatus,
@@ -37,6 +37,8 @@ import { Scoreboard } from "./components/Scoreboard";
 import { Setup } from "./components/Setup";
 
 const STREAMS = ["acp", "stdout", "stage"];
+/** The channel every contender conversation is bound to: one live conversation per agent. */
+const CHANNEL = "arena";
 const MAX_CONTENDERS = 4;
 const MIN_CONTENDERS = 2;
 
@@ -206,19 +208,18 @@ export function App() {
     [client],
   );
 
-  // ── stream: route team events into columns ────────────────────────────────
+  // ── stream: route conversation events into columns ────────────────────────────────
 
   const syncRoster = useCallback(async () => {
     if (!client) return;
     const active = roundsRef.current.find((r) => r.winnerKey === null && r.closedAt === null);
     if (!active) return;
     try {
-      const team = await client.listTeam();
       for (const c of active.contenders) {
         if (!c.agentId) continue;
-        const tm = team.find((t) => t.agent_id === c.agentId);
-        if (tm && tm.conversation.id !== c.conversationId) {
-          const cid = tm.conversation.id;
+        const conv = await client.findConversation(c.agentId, CHANNEL);
+        if (conv && conv.id !== c.conversationId) {
+          const cid = conv.id;
           mutateRounds((rs) =>
             rs.map((r) =>
               r.id === active.id
@@ -242,7 +243,7 @@ export function App() {
 
     const connect = () => {
       if (stopped) return;
-      void client.streamTeam({
+      void client.streamEvents({
         lastEventId,
         streams: STREAMS,
         signal: ctrl.signal,
@@ -254,25 +255,21 @@ export function App() {
         },
         onMessage: (msg) => {
           if (msg.id) lastEventId = msg.id;
-          if (msg.event === "team") {
+          if (msg.event === "conversations") {
+            // The list changed — possibly a contender's fresh conversation.
             void syncRoster();
             return;
           }
-          let ev: TeamEvent;
+          let ev: StreamEvent;
           try {
-            ev = JSON.parse(msg.data) as TeamEvent;
+            ev = JSON.parse(msg.data) as StreamEvent;
           } catch {
             return;
           }
           if (msg.id) ev.id = Number(msg.id);
           const all = roundsRef.current;
           const known = all.some((r) => r.contenders.some((c) => c.conversationId === ev.conversation_id));
-          if (!known) {
-            // A fresh conversation for one of our contenders (computer rotated).
-            const active = all.find((r) => r.winnerKey === null && r.closedAt === null);
-            if (active && ev.agent_id && active.contenders.some((c) => c.agentId === ev.agent_id)) void syncRoster();
-            return;
-          }
+          if (!known) return;
           setEventsByConv((prev) => {
             const list = prev[ev.conversation_id] ?? [];
             if (list.some((e) => e.id === ev.id)) return prev;
@@ -353,16 +350,16 @@ export function App() {
       if (!contender?.agentId) return;
       setPhaseFor(key, "sending");
       void client
-        .sendMessage(contender.agentId, prompt)
-        .then((res) => {
-          if (res.conversation_id !== contender.conversationId) {
+        .sendOnChannel({ agent_id: contender.agentId, channel_id: CHANNEL, prompt })
+        .then((conv) => {
+          if (conv.id !== contender.conversationId) {
             mutateRounds((rs) =>
               rs.map((r) =>
                 r.id === roundId
                   ? {
                       ...r,
                       contenders: r.contenders.map((x) =>
-                        x.key === key ? { ...x, conversationId: res.conversation_id } : x,
+                        x.key === key ? { ...x, conversationId: conv.id } : x,
                       ),
                     }
                   : r,
@@ -396,24 +393,17 @@ export function App() {
   );
 
   const ensureHired = useCallback(
-    async (team: Teammate[], k: ContenderKey): Promise<{ agentId: string; conversationId: string }> => {
+    async (agents: Agent[], k: ContenderKey): Promise<{ agentId: string; conversationId: string | null }> => {
       if (!client || !catalog || !baseUrl) throw new Error("not connected");
       const key = keyId(k);
       const name = agentNameFor(k);
       const known = loadAgentIds(baseUrl)[key];
-      const onTeam = team.find((t) => t.agent_id === known) ?? team.find((t) => t.agent.name === name);
-      if (onTeam) {
-        saveAgentId(baseUrl, key, onTeam.agent_id);
-        return { agentId: onTeam.agent_id, conversationId: onTeam.conversation.id };
-      }
-      if (known) {
-        // The agent may exist but be off the team — re-hiring is one call.
-        try {
-          const tm = await client.addTeammate({ agent_id: known, name });
-          return { agentId: known, conversationId: tm.conversation.id };
-        } catch {
-          // agent gone — fall through and create a fresh one
-        }
+      const existing = agents.find((a) => a.id === known) ?? agents.find((a) => a.name === name);
+      if (existing) {
+        saveAgentId(baseUrl, key, existing.id);
+        // Null until the first prompt opens one on the channel.
+        const conv = await client.findConversation(existing.id, CHANNEL);
+        return { agentId: existing.id, conversationId: conv?.id ?? null };
       }
       const agent = await client.createAgent({
         name,
@@ -422,9 +412,8 @@ export function App() {
         runtime: runtimeFor(k.model, catalog.runtimes),
         system: SYSTEM_PROMPT,
       });
-      const tm = await client.addTeammate({ agent_id: agent.id, name });
       saveAgentId(baseUrl, key, agent.id);
-      return { agentId: agent.id, conversationId: tm.conversation.id };
+      return { agentId: agent.id, conversationId: null };
     },
     [client, catalog, baseUrl],
   );
@@ -438,9 +427,9 @@ export function App() {
       }
       setFighting(true);
       try {
-        let team: Teammate[];
+        let agents: Agent[];
         try {
-          team = await client.listTeam();
+          agents = await client.listAgents();
         } catch (err) {
           say(describeError(err));
           return;
@@ -450,7 +439,7 @@ export function App() {
           const key = keyId(k);
           setPhaseFor(key, "hiring");
           try {
-            const { agentId, conversationId } = await ensureHired(team, k);
+            const { agentId, conversationId } = await ensureHired(agents, k);
             contenders.push({ key, model: k.model, instance: k.instance, agentId, conversationId, turnIds: [] });
             setPhaseFor(key, null);
           } catch (err) {

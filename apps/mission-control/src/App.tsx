@@ -1,5 +1,5 @@
 /**
- * Mission Control: one coordinator teammate plans; the app fans out one
+ * Mission Control: one coordinator agent plans; the app fans out one
  * worker conversation per approved task; every computer streams back on one
  * SSE connection. The coordinator conversation is the system of record —
  * missions, assignments and reports are folded out of it on every render
@@ -8,9 +8,9 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, describeError, FountainClient } from "./api/client";
-import type { Conversation, LogEvent, StreamEvent, Teammate, Turn } from "./api/types";
+import type { Agent, Conversation, LogEvent, StreamEvent, Turn } from "./api/types";
 import { bootSequence, eventsByTurn, replyText, sessionReady, viewBlocks, type ViewBlock } from "./lib/blocks";
-import { clearCrew, loadCrew, saveCrew, type Crew } from "./lib/crew";
+import { CHANNEL, clearCrew, loadCrew, presenceLabel, saveCrew, type Crew } from "./lib/crew";
 import { completeLoginIfCallback, revoke } from "./lib/oauth";
 import {
   approveMessage,
@@ -123,7 +123,8 @@ function Control(props: {
 }) {
   const { client, settings, crew } = props;
 
-  const [teammate, setTeammate] = useState<Teammate | null>(null);
+  const [coordinator, setCoordinator] = useState<Agent | null>(null);
+  const [coordConv, setCoordConv] = useState<Conversation | null>(null);
   const [coordTurns, setCoordTurns] = useState<Turn[]>([]);
   const [coordEvents, setCoordEvents] = useState<LogEvent[]>([]);
   const [workerConvs, setWorkerConvs] = useState<Record<string, Conversation>>({});
@@ -138,7 +139,7 @@ function Control(props: {
   const [toast, setToast] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
-  const coordConvId = teammate?.conversation.id ?? null;
+  const coordConvId = coordConv?.id ?? null;
   const coordConvIdRef = useRef<string | null>(null);
   coordConvIdRef.current = coordConvId;
   const workerConvsRef = useRef(workerConvs);
@@ -154,19 +155,21 @@ function Control(props: {
   const onChangeCrewRef = useRef(props.onChangeCrew);
   onChangeCrewRef.current = props.onChangeCrew;
 
-  const refreshTeammate = useCallback(async () => {
+  const refreshCoordinator = useCallback(async () => {
     try {
-      setTeammate(await client.getTeammate(crew.coordinatorId));
+      const [a, c] = await Promise.all([client.getAgent(crew.coordinatorId), client.findConversation(crew.coordinatorId, CHANNEL)]);
+      setCoordinator(a);
+      setCoordConv(c);
     } catch (err) {
-      // The coordinator is gone (removed in Fountain) — back to connect.
+      // The coordinator is gone (deleted in Fountain) — back to connect.
       say(describeError(err));
       onChangeCrewRef.current();
     }
   }, [client, crew.coordinatorId, say]);
 
   useEffect(() => {
-    void refreshTeammate();
-  }, [refreshTeammate]);
+    void refreshCoordinator();
+  }, [refreshCoordinator]);
 
   const reloadThread = useCallback(async () => {
     const convId = coordConvIdRef.current;
@@ -212,10 +215,13 @@ function Control(props: {
       while (queueRef.current.length > 0) {
         const prompt = queueRef.current[0]!;
         try {
-          const res = await client.sendTeamMessage(crew.coordinatorId, prompt);
+          const conv = await client.sendOnChannel({ agent_id: crew.coordinatorId, channel_id: CHANNEL, prompt });
           queueRef.current.shift();
           setQueuedCount(queueRef.current.length);
-          if (res.conversation_id !== coordConvIdRef.current) await refreshTeammate();
+          if (conv.id !== coordConvIdRef.current) {
+            coordConvIdRef.current = conv.id;
+            setCoordConv(conv);
+          }
           await reloadThread();
         } catch (err) {
           if (err instanceof ApiError && err.code === "conversation_busy") return; // pumped again on turn end
@@ -231,7 +237,7 @@ function Control(props: {
     } finally {
       pumpingRef.current = false;
     }
-  }, [client, crew.coordinatorId, refreshTeammate, reloadThread, say]);
+  }, [client, crew.coordinatorId, reloadThread, say]);
 
   const send = useCallback(
     (prompt: string) => {
@@ -246,8 +252,8 @@ function Control(props: {
 
   const pumpRef = useRef(pump);
   pumpRef.current = pump;
-  const refreshTeammateRef = useRef(refreshTeammate);
-  refreshTeammateRef.current = refreshTeammate;
+  const refreshCoordinatorRef = useRef(refreshCoordinator);
+  refreshCoordinatorRef.current = refreshCoordinator;
   const reloadThreadRef = useRef(reloadThread);
   reloadThreadRef.current = reloadThread;
   const refreshWorkerRef = useRef(refreshWorker);
@@ -268,7 +274,7 @@ function Control(props: {
         onOpen: () => {
           setConnected(true);
           backoff = 1000;
-          void refreshTeammateRef.current();
+          void refreshCoordinatorRef.current();
           void reloadThreadRef.current();
         },
         onMessage: (msg) => {
@@ -276,7 +282,7 @@ function Control(props: {
           if (msg.event === "conversations") {
             // The list changed — a fresh coordinator thread, a worker
             // finishing, a title landing. Cheap to re-fetch what we follow.
-            void refreshTeammateRef.current();
+            void refreshCoordinatorRef.current();
             return;
           }
           let ev: StreamEvent;
@@ -327,7 +333,7 @@ function Control(props: {
 
   // ── derived: the coordinator thread, folded into missions ─────────────────
 
-  const runtime = teammate?.conversation.runtime ?? "claude";
+  const runtime = coordConv?.runtime ?? coordinator?.runtime ?? "claude";
   const coordThread = useMemo(() => {
     const sorted = [...coordTurns].sort((a, b) => a.turn_number - b.turn_number);
     const byTurn = eventsByTurn(coordEvents);
@@ -598,7 +604,7 @@ function Control(props: {
               ? `${queuedCount} message${queuedCount === 1 ? "" : "s"} queued for the coordinator`
               : coordWorking
                 ? "coordinator working…"
-                : teammate?.presence.label ?? "…"}
+                : coordinator ? presenceLabel(coordConv) : "…"}
           </span>
           <button className="linkish" onClick={props.onChangeCrew}>
             change crew

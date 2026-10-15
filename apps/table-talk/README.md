@@ -7,7 +7,7 @@ jargon, no dashboards to configure.
 
 It is a static single-page app with no backend of its own — it talks only to
 the [Fountain](https://github.com/managoat/fountain) API, where the
-analyst runs as a teammate (an agent in a sandbox). Client patterns (OAuth,
+analyst runs as an agent in a sandbox. Client patterns (OAuth,
 SSE, API client) follow [dns-desk](../dns-desk).
 
 ## Run it
@@ -20,8 +20,8 @@ bun run dev        # http://localhost:5175
 On first load, enter your Fountain URL and **Sign in with Fountain** (OAuth
 code + PKCE; the token is an API key), or paste an API key. Then drop a CSV
 (or paste one). The first **Analyze** hires the analyst for you: it creates a
-`table-talk` agent with the built-in operating rules and adds it to your team;
-after that it is reused.
+`table-talk` agent with the built-in operating rules (or reuses one by that
+name); after that it is remembered.
 
 The CSV is parsed locally first — preview table, row/column counts, a cap of
 400 KB / 5,000 rows (truncated with a notice beyond that). Nothing leaves the
@@ -42,11 +42,12 @@ OAUTH_CLIENTS='[{"id":"table-talk","name":"Table Talk","redirect_uris":["http://
 
 ## How it works: the report protocol
 
-Each dataset is one Fountain conversation — the analyst teammate gets a fresh
-thread on the same computer per file, and the left rail is just a localStorage
+Each dataset is one Fountain conversation — a new file opens a fresh one
+(`POST /api/conversations` with `channel_id: "table-talk"` and `fresh: true`),
+follow-ups go to that dataset's own conversation, and the left rail is just a localStorage
 index of conversation ids. **The conversation is the system of record**: the
 app derives everything it shows from turns and the fenced blocks in them, on
-load and over one team SSE stream while live.
+load and over one SSE stream (`/api/events/stream`) while live.
 
 The dataset travels to the agent as a ```` ```csv ```` fence inside the first
 message; the agent saves it to disk, analyzes it with Python, and replies with

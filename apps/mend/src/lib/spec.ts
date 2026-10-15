@@ -12,7 +12,7 @@ export function agentName(ref: RepoRef): string {
   return `${AGENT_NAME_PREFIX}${refKey(ref)}`;
 }
 
-/** `Mend: host/owner/name` → the ref; null for any other teammate. */
+/** `Mend: host/owner/name` → the ref; null for any other agent. */
 export function refOfAgentName(name: string): RepoRef | null {
   return name.startsWith(AGENT_NAME_PREFIX) ? parseRefKey(name.slice(AGENT_NAME_PREFIX.length)) : null;
 }

@@ -1,6 +1,6 @@
 /**
  * A tiny mock Fountain, for developing Repo Sage without a live server: one
- * sage teammate whose canned turns walk the whole protocol (study → repo-map,
+ * sage whose canned turns walk the whole protocol (study → repo-map,
  * then a question answered with tool chips and citations). Run with
  * `bun run mock`, start the app with `FOUNTAIN_PROXY=http://localhost:8788
  * bun run dev`, and paste any string as the API key with
@@ -38,7 +38,7 @@ const toolDone = (id: string, text: string) =>
 const STUDY_REPLY = `Cloned and read it. This is a small Phoenix umbrella with the API under one router.
 
 \`\`\`repo-map
-{"repo":"managoat/fountain","default_branch":"main","description":"Run AI coding agents on their own computers, over one API","languages":[{"name":"Elixir","share":0.82},{"name":"Go","share":0.12},{"name":"TypeScript","share":0.06}],"loc":98000,"components":[{"name":"router","path":"apps/fountain/lib/fountain_web/router.ex","role":"every /api route"},{"name":"contexts","path":"apps/fountain/lib/fountain","role":"Agents, Environments, Vaults, Conversations"},{"name":"team","path":"apps/fountain/lib/fountain/team.ex","role":"teammates = conversations on the team channel"},{"name":"CLI","path":"cli","role":"the fountain command"}],"entry_points":["apps/fountain/lib/fountain/application.ex"],"how_it_works":"A Phoenix app exposes the API; conversations run agents in sandboxes and stream their output back as log events."}
+{"repo":"managoat/fountain","default_branch":"main","description":"Run AI coding agents on their own computers, over one API","languages":[{"name":"Elixir","share":0.82},{"name":"Go","share":0.12},{"name":"TypeScript","share":0.06}],"loc":98000,"components":[{"name":"router","path":"apps/fountain/lib/fountain_web/router.ex","role":"every /api route"},{"name":"contexts","path":"apps/fountain/lib/fountain","role":"Agents, Environments, Vaults, Conversations"},{"name":"launch","path":"apps/fountain/lib/fountain/conversations/launch.ex","role":"starts conversations, or resumes one bound to a channel"},{"name":"CLI","path":"cli","role":"the fountain command"}],"entry_points":["apps/fountain/lib/fountain/application.ex"],"how_it_works":"A Phoenix app exposes the API; conversations run agents in sandboxes and stream their output back as log events."}
 \`\`\``;
 
 const ANSWER_REPLY = `Auth is a bearer API key on every request: the plug at apps/fountain/lib/fountain_web/plugs/tenant_api_auth.ex:1 hashes the key and loads the user. OAuth sign-in mints the same kind of key.
@@ -77,36 +77,30 @@ const events = eventData.map((e, i) => ({
   ts: now,
 }));
 
-const teammate = {
-  agent_id: "agent-sage",
+const agent = {
+  id: "agent-sage",
   name: "Sage: managoat/fountain",
-  agent: {
-    id: "agent-sage",
-    name: "Sage: managoat/fountain",
-    model: "anthropic/claude-sonnet-5",
-    runtime: "claude",
-    environment_id: null,
-    allowed_vault_ids: null,
-    allowed_environment_ids: null,
-  },
-  conversation: {
-    id: "c1",
-    title: "Sage: managoat/fountain",
-    agent_id: "agent-sage",
-    vault_id: null,
-    environment_id: null,
-    runtime: "claude",
-    acp: true,
-    status: "idle",
-    turn_count: turns.length,
-    last_active_at: now,
-    unread: false,
-    inserted_at: now,
-    updated_at: now,
-  },
-  presence: { state: "online", label: "online" },
+  model: "anthropic/claude-sonnet-5",
+  runtime: "claude",
+  environment_id: null,
+  allowed_vault_ids: null,
+  allowed_environment_ids: null,
+};
+
+const conversation = {
+  id: "c1",
+  title: "Sage: managoat/fountain",
+  agent_id: "agent-sage",
+  vault_id: null,
+  environment_id: null,
+  runtime: "claude",
+  acp: true,
+  status: "idle",
+  turn_count: turns.length,
+  last_active_at: now,
   unread: false,
-  last_turn: null,
+  inserted_at: now,
+  updated_at: now,
 };
 
 const json = (data: unknown) => Response.json({ data });
@@ -117,13 +111,14 @@ Bun.serve({
   routes: {
     "/api/auth/me": json({ id: "u1", email: "dev@example.com", role: "user" }),
     "/api/catalog": json({ runtimes: ["claude"], models: { claude: ["anthropic/claude-sonnet-5"] } }),
-    "/api/team": json([teammate]),
-    "/api/team/agent-sage": json(teammate),
+    "/api/agents": json([agent]),
+    "/api/conversations": (req: Request) =>
+      req.method === "POST" ? Response.json({ data: conversation, meta: { resumed: true } }) : json([conversation]),
+    "/api/conversations/c1/prompts": () => Response.json({ status: "queued" }),
     "/api/conversations/c1/turns": json(turns),
     "/api/conversations/c1/events": () => Response.json({ data: events, meta: { has_more: false, next_cursor: null } }),
     "/api/conversations/c1/read": new Response(null, { status: 204 }),
-    "/api/team/agent-sage/messages": () => Response.json({ status: "queued", conversation_id: "c1" }),
-    "/api/team/stream": () =>
+    "/api/events/stream": () =>
       new Response(
         new ReadableStream({
           start(controller) {

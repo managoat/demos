@@ -1,7 +1,8 @@
 /**
  * A tiny mock Fountain, for developing Arena without a live server: a model
- * catalog, lazy hiring (agents + teammates created on demand), and fake turns
- * that stream chunks over the team SSE so the columns fill in live. Run with
+ * catalog, lazy hiring (agents created on demand, a conversation opened on the
+ * `arena` channel by the first prompt), and fake turns that stream chunks over
+ * `/api/events/stream` so the columns fill in live. Run with
  * `bun run mock`, start the app with `FOUNTAIN_PROXY=http://localhost:8787
  * bun run dev`, and paste any string as the API key with
  * http://localhost:5175 as the URL.
@@ -19,11 +20,12 @@ interface MockTurn {
   usage: { input: number; output: number } | null;
 }
 
-interface MockTeammate {
+interface MockContender {
   agentId: string;
   name: string;
   model: string;
-  conversationId: string;
+  /** Null until the first prompt opens the channel's conversation. */
+  conversationId: string | null;
   turns: MockTurn[];
 }
 
@@ -37,7 +39,7 @@ const CATALOG = {
   model_providers: ["anthropic", "openai", "google"],
 };
 
-const teammates = new Map<string, MockTeammate>();
+const contenders = new Map<string, MockContender>();
 let seq = 0;
 const nextId = () => ++seq;
 
@@ -59,12 +61,11 @@ function broadcast(event: string, id: number | null, data: unknown): void {
 
 const eventLog: Array<{ conv: string; event: Record<string, unknown> }> = [];
 
-function emit(tm: MockTeammate, kind: string, over: Record<string, unknown>): void {
+function emit(tm: MockContender, kind: string, over: Record<string, unknown>): void {
   const id = nextId();
   const event = {
     id,
     conversation_id: tm.conversationId,
-    agent_id: tm.agentId,
     kind,
     stream: "",
     data: "",
@@ -74,7 +75,7 @@ function emit(tm: MockTeammate, kind: string, over: Record<string, unknown>): vo
     ts: new Date().toISOString(),
     ...over,
   };
-  eventLog.push({ conv: tm.conversationId, event });
+  eventLog.push({ conv: tm.conversationId!, event });
   broadcast(kind, id, event);
 }
 
@@ -102,7 +103,7 @@ function replyFor(model: string, prompt: string): string[] {
   ];
 }
 
-function runTurn(tm: MockTeammate, prompt: string): void {
+function runTurn(tm: MockContender, prompt: string): void {
   const turn: MockTurn = {
     id: `t-${nextId()}`,
     turn_number: tm.turns.length + 1,
@@ -151,39 +152,25 @@ function runTurn(tm: MockTeammate, prompt: string): void {
 
 const json = (data: unknown, status = 200) => Response.json({ data }, { status });
 
-function teammateJson(tm: MockTeammate) {
+function conversationJson(tm: MockContender) {
   return {
+    id: tm.conversationId,
+    title: tm.name,
     agent_id: tm.agentId,
-    name: tm.name,
-    agent: {
-      id: tm.agentId,
-      name: tm.name,
-      model: tm.model,
-      runtime: "claude",
-      environment_id: null,
-      allowed_vault_ids: null,
-      allowed_environment_ids: null,
-    },
-    conversation: {
-      id: tm.conversationId,
-      title: tm.name,
-      agent_id: tm.agentId,
-      vault_id: null,
-      environment_id: null,
-      runtime: "claude",
-      acp: true,
-      status: "idle",
-      turn_count: tm.turns.length,
-      last_active_at: null,
-      unread: false,
-      inserted_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    presence: { state: "online", label: "online" },
+    vault_id: null,
+    environment_id: null,
+    runtime: "claude",
+    acp: true,
+    status: tm.turns.some((t) => t.status === "running") ? "running" : "idle",
+    turn_count: tm.turns.length,
+    last_active_at: null,
     unread: false,
-    last_turn: null,
+    inserted_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
   };
 }
+
+const agentJson = (tm: MockContender) => ({ id: tm.agentId, name: tm.name, model: tm.model, runtime: "claude", environment_id: null, allowed_vault_ids: null, allowed_environment_ids: null });
 
 Bun.serve({
   port: 8787,
@@ -198,28 +185,32 @@ Bun.serve({
     if (p === "/api/agents" && req.method === "POST") {
       return req.json().then((body: { name: string; model: string }) => {
         const agentId = `agent-${nextId()}`;
-        teammates.set(agentId, {
-          agentId,
-          name: body.name,
-          model: body.model,
-          conversationId: `conv-${nextId()}`,
-          turns: [],
-        });
+        contenders.set(agentId, { agentId, name: body.name, model: body.model, conversationId: null, turns: [] });
         return json({ id: agentId, name: body.name, model: body.model, runtime: "claude" }, 201);
       });
     }
 
-    if (p === "/api/team" && req.method === "GET") return json([...teammates.values()].map(teammateJson));
-    if (p === "/api/team" && req.method === "POST") {
-      return req.json().then((body: { agent_id: string }) => {
-        const tm = teammates.get(body.agent_id);
+    if (p === "/api/agents" && req.method === "GET") return json([...contenders.values()].map(agentJson));
+
+    if (p === "/api/conversations" && req.method === "GET") {
+      const tm = contenders.get(url.searchParams.get("agent_id") ?? "");
+      return json(tm?.conversationId ? [conversationJson(tm)] : []);
+    }
+    if (p === "/api/conversations" && req.method === "POST") {
+      return req.json().then((body: { agent_id: string; prompt?: string }) => {
+        const tm = contenders.get(body.agent_id);
         if (!tm) return Response.json({ error: "not_found" }, { status: 404 });
-        broadcast("team", null, { reason: "changed" });
-        return json(teammateJson(tm), 201);
+        const resumed = tm.conversationId !== null;
+        if (!resumed) {
+          tm.conversationId = `conv-${nextId()}`;
+          broadcast("conversations", null, { reason: "changed" });
+          if (body.prompt) runTurn(tm, body.prompt);
+        }
+        return Response.json({ data: conversationJson(tm), meta: { resumed } }, { status: resumed ? 200 : 201 });
       });
     }
 
-    if (p === "/api/team/stream") {
+    if (p === "/api/events/stream") {
       let ctrl: ReadableStreamDefaultController<Uint8Array>;
       return new Response(
         new ReadableStream({
@@ -236,27 +227,21 @@ Bun.serve({
       );
     }
 
-    let m = p.match(/^\/api\/team\/([^/]+)\/messages$/);
+    let m = p.match(/^\/api\/conversations\/([^/]+)\/prompts$/);
     if (m && req.method === "POST") {
-      const tm = teammates.get(m[1]!);
+      const tm = [...contenders.values()].find((t) => t.conversationId === m![1]);
       if (!tm) return Response.json({ error: "not_found" }, { status: 404 });
       const last = tm.turns[tm.turns.length - 1];
       if (last && last.status === "running") return Response.json({ error: "conversation_busy" }, { status: 400 });
       return req.json().then((body: { prompt: string }) => {
         runTurn(tm, body.prompt);
-        return Response.json({ status: "queued", conversation_id: tm.conversationId });
+        return Response.json({ status: "queued" });
       });
-    }
-
-    m = p.match(/^\/api\/team\/([^/]+)$/);
-    if (m && req.method === "GET") {
-      const tm = teammates.get(m[1]!);
-      return tm ? json(teammateJson(tm)) : Response.json({ error: "not_found" }, { status: 404 });
     }
 
     m = p.match(/^\/api\/conversations\/([^/]+)\/turns$/);
     if (m) {
-      const tm = [...teammates.values()].find((t) => t.conversationId === m![1]);
+      const tm = [...contenders.values()].find((t) => t.conversationId === m![1]);
       return json(tm?.turns ?? []);
     }
 

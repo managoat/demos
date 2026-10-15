@@ -120,7 +120,7 @@ export function IndexPage() {
                         <span className={c.unread ? "strong" : ""}>{task ?? "—"}</span>
                       </a>
                       {c.parent_conversation_id && <span className="tag">sub</span>}
-                      {c.channel_id && <span className="tag">{c.channel_id === "fountain:team" ? "team" : "channel"}</span>}
+                      {c.channel_id && <span className="tag">channel</span>}
                       {c.sandbox?.mode === "persistent" && (
                         <HomeBadge sandbox={c.sandbox} currentId={c.id} siblings={sandboxes.get(c.sandbox.id)?.conversations ?? null} />
                       )}

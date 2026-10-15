@@ -37,7 +37,7 @@ export function saveRepo(baseUrl: string, key: string, agentId: string): void {
   save(store);
 }
 
-/** Drop entries whose agent is gone from the team (the roster is the truth). */
+/** Drop entries whose mender is gone from the rail (the roster is the truth). */
 export function reconcileRepos(baseUrl: string, live: Record<string, string>): void {
   const store = load();
   const entry = store[baseUrl] ?? { repos: {} };

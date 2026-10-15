@@ -3,7 +3,7 @@
  * bearer key; every error is an `ApiError` with the server's `error` string
  * when there was one. Ported (slimmed) from jhgaylor/dns-desk.
  */
-import type { Agent, Catalog, LogEvent, Me, Teammate, Turn } from "./types";
+import type { Agent, Catalog, Conversation, LogEvent, Me, Turn } from "./types";
 import { readSse, type SseMessage } from "../lib/sse";
 import type { Settings } from "../lib/settings";
 
@@ -30,27 +30,29 @@ export class FountainClient {
     return this.json<Me>("GET", "/api/auth/me");
   }
 
-  // ── the sages: teammates, one per repo ────────────────────────────────────
+  // ── the sages' conversations: one per agent, held by a channel ───────────
 
-  async listTeam(): Promise<Teammate[]> {
-    return (await this.json<{ data: Teammate[] }>("GET", "/api/team")).data;
+  /** Every live conversation bound to `channel`, most recently updated first. */
+  async listChannelConversations(channel: string): Promise<Conversation[]> {
+    const qs = new URLSearchParams({ channel_id: channel, status: "pending,running,idle", limit: "200" });
+    return (await this.json<{ data: Conversation[] }>("GET", `/api/conversations?${qs}`)).data;
   }
 
-  async getTeammate(agentId: string): Promise<Teammate> {
-    return (await this.json<{ data: Teammate }>("GET", `/api/team/${agentId}`)).data;
+  /**
+   * Send `prompt` on the agent's conversation on `channel`. `POST
+   * /api/conversations` with a `channel_id` resumes the live one (and then
+   * ignores `prompt`, so it is sent as a prompt) or opens a new one with
+   * `prompt` as turn 1.
+   */
+  async sendOnChannel(input: { agent_id: string; channel_id: string; prompt: string }): Promise<Conversation> {
+    const res = await this.json<{ data: Conversation; meta?: { resumed?: boolean } }>("POST", "/api/conversations", input);
+    if (res.meta?.resumed) await this.json("POST", `/api/conversations/${res.data.id}/prompts`, { prompt: input.prompt });
+    return res.data;
   }
 
-  async addTeammate(input: { agent_id: string; name?: string }): Promise<Teammate> {
-    return (await this.json<{ data: Teammate }>("POST", "/api/team", input)).data;
-  }
-
-  /** Terminates the sage's conversation and takes it off the team. */
-  removeTeammate(agentId: string): Promise<void> {
-    return this.json<void>("DELETE", `/api/team/${agentId}`);
-  }
-
-  sendMessage(agentId: string, prompt: string): Promise<{ status: string; conversation_id: string }> {
-    return this.json("POST", `/api/team/${agentId}/messages`, { prompt });
+  /** Ends a conversation: its computer and clone go; the transcript stays in Fountain. */
+  terminate(conversationId: string): Promise<unknown> {
+    return this.json("POST", `/api/conversations/${conversationId}/terminate`);
   }
 
   // ── the conversation a sage runs on ───────────────────────────────────────
@@ -90,6 +92,10 @@ export class FountainClient {
     return this.json<{ data: Agent }>("POST", "/api/agents", input).then((r) => r.data);
   }
 
+  deleteAgent(agentId: string): Promise<void> {
+    return this.json<void>("DELETE", `/api/agents/${agentId}`);
+  }
+
   getCatalog(): Promise<Catalog> {
     return this.json<{ data: Catalog }>("GET", "/api/catalog").then((r) => r.data);
   }
@@ -97,10 +103,11 @@ export class FountainClient {
   // ── stream ────────────────────────────────────────────────────────────────
 
   /**
-   * The whole team's events on one connection. Resolves when the server
-   * closes (idle timeout, deploy); the caller reconnects with the last id.
+   * Every conversation's events on one connection (`/api/events/stream`);
+   * the caller keeps the open sage's. Resolves when the server closes (idle
+   * timeout, deploy); the caller reconnects with the last id.
    */
-  streamTeam(opts: {
+  streamEvents(opts: {
     lastEventId: string | null;
     streams: string[];
     signal: AbortSignal;
@@ -109,7 +116,7 @@ export class FountainClient {
     onClose: (err?: unknown) => void;
   }): Promise<void> {
     const qs = new URLSearchParams({ streams: opts.streams.join(",") });
-    return readSse(`${this.baseUrl}/api/team/stream?${qs}`, {
+    return readSse(`${this.baseUrl}/api/events/stream?${qs}`, {
       headers: { authorization: `Bearer ${this.settings.apiKey}` },
       lastEventId: opts.lastEventId,
       signal: opts.signal,
@@ -165,7 +172,7 @@ export function describeError(err: unknown): string {
       case "subscription_required":
         return "An active Fountain subscription is required.";
       case "sandbox_quota_exceeded":
-        return "You are at your Fountain sandbox limit — retire a sage (or another teammate) first.";
+        return "You are at your Fountain sandbox limit — retire a sage (or end another conversation) first.";
       case "not_found":
         return "Not found.";
       default:

@@ -1,4 +1,9 @@
-/** Which teammate is the analyst — remembered per Fountain URL, in this browser. */
+import type { Conversation } from "../api/types";
+
+/** Which agent is the analyst — remembered per Fountain URL, in this browser. */
+
+/** The channel the analyst's current conversation is bound to; each new dataset rotates it. */
+export const CHANNEL = "table-talk";
 const KEY = "table-talk.analyst";
 
 export function loadAnalystId(baseUrl: string): string | null {
@@ -30,5 +35,20 @@ export function clearAnalystId(baseUrl: string): void {
     localStorage.setItem(KEY, JSON.stringify(map));
   } catch {
     localStorage.removeItem(KEY);
+  }
+}
+
+/** A one-word status for the rail, from the channel's current conversation. */
+export function presenceLabel(conv: Conversation | null): string {
+  if (!conv) return "ready";
+  switch (conv.status) {
+    case "pending":
+      return "starting";
+    case "running":
+      return "working";
+    case "idle":
+      return "online";
+    default:
+      return conv.status;
   }
 }

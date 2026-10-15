@@ -72,7 +72,7 @@ function saveMap<T>(storageKey: string, baseUrl: string, value: T): void {
   localStorage.setItem(storageKey, JSON.stringify(map));
 }
 
-/** contender key → agent id, the teammates this browser has hired. */
+/** contender key → agent id, the contenders this browser has hired. */
 export function loadAgentIds(baseUrl: string): Record<string, string> {
   return loadMap<Record<string, string>>(AGENTS_KEY, baseUrl) ?? {};
 }
