@@ -1,32 +1,51 @@
 /**
- * Repo Sage: a rail of repositories, each with one sage (a Fountain teammate
- * that cloned the repo on its own computer) and one conversation. The
- * dossier and every answer are derived from turns + blocks; localStorage
- * holds only settings and choices. Streaming/reconnect follows
- * jhgaylor/dns-desk / fountain-team.
+ * Repo Sage: a rail of repositories, each with one sage (a Fountain agent
+ * named `Sage: owner/name` that cloned the repo on its own computer) and one
+ * conversation, the agent's live one on the `repo-sage` channel. The dossier
+ * and every answer are derived from turns + blocks; localStorage holds only
+ * settings and choices. Streaming/reconnect follows jhgaylor/dns-desk.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ApiError, describeError, FountainClient } from "./api/client";
-import type { Catalog, LogEvent, TeamEvent, Teammate, Turn } from "./api/types";
+import type { Agent, Catalog, Conversation, LogEvent, StreamEvent, Turn } from "./api/types";
 import { blocksForTurn } from "./lib/acp";
 import { parseRepoInput } from "./lib/github";
 import { completeLoginIfCallback, revoke } from "./lib/oauth";
 import { foldThread, stripBlocks } from "./lib/protocol";
 import { loadSelected, reconcileRepos, saveRepo, saveSelected } from "./lib/repos";
 import { clearSettings, loadSettings, saveSettings, type Settings } from "./lib/settings";
-import { agentDescription, agentName, repoOfAgentName, STUDY_PROMPT, systemPrompt } from "./lib/spec";
+import { AGENT_NAME_PREFIX, agentDescription, agentName, repoOfAgentName, STUDY_PROMPT, systemPrompt } from "./lib/spec";
 import { Chat, type ThreadEntry } from "./components/Chat";
 import { Connect } from "./components/Connect";
 import { Dossier } from "./components/Dossier";
 
 const STREAMS = ["acp", "stdout", "stage"];
 const DEFAULT_MODEL = "anthropic/claude-sonnet-5";
+/** The channel every sage conversation is bound to; one live conversation per agent. */
+const CHANNEL = "repo-sage";
 
 type Phase = "boot" | "connect" | "app";
 
 interface Sage {
   repo: string;
-  teammate: Teammate;
+  agent: Agent;
+  /** Its live conversation on the channel; null before the first question, or after its machine was retired. */
+  conversation: Conversation | null;
+}
+
+/** A one-word status for a sage, from its conversation. */
+function presenceLabel(conv: Conversation | null): string {
+  if (!conv) return "ready";
+  switch (conv.status) {
+    case "pending":
+      return "starting";
+    case "running":
+      return "working";
+    case "idle":
+      return "online";
+    default:
+      return conv.status;
+  }
 }
 
 export function App() {
@@ -34,7 +53,8 @@ export function App() {
   const [phase, setPhase] = useState<Phase>("boot");
   const [connectError, setConnectError] = useState<string | null>(null);
 
-  const [team, setTeam] = useState<Teammate[] | null>(null);
+  const [agents, setAgents] = useState<Agent[] | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [events, setEvents] = useState<LogEvent[]>([]);
@@ -82,37 +102,41 @@ export function App() {
     if (settings?.via === "oauth") void revoke(settings.baseUrl, settings.apiKey);
     clearSettings();
     setSettings(null);
-    setTeam(null);
+    setAgents(null);
+    setConversations([]);
     setSelected(null);
     setPhase("connect");
   }, [settings]);
 
-  // ── the roster: every teammate named "Sage: owner/name" ──────────────────
+  // ── the roster: every agent named "Sage: owner/name" ─────────────────────
 
   const sages: Sage[] = useMemo(() => {
+    // The list is most recently updated first, so the first one per agent wins.
+    const byAgent = new Map<string, Conversation>();
+    for (const c of conversations) if (c.agent_id && !byAgent.has(c.agent_id)) byAgent.set(c.agent_id, c);
     const out: Sage[] = [];
-    for (const t of team ?? []) {
-      const repo = repoOfAgentName(t.name);
-      if (repo) out.push({ repo, teammate: t });
+    for (const a of agents ?? []) {
+      const repo = repoOfAgentName(a.name);
+      if (repo) out.push({ repo, agent: a, conversation: byAgent.get(a.id) ?? null });
     }
     return out.sort((a, b) => a.repo.localeCompare(b.repo));
-  }, [team]);
+  }, [agents, conversations]);
 
   const current = selected ? sages.find((s) => s.repo === selected) ?? null : null;
-  const convId = current?.teammate.conversation.id ?? null;
+  const convId = current?.conversation?.id ?? null;
   const convIdRef = useRef<string | null>(null);
   convIdRef.current = convId;
-  const currentAgentId = current?.teammate.agent_id ?? null;
 
-  const refreshTeam = useCallback(async () => {
+  const refreshSages = useCallback(async () => {
     if (!client || !settings) return;
     try {
-      const roster = await client.listTeam();
-      setTeam(roster);
+      const [list, convs] = await Promise.all([client.listAgents(AGENT_NAME_PREFIX), client.listChannelConversations(CHANNEL)]);
+      setAgents(list);
+      setConversations(convs);
       const live: Record<string, string> = {};
-      for (const t of roster) {
-        const repo = repoOfAgentName(t.name);
-        if (repo) live[repo] = t.agent_id;
+      for (const a of list) {
+        const repo = repoOfAgentName(a.name);
+        if (repo) live[repo] = a.id;
       }
       reconcileRepos(settings.baseUrl, live);
     } catch (err) {
@@ -121,16 +145,16 @@ export function App() {
   }, [client, settings, say]);
 
   useEffect(() => {
-    if (phase === "app") void refreshTeam();
-  }, [phase, refreshTeam]);
+    if (phase === "app") void refreshSages();
+  }, [phase, refreshSages]);
 
   // First roster in: land on the remembered repo, or the first sage.
   const pickedRef = useRef(false);
   useEffect(() => {
-    if (team === null || pickedRef.current) return;
+    if (agents === null || pickedRef.current) return;
     pickedRef.current = true;
     if (!selected && sages.length > 0) setSelected(sages[0]!.repo);
-  }, [team, sages, selected]);
+  }, [agents, sages, selected]);
 
   const select = useCallback(
     (repo: string) => {
@@ -170,25 +194,26 @@ export function App() {
 
     const connect = () => {
       if (stopped) return;
-      void client.streamTeam({
+      void client.streamEvents({
         lastEventId,
         streams: STREAMS,
         signal: ctrl.signal,
         onOpen: () => {
           setConnected(true);
           backoff = 1000;
-          void refreshTeam();
+          void refreshSages();
           void reloadThread();
         },
         onMessage: (msg) => {
           if (msg.id) lastEventId = msg.id;
-          if (msg.event === "team") {
-            void refreshTeam();
+          if (msg.event === "conversations") {
+            // The list changed — a sage's conversation opened, ended, was read.
+            void refreshSages();
             return;
           }
-          let ev: TeamEvent;
+          let ev: StreamEvent;
           try {
-            ev = JSON.parse(msg.data) as TeamEvent;
+            ev = JSON.parse(msg.data) as StreamEvent;
           } catch {
             return;
           }
@@ -196,7 +221,7 @@ export function App() {
           if (ev.conversation_id !== convIdRef.current) {
             // Another sage's turn ended → its unread flag moved; a new
             // conversation for the open sage (fresh computer) → re-point.
-            if (ev.kind === "stage" && ev.stage === "turn" && ev.state !== "started") void refreshTeam();
+            if (ev.kind === "stage" && ev.stage === "turn" && ev.state !== "started") void refreshSages();
             return;
           }
           setEvents((es) => (es.some((e) => e.id === ev.id) ? es : [...es, ev]));
@@ -204,7 +229,7 @@ export function App() {
             void client.listTurns(ev.conversation_id).then(setTurns).catch(() => undefined);
             if (ev.state !== "started") {
               void client.markRead(ev.conversation_id).catch(() => undefined);
-              void refreshTeam();
+              void refreshSages();
             }
           }
         },
@@ -221,11 +246,11 @@ export function App() {
       stopped = true;
       ctrl.abort();
     };
-  }, [client, phase, refreshTeam, reloadThread]);
+  }, [client, phase, refreshSages, reloadThread]);
 
   // ── derived: blocks per turn, the dossier ─────────────────────────────────
 
-  const runtime = current?.teammate.conversation.runtime ?? "claude";
+  const runtime = current?.conversation?.runtime ?? current?.agent.runtime ?? "claude";
   const thread: ThreadEntry[] = useMemo(() => {
     const sorted = [...turns].sort((a, b) => a.turn_number - b.turn_number);
     const byTurn = new Map<string, LogEvent[]>();
@@ -257,15 +282,15 @@ export function App() {
       if (!client) return;
       setBusy(true);
       try {
-        await client.sendMessage(agentId, text);
-        await Promise.all([refreshTeam(), reloadThread()]);
+        await client.sendOnChannel({ agent_id: agentId, channel_id: CHANNEL, prompt: text });
+        await Promise.all([refreshSages(), reloadThread()]);
       } catch (err) {
         say(describeError(err));
       } finally {
         setBusy(false);
       }
     },
-    [client, refreshTeam, reloadThread, say],
+    [client, refreshSages, reloadThread, say],
   );
 
   /** The study kick-off: the computer may still be provisioning, so retry through 503s. */
@@ -276,8 +301,8 @@ export function App() {
       try {
         for (let i = 0; i < 24; i++) {
           try {
-            await client.sendMessage(agentId, STUDY_PROMPT);
-            await Promise.all([refreshTeam(), reloadThread()]);
+            await client.sendOnChannel({ agent_id: agentId, channel_id: CHANNEL, prompt: STUDY_PROMPT });
+            await Promise.all([refreshSages(), reloadThread()]);
             return;
           } catch (err) {
             if (err instanceof ApiError && err.status === 503) {
@@ -294,7 +319,7 @@ export function App() {
         setBusy(false);
       }
     },
-    [client, refreshTeam, reloadThread, say],
+    [client, refreshSages, reloadThread, say],
   );
 
   const addRepo = useCallback(
@@ -313,7 +338,7 @@ export function App() {
       setAdding(repo);
       try {
         const name = agentName(repo);
-        // Reuse an agent left over from an earlier hire; otherwise create one.
+        // Reuse an agent of that name if there is one; otherwise create one.
         let agent = (await client.listAgents(name)).find((a) => a.name === name);
         if (!agent) {
           if (!catalogRef.current) catalogRef.current = await client.getCatalog().catch(() => null);
@@ -327,9 +352,8 @@ export function App() {
             system: systemPrompt(repo),
           });
         }
-        await client.addTeammate({ agent_id: agent.id, name });
         saveRepo(settings.baseUrl, repo, agent.id);
-        await refreshTeam();
+        await refreshSages();
         select(repo);
         void study(agent.id);
       } catch (err) {
@@ -338,25 +362,26 @@ export function App() {
         setAdding(null);
       }
     },
-    [client, settings, sages, select, refreshTeam, study, say],
+    [client, settings, sages, select, refreshSages, study, say],
   );
 
   const retire = useCallback(
     async (sage: Sage) => {
       if (!client || !settings) return;
-      if (!window.confirm(`Retire the sage for ${sage.repo}? Its computer and clone go away; the conversation stays in Fountain.`)) return;
+      if (!window.confirm(`Retire the sage for ${sage.repo}? Its agent, computer and clone go away; the conversation stays in Fountain.`)) return;
       try {
-        await client.removeTeammate(sage.teammate.agent_id);
+        if (sage.conversation) await client.terminate(sage.conversation.id);
+        await client.deleteAgent(sage.agent.id);
         if (selected === sage.repo) {
           setSelected(null);
           saveSelected(settings.baseUrl, null);
         }
-        await refreshTeam();
+        await refreshSages();
       } catch (err) {
         say(describeError(err));
       }
     },
-    [client, settings, selected, refreshTeam, say],
+    [client, settings, selected, refreshSages, say],
   );
 
   // ── render ────────────────────────────────────────────────────────────────
@@ -387,8 +412,8 @@ export function App() {
             <button key={s.repo} className={s.repo === selected ? "repobtn active" : "repobtn"} onClick={() => select(s.repo)}>
               <code>{s.repo}</code>
               <span className="repostate">
-                {s.teammate.unread && s.repo !== selected && <i className="unread" />}
-                {s.teammate.presence.state === "working" ? "working" : ""}
+                {s.conversation?.unread && s.repo !== selected && <i className="unread" />}
+                {s.conversation?.status === "running" ? "working" : ""}
               </span>
             </button>
           ))}
@@ -398,7 +423,7 @@ export function App() {
               <span className="repostate">hiring…</span>
             </div>
           )}
-          {team !== null && sages.length === 0 && !pendingRepo && <p className="fineprint">No repos yet.</p>}
+          {agents !== null && sages.length === 0 && !pendingRepo && <p className="fineprint">No repos yet.</p>}
         </nav>
         <AddRepoForm disabled={adding !== null} onAdd={(v) => void addRepo(v)} />
         <div className="rail-foot">
@@ -421,7 +446,7 @@ export function App() {
               <a href={`https://github.com/${current.repo}`} target="_blank" rel="noreferrer">
                 <code>{current.repo}</code>
               </a>
-              <span className="fineprint">{working ? "working…" : current.teammate.presence.label}</span>
+              <span className="fineprint">{working ? "working…" : presenceLabel(current.conversation)}</span>
               <button className="linkish" onClick={() => void retire(current)}>
                 retire sage
               </button>
@@ -439,7 +464,7 @@ export function App() {
               <div className="study-card failed">
                 <p>{lastProse(thread) || "The sage could not study this repository."}</p>
                 <div className="study-actions">
-                  <button className="primary" disabled={busy} onClick={() => void study(current.teammate.agent_id)}>
+                  <button className="primary" disabled={busy} onClick={() => void study(current.agent.id)}>
                     Retry
                   </button>
                   <button className="danger" disabled={busy} onClick={() => void retire(current)}>
@@ -455,7 +480,7 @@ export function App() {
               busy={busy}
               working={working}
               onSend={(text) => {
-                if (currentAgentId) void send(currentAgentId, text);
+                if (current) void send(current.agent.id, text);
               }}
             />
           </>

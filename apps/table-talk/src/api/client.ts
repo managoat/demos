@@ -3,7 +3,7 @@
  * bearer key; every error is an `ApiError` with the server's `error` string
  * when there was one. Ported (slimmed) from jhgaylor/dns-desk.
  */
-import type { Agent, Conversation, LogEvent, Teammate, Turn } from "./types";
+import type { Agent, Conversation, LogEvent, Turn } from "./types";
 import { readSse, type SseMessage } from "../lib/sse";
 import type { Settings } from "../lib/settings";
 
@@ -26,27 +26,32 @@ export class FountainClient {
     return this.settings.baseUrl;
   }
 
-  // ── the analyst teammate ──────────────────────────────────────────────────
+  // ── the analyst's conversations: one per dataset, on the table-talk channel ─
 
-  async listTeam(): Promise<Teammate[]> {
-    return (await this.json<{ data: Teammate[] }>("GET", "/api/team")).data;
+  /** The conversation currently bound to `channel` for this agent, if it is live. */
+  async findConversation(agentId: string, channel: string): Promise<Conversation | null> {
+    const qs = new URLSearchParams({ agent_id: agentId, channel_id: channel, status: "pending,running,idle", limit: "1" });
+    return (await this.json<{ data: Conversation[] }>("GET", `/api/conversations?${qs}`)).data[0] ?? null;
   }
 
-  async getTeammate(agentId: string): Promise<Teammate> {
-    return (await this.json<{ data: Teammate }>("GET", `/api/team/${agentId}`)).data;
+  /**
+   * A new dataset: `fresh: true` rotates the channel's binding to a new
+   * conversation (the old one keeps running until it is retired) with
+   * `prompt` as turn 1.
+   */
+  async startFresh(input: { agent_id: string; channel_id: string; prompt: string }): Promise<Conversation> {
+    const res = await this.json<{ data: Conversation; meta?: { resumed?: boolean } }>("POST", "/api/conversations", { ...input, fresh: true });
+    if (res.meta?.resumed) await this.prompt(res.data.id, input.prompt);
+    return res.data;
   }
 
-  async addTeammate(input: { agent_id: string; name?: string }): Promise<Teammate> {
-    return (await this.json<{ data: Teammate }>("POST", "/api/team", input)).data;
+  /** A follow-up on a dataset's own conversation. */
+  prompt(conversationId: string, prompt: string): Promise<unknown> {
+    return this.json("POST", `/api/conversations/${conversationId}/prompts`, { prompt });
   }
 
-  sendMessage(agentId: string, prompt: string): Promise<{ status: string; conversation_id: string }> {
-    return this.json("POST", `/api/team/${agentId}/messages`, { prompt });
-  }
-
-  /** Fresh thread on the same computer — how each dataset gets its own conversation. */
-  startFreshThread(agentId: string): Promise<unknown> {
-    return this.json("POST", `/api/team/${agentId}/conversations`);
+  getAgent(agentId: string): Promise<Agent> {
+    return this.json<{ data: Agent }>("GET", `/api/agents/${agentId}`).then((r) => r.data);
   }
 
   // ── set-up: creating the analyst agent ────────────────────────────────────
@@ -98,10 +103,11 @@ export class FountainClient {
   // ── stream ────────────────────────────────────────────────────────────────
 
   /**
-   * The whole team's events on one connection. Resolves when the server
-   * closes (idle timeout, deploy); the caller reconnects with the last id.
+   * Every conversation's events on one connection (`/api/events/stream`);
+   * the caller keeps the active dataset's. Resolves when the server closes
+   * (idle timeout, deploy); the caller reconnects with the last id.
    */
-  streamTeam(opts: {
+  streamEvents(opts: {
     lastEventId: string | null;
     streams: string[];
     signal: AbortSignal;
@@ -110,7 +116,7 @@ export class FountainClient {
     onClose: (err?: unknown) => void;
   }): Promise<void> {
     const qs = new URLSearchParams({ streams: opts.streams.join(",") });
-    return readSse(`${this.baseUrl}/api/team/stream?${qs}`, {
+    return readSse(`${this.baseUrl}/api/events/stream?${qs}`, {
       headers: { authorization: `Bearer ${this.settings.apiKey}` },
       lastEventId: opts.lastEventId,
       signal: opts.signal,

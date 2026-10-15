@@ -10,7 +10,7 @@ export function agentName(repo: string): string {
   return `${AGENT_NAME_PREFIX}${repo}`;
 }
 
-/** `Sage: owner/name` → `owner/name`; null for any other teammate. */
+/** `Sage: owner/name` → `owner/name`; null for any other agent. */
 export function repoOfAgentName(name: string): string | null {
   return name.startsWith(AGENT_NAME_PREFIX) ? name.slice(AGENT_NAME_PREFIX.length) : null;
 }

@@ -24,19 +24,13 @@
  *     `session/new`, so those *do* follow an edit — but only from the next
  *     turn.
  *
- * **Fountain adds to both sets, and the API reports neither addition.**
- * `SandboxSkills.mount/3` always prepends its own bundled skills, which is
- * how a sprite discovers the callback API and the team set-up Q&A; they are
- * on every machine and in no agent's definition, so `BUNDLED_SKILLS` names
- * them here rather than letting the panel imply a shorter list.
- * `ConversationServer` likewise appends up to three MCP servers of its own at
- * `session/new` — `fountain-buzz`, `fountain-team` and `fountain-team-comms`.
- * The team pair is reachable only by a conversation on Fountain's own team
- * channel (`fountain:team`), which a workbench conversation never is: its
- * channel is `workbench:<project>/…`. `fountain-buzz` has no such guard — it
- * is injected whenever the conversation's *vault* carries a Buzz identity,
- * which a project's vault may — so it is the one addition the workbench can
- * neither see nor rule out. `mcpCaveat` is that sentence.
+ * **Fountain adds to the skills, and the API does not report it.**
+ * `SandboxSkills.mount/3` always prepends its own bundled skill, which is
+ * how a sprite discovers the callback API; it is on every machine and in no
+ * agent's definition, so `BUNDLED_SKILLS` names it here rather than letting
+ * the panel imply a shorter list. Fountain no longer adds MCP servers of its
+ * own at `session/new` (the team pair went with the team feature), so the
+ * agent's list is the whole list.
  *
  * The MCP entries are stored as Claude's own config map and normalised into
  * the shape ACP delivers (`Fountain.Runtimes.ACP.mcp_servers/1`) — sorted by
@@ -175,14 +169,6 @@ export function mcpServersOf(agent: Agent | null | undefined): McpServer[] {
     });
 }
 
-/**
- * What this list cannot show, in one sentence — see the module doc. Rendered
- * under the servers rather than left for someone to discover by wondering
- * why a tool they can see the agent using is not here.
- */
-export const mcpCaveat =
-  "Fountain adds a server of its own to a conversation whose vault carries a Buzz identity. It is not in the agent's definition and no endpoint reports it, so it cannot appear here.";
-
 // ── skills ───────────────────────────────────────────────────────────────
 
 export interface Skill {
@@ -200,12 +186,11 @@ export interface Skill {
 /**
  * The skills Fountain writes onto every sprite whatever the agent says
  * (`Fountain.SandboxSkills.@bundled_skills`, prepended in `mount/3`): the
- * one that documents the callback API to whatever is running in there, and
- * the team set-up Q&A. Listing them is the difference between "these are the
- * agent's skills" and "this is what is on the machine", and the panel is
- * asked for the second.
+ * one that documents the callback API to whatever is running in there.
+ * Listing it is the difference between "these are the agent's skills" and
+ * "this is what is on the machine", and the panel is asked for the second.
  */
-export const BUNDLED_SKILLS = ["fountain", "create-team"];
+export const BUNDLED_SKILLS = ["fountain"];
 
 /**
  * An agent's skills, the bundled ones first — the order `mount/3` writes

@@ -147,14 +147,9 @@ panel says so rather than letting you assume otherwise (`src/lib/details.ts`).
 Skills are written onto a sprite once, when it is built, so editing the
 teammate does not reach a computer that is already up; MCP servers are re-read
 at every turn, so those do follow an edit, from the next turn. And Fountain
-adds to both sets without reporting either. Every sprite gets bundled skills
-that are in no teammate's definition — the panel lists them, rather than
-implying a shorter set than is on the disk — and a conversation whose *vault*
-carries a Buzz identity gets a server of Fountain's own that no endpoint will
-name, which is the one thing the panel says outright that it cannot show. (The
-other two Fountain injects, the team pair, reach only a conversation on
-Fountain's own `fountain:team` channel, which a workbench conversation never
-is.) The policy is the merge Fountain itself performs, recomputed here: the
+adds to the skills without reporting it: every sprite gets a bundled skill
+that is in no teammate's definition, and the panel lists it rather than
+implying a shorter set than is on the disk. The policy is the merge Fountain itself performs, recomputed here: the
 teammate's and the launch's, tool by tool, whichever withholds more — so a
 launch can tighten it and never loosen it.
 

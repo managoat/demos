@@ -39,14 +39,6 @@ export function saveDataset(baseUrl: string, entry: DatasetEntry): DatasetEntry[
   return index[baseUrl];
 }
 
-/** A follow-up landed in a replacement conversation — the dataset moves with it. */
-export function repointDataset(baseUrl: string, oldId: string, newId: string): DatasetEntry[] {
-  const index = loadIndex();
-  index[baseUrl] = (index[baseUrl] ?? []).map((d) => (d.conversationId === oldId ? { ...d, conversationId: newId } : d));
-  localStorage.setItem(KEY, JSON.stringify(index));
-  return index[baseUrl];
-}
-
 export function forgetDataset(baseUrl: string, conversationId: string): DatasetEntry[] {
   const index = loadIndex();
   index[baseUrl] = (index[baseUrl] ?? []).filter((d) => d.conversationId !== conversationId);

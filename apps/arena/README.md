@@ -7,7 +7,7 @@ streams, your vote decides.
 
 It is a static single-page app with no backend of its own — it talks only to
 the [Fountain](https://github.com/managoat/fountain) API, where each
-contender runs as a teammate (one agent per model, hired lazily on the first
+contender runs as an agent (one agent per model, hired lazily on the first
 fight and reused across rounds). Client patterns (OAuth, SSE, API client)
 follow [dns-desk](../dns-desk).
 
@@ -46,10 +46,12 @@ entries with `https://arena.demo.managoat.com` / `https://arena.demo.managoat.co
 
 No protocol blocks — the reply text is the product. Each selected model gets
 an agent named `Arena <model>` with a pinned system prompt (`src/lib/spec.ts`:
-you are a contender; answer directly and well; no preamble), added to the team
-via `POST /api/team`. A round sends the same prompt to every contender's
-conversation (`POST /api/team/:agent_id/messages`) and follows all of them on
-one `GET /api/team/stream` SSE connection, reconnecting with `Last-Event-ID`.
+you are a contender; answer directly and well; no preamble). Its conversation
+is bound to the `arena` channel: a round sends the same prompt to every
+contender with `POST /api/conversations` (`channel_id: "arena"`), which resumes
+the agent's live conversation — the prompt then goes to its `/prompts` — or
+opens one with the prompt as turn 1. All of them are followed on one
+`GET /api/events/stream` SSE connection, reconnecting with `Last-Event-ID`.
 
 Per column, everything is derived from turns + events: status, time to first
 output chunk (first output event vs. the turn's `started_at`, both server
@@ -62,7 +64,7 @@ out `conversation_busy` / `provisioning` client-side and disables Fight until
 all columns settle.
 
 If the catalog has only one model, the picker offers it twice (`#1` / `#2`) —
-two teammates on the same model is still a fight.
+two contenders on the same model is still a fight.
 
 ## Development
 

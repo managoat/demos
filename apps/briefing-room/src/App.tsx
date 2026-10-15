@@ -1,13 +1,13 @@
 /**
- * Briefing Room: one researcher teammate, its conversation folded into a
- * library of briefs. The protocol lives in lib/protocol.ts; the agent's rules
- * in lib/spec.ts. Streaming/reconnect follows jhgaylor/dns-desk.
+ * Briefing Room: one researcher agent, its conversation (the one bound to the
+ * `briefing-room` channel, lib/analyst.ts) folded into a library of briefs.
+ * The protocol lives in lib/protocol.ts; the agent's rules in lib/spec.ts.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { describeError, FountainClient } from "./api/client";
-import type { LogEvent, TeamEvent, Teammate, Turn } from "./api/types";
+import type { Agent, Conversation, LogEvent, StreamEvent, Turn } from "./api/types";
 import { assistantText, blocksForTurn } from "./lib/acp";
-import { clearAnalystId, loadAnalystId, saveAnalystId } from "./lib/analyst";
+import { CHANNEL, clearAnalystId, loadAnalystId, presenceLabel, saveAnalystId } from "./lib/analyst";
 import { completeLoginIfCallback, revoke } from "./lib/oauth";
 import { clearSettings, loadSettings, saveSettings, type Settings } from "./lib/settings";
 import { fetchedUrls, foldConversation, latestOrphan, parseRequest, type RoomView } from "./lib/protocol";
@@ -29,7 +29,8 @@ export function App() {
   const [phase, setPhase] = useState<Phase>("boot");
   const [setupError, setSetupError] = useState<string | null>(null);
 
-  const [teammate, setTeammate] = useState<Teammate | null>(null);
+  const [agent, setAgent] = useState<Agent | null>(null);
+  const [conversation, setConversation] = useState<Conversation | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [events, setEvents] = useState<LogEvent[]>([]);
   const [connected, setConnected] = useState(false);
@@ -39,7 +40,7 @@ export function App() {
   const [toast, setToast] = useState<string | null>(null);
 
   const client = useMemo(() => (settings ? new FountainClient(settings) : null), [settings]);
-  const convId = teammate?.conversation.id ?? null;
+  const convId = conversation?.id ?? null;
   const convIdRef = useRef<string | null>(null);
   convIdRef.current = convId;
 
@@ -82,26 +83,31 @@ export function App() {
     clearSettings();
     setSettings(null);
     setAnalystId(null);
-    setTeammate(null);
+    setAgent(null);
+    setConversation(null);
     setPhase("setup");
   }, [settings]);
 
   const changeAnalyst = useCallback(() => {
     if (settings) clearAnalystId(settings.baseUrl);
     setAnalystId(null);
-    setTeammate(null);
+    setAgent(null);
+    setConversation(null);
     setPhase("connect");
   }, [settings]);
 
   // ── the researcher's conversation ─────────────────────────────────────────
 
-  const refreshTeammate = useCallback(async () => {
+  const refreshAnalyst = useCallback(async () => {
     if (!client || !analystId) return;
     try {
-      setTeammate(await client.getTeammate(analystId));
+      const [a, c] = await Promise.all([client.getAgent(analystId), client.findConversation(analystId, CHANNEL)]);
+      setAgent(a);
+      setConversation(c);
     } catch (err) {
-      // The teammate is gone (removed in Fountain) — back to connect.
-      setTeammate(null);
+      // The agent is gone (deleted in Fountain) — back to connect.
+      setAgent(null);
+      setConversation(null);
       if (settings) clearAnalystId(settings.baseUrl);
       setAnalystId(null);
       setPhase("connect");
@@ -110,8 +116,8 @@ export function App() {
   }, [client, analystId, settings, say]);
 
   useEffect(() => {
-    if (phase === "room") void refreshTeammate();
-  }, [phase, refreshTeammate]);
+    if (phase === "room") void refreshAnalyst();
+  }, [phase, refreshAnalyst]);
 
   const reloadThread = useCallback(async () => {
     if (!client || !convId) return;
@@ -139,34 +145,32 @@ export function App() {
 
     const connect = () => {
       if (stopped) return;
-      void client.streamTeam({
+      void client.streamEvents({
         lastEventId,
         streams: STREAMS,
         signal: ctrl.signal,
         onOpen: () => {
           setConnected(true);
           backoff = 1000;
-          void refreshTeammate();
+          void refreshAnalyst();
           void reloadThread();
         },
         onMessage: (msg) => {
           if (msg.id) lastEventId = msg.id;
-          if (msg.event === "team") {
-            void refreshTeammate();
+          if (msg.event === "conversations") {
+            // The list changed — possibly a new conversation on the
+            // researcher's channel (a fresh computer): re-point.
+            void refreshAnalyst();
             return;
           }
-          let ev: TeamEvent;
+          let ev: StreamEvent;
           try {
-            ev = JSON.parse(msg.data) as TeamEvent;
+            ev = JSON.parse(msg.data) as StreamEvent;
           } catch {
             return;
           }
           if (msg.id) ev.id = Number(msg.id);
-          if (ev.conversation_id !== convIdRef.current) {
-            // A new conversation for our agent (fresh computer): re-point.
-            if (ev.agent_id === analystId) void refreshTeammate();
-            return;
-          }
+          if (ev.conversation_id !== convIdRef.current) return;
           setEvents((es) => (es.some((e) => e.id === ev.id) ? es : [...es, ev]));
           if (ev.kind === "stage" && ev.stage === "turn") {
             void client.listTurns(ev.conversation_id).then(setTurns).catch(() => undefined);
@@ -187,11 +191,11 @@ export function App() {
       stopped = true;
       ctrl.abort();
     };
-  }, [client, phase, analystId, refreshTeammate, reloadThread]);
+  }, [client, phase, analystId, refreshAnalyst, reloadThread]);
 
   // ── derived: replies per turn, the folded library ─────────────────────────
 
-  const runtime = teammate?.conversation.runtime ?? "claude";
+  const runtime = conversation?.runtime ?? agent?.runtime ?? "claude";
   const thread = useMemo(() => {
     const sorted = [...turns].sort((a, b) => a.turn_number - b.turn_number);
     const byTurn = new Map<string, LogEvent[]>();
@@ -272,16 +276,17 @@ export function App() {
       if (!client || !analystId || !text.trim()) return;
       setBusy(true);
       try {
-        await client.sendMessage(analystId, text.trim());
+        const conv = await client.sendOnChannel({ agent_id: analystId, channel_id: CHANNEL, prompt: text.trim() });
         autoFollowRef.current = true;
-        await Promise.all([refreshTeammate(), reloadThread()]);
+        setConversation(conv);
+        await reloadThread();
       } catch (err) {
         say(describeError(err));
       } finally {
         setBusy(false);
       }
     },
-    [client, analystId, refreshTeammate, reloadThread, say],
+    [client, analystId, reloadThread, say],
   );
 
   const commission = useCallback(
@@ -339,7 +344,7 @@ export function App() {
         <div className="grow" />
         <div className="head-status">
           <span className={connected ? "dot on" : "dot"} title={connected ? "live" : "reconnecting"} />
-          <span className="fineprint">{working ? "researching…" : teammate?.presence.label ?? "…"}</span>
+          <span className="fineprint">{working ? "researching…" : agent ? presenceLabel(conversation) : "…"}</span>
           <button className="linkish" onClick={changeAnalyst}>
             change researcher
           </button>

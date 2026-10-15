@@ -3,7 +3,7 @@
  * bearer key; every error is an `ApiError` with the server's `error` string
  * when there was one. Ported (slimmed) from jhgaylor/repo-sage / dns-desk.
  */
-import type { Agent, Catalog, Environment, LogEvent, Me, SecretKey, Teammate, Turn, Vault } from "./types";
+import type { Agent, Catalog, Conversation, Environment, LogEvent, Me, SecretKey, Turn, Vault } from "./types";
 import { readSse, type SseMessage } from "../lib/sse";
 import type { Settings } from "../lib/settings";
 
@@ -30,24 +30,36 @@ export class FountainClient {
     return this.json<Me>("GET", "/api/auth/me");
   }
 
-  // ── the menders: teammates, one per repo ──────────────────────────────────
+  // ── the menders: one conversation per repo, bound to the mend channel ────
 
-  async listTeam(): Promise<Teammate[]> {
-    return (await this.json<{ data: Teammate[] }>("GET", "/api/team")).data;
+  /**
+   * Every mender conversation that is still a mender — bound to `channel`
+   * and not terminated — most recently updated first. Retiring one
+   * terminates it, which is what takes it off the rail.
+   */
+  async listChannelConversations(channel: string): Promise<Conversation[]> {
+    const qs = new URLSearchParams({ channel_id: channel, status: "pending,running,idle,failed", limit: "200" });
+    return (await this.json<{ data: Conversation[] }>("GET", `/api/conversations?${qs}`)).data;
   }
 
-  /** `vault_id` can only be set here — Fountain has no way to attach one later. */
-  async addTeammate(input: { agent_id: string; name?: string; environment_id?: string; vault_id?: string }): Promise<Teammate> {
-    return (await this.json<{ data: Teammate }>("POST", "/api/team", input)).data;
+  /**
+   * Send `prompt` on the agent's conversation on `channel_id`. `POST
+   * /api/conversations` with a `channel_id` resumes the live one for the same
+   * agent and vault (and then ignores `prompt`, so it is sent as a prompt) or
+   * opens a new one with `prompt` as turn 1. A vault binds when a
+   * conversation opens, so a different `vault_id` opens a new one.
+   */
+  async sendOnChannel(input: { agent_id: string; vault_id: string | null; channel_id: string; prompt: string }): Promise<Conversation> {
+    const body: Record<string, string> = { agent_id: input.agent_id, channel_id: input.channel_id, prompt: input.prompt };
+    if (input.vault_id) body.vault_id = input.vault_id;
+    const res = await this.json<{ data: Conversation; meta?: { resumed?: boolean } }>("POST", "/api/conversations", body);
+    if (res.meta?.resumed) await this.json("POST", `/api/conversations/${res.data.id}/prompts`, { prompt: input.prompt });
+    return res.data;
   }
 
-  /** Terminates the mender's conversation and takes it off the team. */
-  removeTeammate(agentId: string): Promise<void> {
-    return this.json<void>("DELETE", `/api/team/${agentId}`);
-  }
-
-  sendMessage(agentId: string, prompt: string): Promise<{ status: string; conversation_id: string }> {
-    return this.json("POST", `/api/team/${agentId}/messages`, { prompt });
+  /** Ends the conversation and lets its computer go. */
+  terminate(conversationId: string): Promise<unknown> {
+    return this.json("POST", `/api/conversations/${conversationId}/terminate`);
   }
 
   // ── the conversation a mender runs on ─────────────────────────────────────
@@ -128,7 +140,7 @@ export class FountainClient {
   }
 
   /** Update an existing agent — used to bring an old mender's system prompt up to date. */
-  updateAgent(id: string, input: { system?: string; description?: string }): Promise<Agent> {
+  updateAgent(id: string, input: { system?: string; description?: string; environment_id?: string }): Promise<Agent> {
     return this.json<{ data: Agent }>("PUT", `/api/agents/${id}`, input).then((r) => r.data);
   }
 
@@ -139,10 +151,11 @@ export class FountainClient {
   // ── stream ────────────────────────────────────────────────────────────────
 
   /**
-   * The whole team's events on one connection. Resolves when the server
+   * Every conversation's events on one connection (`/api/events/stream`);
+   * the caller routes them by `conversation_id`. Resolves when the server
    * closes (idle timeout, deploy); the caller reconnects with the last id.
    */
-  streamTeam(opts: {
+  streamEvents(opts: {
     lastEventId: string | null;
     streams: string[];
     signal: AbortSignal;
@@ -151,7 +164,7 @@ export class FountainClient {
     onClose: (err?: unknown) => void;
   }): Promise<void> {
     const qs = new URLSearchParams({ streams: opts.streams.join(",") });
-    return readSse(`${this.baseUrl}/api/team/stream?${qs}`, {
+    return readSse(`${this.baseUrl}/api/events/stream?${qs}`, {
       headers: { authorization: `Bearer ${this.settings.apiKey}` },
       lastEventId: opts.lastEventId,
       signal: opts.signal,
@@ -207,7 +220,7 @@ export function describeError(err: unknown): string {
       case "subscription_required":
         return "An active Fountain subscription is required.";
       case "sandbox_quota_exceeded":
-        return "You are at your Fountain sandbox limit — retire a mender (or another teammate) first.";
+        return "You are at your Fountain sandbox limit — retire a mender (or end another conversation) first.";
       case "not_found":
         return "Not found.";
       default:

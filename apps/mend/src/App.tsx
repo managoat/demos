@@ -1,13 +1,13 @@
 /**
- * Mend: a rail of repositories, each with one mender (a Fountain teammate on
+ * Mend: a rail of repositories, each with one mender (a Fountain agent on
  * a computer that has chant and every audit lexicon installed) and one
- * conversation. The audit, the plan and the patch are all derived from turns
+ * conversation, bound to the `mend` channel. The audit, the plan and the patch are all derived from turns
  * + protocol blocks; localStorage holds only settings and choices.
  * Streaming/reconnect follows jhgaylor/repo-sage / dns-desk.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ApiError, describeError, FountainClient } from "./api/client";
-import type { Catalog, LogEvent, TeamEvent, Teammate, Turn } from "./api/types";
+import type { Agent, Catalog, Conversation, LogEvent, StreamEvent, Turn } from "./api/types";
 import { blocksForTurn } from "./lib/acp";
 import { parseRepoInput, refKey, refLabel, repoUrl, type RepoRef } from "./lib/hosts";
 import { loadGhAuth, saveGhAuth, type GhAuth } from "./lib/ghauth";
@@ -40,13 +40,56 @@ import { Work, type ThreadEntry } from "./components/Work";
 
 const STREAMS = ["acp", "stdout", "stage"];
 const DEFAULT_MODEL = "anthropic/claude-sonnet-5";
+/** Every mender conversation is bound to this channel; retiring one terminates it. */
+const CHANNEL = "mend";
 
 type Phase = "boot" | "connect" | "app";
 
 interface Mender {
   ref: RepoRef;
   key: string;
-  teammate: Teammate;
+  agent: Agent;
+  conversation: Conversation;
+}
+
+interface Roster {
+  agents: Agent[];
+  conversations: Conversation[];
+}
+
+function statusLabel(conv: Conversation): string {
+  switch (conv.status) {
+    case "pending":
+      return "starting";
+    case "running":
+      return "working";
+    case "idle":
+      return "online";
+    default:
+      return conv.status;
+  }
+}
+
+/**
+ * The rail: agents named for a repo, each with its newest live conversation
+ * on the mend channel. An agent with none (retired, or never started) is not
+ * a mender; adding its repo again reuses it.
+ */
+function menderList(roster: Roster | null): Mender[] {
+  if (!roster) return [];
+  const newest = new Map<string, Conversation>();
+  for (const c of roster.conversations) {
+    if (!c.agent_id) continue;
+    const seen = newest.get(c.agent_id);
+    if (!seen || c.updated_at > seen.updated_at) newest.set(c.agent_id, c);
+  }
+  const out: Mender[] = [];
+  for (const agent of roster.agents) {
+    const ref = refOfAgentName(agent.name);
+    const conversation = newest.get(agent.id);
+    if (ref && conversation) out.push({ ref, key: refKey(ref), agent, conversation });
+  }
+  return out.sort((a, b) => a.key.localeCompare(b.key));
 }
 
 export function App() {
@@ -54,7 +97,7 @@ export function App() {
   const [phase, setPhase] = useState<Phase>("boot");
   const [connectError, setConnectError] = useState<string | null>(null);
 
-  const [team, setTeam] = useState<Teammate[] | null>(null);
+  const [roster, setRoster] = useState<Roster | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [events, setEvents] = useState<LogEvent[]>([]);
@@ -126,24 +169,18 @@ export function App() {
     if (settings?.via === "oauth") void revoke(settings.baseUrl, settings.apiKey);
     clearSettings();
     setSettings(null);
-    setTeam(null);
+    setRoster(null);
     setSelected(null);
     setPhase("connect");
   }, [settings]);
 
-  // ── the roster: every teammate named "Mend: host/owner/name" ─────────────
+  // ── the roster: every agent named "Mend: host/owner/name" with a live
+  //    conversation on the mend channel (the newest, if there are several) ──
 
-  const menders: Mender[] = useMemo(() => {
-    const out: Mender[] = [];
-    for (const t of team ?? []) {
-      const ref = refOfAgentName(t.name);
-      if (ref) out.push({ ref, key: refKey(ref), teammate: t });
-    }
-    return out.sort((a, b) => a.key.localeCompare(b.key));
-  }, [team]);
+  const menders: Mender[] = useMemo(() => menderList(roster), [roster]);
 
   const current = selected ? menders.find((m) => m.key === selected) ?? null : null;
-  const convId = current?.teammate.conversation.id ?? null;
+  const convId = current?.conversation.id ?? null;
   const convIdRef = useRef<string | null>(null);
   convIdRef.current = convId;
 
@@ -155,16 +192,14 @@ export function App() {
    */
   const healedRef = useRef<Set<string>>(new Set());
 
-  const refreshTeam = useCallback(async () => {
+  const refreshRoster = useCallback(async () => {
     if (!client || !settings) return;
     try {
-      const roster = await client.listTeam();
-      setTeam(roster);
+      const [agents, conversations] = await Promise.all([client.listAgents("Mend: "), client.listChannelConversations(CHANNEL)]);
+      const next = { agents, conversations };
+      setRoster(next);
       const live: Record<string, string> = {};
-      for (const t of roster) {
-        const ref = refOfAgentName(t.name);
-        if (ref) live[refKey(ref)] = t.agent_id;
-      }
+      for (const m of menderList(next)) live[m.key] = m.agent.id;
       reconcileRepos(settings.baseUrl, live);
     } catch (err) {
       say(describeError(err));
@@ -172,16 +207,16 @@ export function App() {
   }, [client, settings, say]);
 
   useEffect(() => {
-    if (phase === "app") void refreshTeam();
-  }, [phase, refreshTeam]);
+    if (phase === "app") void refreshRoster();
+  }, [phase, refreshRoster]);
 
   // First roster in: land on the remembered repo, or the first mender.
   const pickedRef = useRef(false);
   useEffect(() => {
-    if (team === null || pickedRef.current) return;
+    if (roster === null || pickedRef.current) return;
     pickedRef.current = true;
     if (!selected && menders.length > 0) setSelected(menders[0]!.key);
-  }, [team, menders, selected]);
+  }, [roster, menders, selected]);
 
   const select = useCallback(
     (key: string) => {
@@ -195,21 +230,21 @@ export function App() {
 
   useEffect(() => {
     if (!client || !current) return;
-    const agentId = current.teammate.agent_id;
+    const agentId = current.agent.id;
     const want = systemPrompt(current.ref);
-    if (current.teammate.agent.system === want || healedRef.current.has(agentId)) return;
+    if (current.agent.system === want || healedRef.current.has(agentId)) return;
     healedRef.current.add(agentId);
     void (async () => {
       try {
         await client.updateAgent(agentId, { system: want, description: agentDescription(current.ref) });
-        await refreshTeam();
+        await refreshRoster();
         say("This mender was hired before the current protocol — updated it. Run Mend again to get per-fix diffs and the pull-request button.");
       } catch (err) {
         healedRef.current.delete(agentId);
         say(`Could not update this mender to the current protocol: ${describeError(err)}`);
       }
     })();
-  }, [client, current, refreshTeam, say]);
+  }, [client, current, refreshRoster, say]);
 
   // ── the selected mender's thread ──────────────────────────────────────────
 
@@ -239,33 +274,32 @@ export function App() {
 
     const connect = () => {
       if (stopped) return;
-      void client.streamTeam({
+      void client.streamEvents({
         lastEventId,
         streams: STREAMS,
         signal: ctrl.signal,
         onOpen: () => {
           setConnected(true);
           backoff = 1000;
-          void refreshTeam();
+          void refreshRoster();
           void reloadThread();
         },
         onMessage: (msg) => {
           if (msg.id) lastEventId = msg.id;
-          if (msg.event === "team") {
-            void refreshTeam();
+          if (msg.event === "conversations") {
+            void refreshRoster();
             return;
           }
-          let ev: TeamEvent;
+          let ev: StreamEvent;
           try {
-            ev = JSON.parse(msg.data) as TeamEvent;
+            ev = JSON.parse(msg.data) as StreamEvent;
           } catch {
             return;
           }
           if (msg.id) ev.id = Number(msg.id);
           if (ev.conversation_id !== convIdRef.current) {
-            // Another mender's turn ended → its unread flag moved; a new
-            // conversation for the open mender (fresh computer) → re-point.
-            if (ev.kind === "stage" && ev.stage === "turn" && ev.state !== "started") void refreshTeam();
+            // Another mender's turn ended → its unread flag moved.
+            if (ev.kind === "stage" && ev.stage === "turn" && ev.state !== "started") void refreshRoster();
             return;
           }
           setEvents((es) => (es.some((e) => e.id === ev.id) ? es : [...es, ev]));
@@ -273,7 +307,7 @@ export function App() {
             void client.listTurns(ev.conversation_id).then(setTurns).catch(() => undefined);
             if (ev.state !== "started") {
               void client.markRead(ev.conversation_id).catch(() => undefined);
-              void refreshTeam();
+              void refreshRoster();
             }
           }
         },
@@ -290,11 +324,11 @@ export function App() {
       stopped = true;
       ctrl.abort();
     };
-  }, [client, phase, refreshTeam, reloadThread]);
+  }, [client, phase, refreshRoster, reloadThread]);
 
   // ── derived: blocks per turn, the audit / plan / patch ─────────────────────
 
-  const runtime = current?.teammate.conversation.runtime ?? "claude";
+  const runtime = current?.conversation.runtime ?? "claude";
   const thread: ThreadEntry[] = useMemo(() => {
     const sorted = [...turns].sort((a, b) => a.turn_number - b.turn_number);
     const byTurn = new Map<string, LogEvent[]>();
@@ -351,16 +385,20 @@ export function App() {
 
   // ── actions ───────────────────────────────────────────────────────────────
 
-  /** Send a prompt, retrying through 503s while the computer provisions. */
+  /**
+   * Send a prompt on the mender's channel conversation (opening it if there
+   * is none for this agent and vault), retrying through 503s while the
+   * computer provisions.
+   */
   const drive = useCallback(
-    async (agentId: string, prompt: string, patience = 24) => {
+    async (agentId: string, vaultId: string | null, prompt: string, patience = 24) => {
       if (!client) return;
       setBusy(true);
       try {
         for (let i = 0; i < patience; i++) {
           try {
-            await client.sendMessage(agentId, prompt);
-            await Promise.all([refreshTeam(), reloadThread()]);
+            await client.sendOnChannel({ agent_id: agentId, vault_id: vaultId, channel_id: CHANNEL, prompt });
+            await Promise.all([refreshRoster(), reloadThread()]);
             return;
           } catch (err) {
             if (err instanceof ApiError && err.status === 503) {
@@ -377,7 +415,7 @@ export function App() {
         setBusy(false);
       }
     },
-    [client, refreshTeam, reloadThread, say],
+    [client, refreshRoster, reloadThread, say],
   );
 
   /** The shared toolkit environment: chant + every lexicon, made once per Fountain. */
@@ -395,8 +433,8 @@ export function App() {
   }, [client, say]);
 
   /**
-   * A repository's own vault, holding only its read token. Fountain can only
-   * attach a vault when the teammate is created, so this runs before that.
+   * A repository's own vault, holding only its read token. A vault binds
+   * when a conversation opens, so this runs before that.
    */
   const ensureVault = useCallback(
     async (ref: RepoRef, token: string): Promise<string | undefined> => {
@@ -440,6 +478,10 @@ export function App() {
           agent = await client.updateAgent(agent.id, { system: systemPrompt(ref), description: agentDescription(ref) });
           healedRef.current.add(agent.id);
         }
+        if (agent && environmentId && agent.environment_id !== environmentId) {
+          // Left over from before the toolkit environment existed.
+          agent = await client.updateAgent(agent.id, { environment_id: environmentId });
+        }
         if (!agent) {
           if (!catalogRef.current) catalogRef.current = await client.getCatalog().catch(() => null);
           const models = Object.values(catalogRef.current?.models ?? {}).flat();
@@ -453,36 +495,30 @@ export function App() {
             ...(environmentId ? { environment_id: environmentId } : {}),
           });
         }
-        await client.addTeammate({
-          agent_id: agent.id,
-          name,
-          ...(environmentId ? { environment_id: environmentId } : {}),
-          ...(vaultId ? { vault_id: vaultId } : {}),
-        });
         saveRepo(settings.baseUrl, key, agent.id);
-        await refreshTeam();
         select(key);
-        void drive(agent.id, AUDIT_PROMPT);
+        // Opens the mender's conversation with the audit as turn 1.
+        await drive(agent.id, vaultId ?? null, AUDIT_PROMPT);
       } catch (err) {
         say(describeError(err));
       } finally {
         setAdding(null);
       }
     },
-    [client, settings, menders, select, refreshTeam, ensureEnvironment, ensureVault, drive, say],
+    [client, settings, menders, select, refreshRoster, ensureEnvironment, ensureVault, drive, say],
   );
 
   /**
-   * Attaching a token to a repo that is already here means re-creating the
-   * teammate, because a vault binds at creation. That starts a fresh thread,
-   * so it asks first and says exactly what is lost.
+   * Attaching a token to a repo that is already here means a new
+   * conversation, because a vault binds when one opens. That starts a fresh
+   * thread, so it asks first and says exactly what is lost.
    */
   const attachToken = useCallback(
     async (mender: Mender, token: string) => {
       if (!client || !settings) return;
       if (
         !window.confirm(
-          `Attach a token to ${refLabel(mender.ref)}?\n\nFountain can only bind a vault when a teammate is created, so this rebuilds the mender: its current audit, plan and patch leave this view (the old conversation is kept in Fountain). You will need to audit again.`,
+          `Attach a token to ${refLabel(mender.ref)}?\n\nFountain binds a vault when a conversation opens, so this ends the mender's conversation and starts a new one that audits again with the token: its current audit, plan and patch leave this view (the old conversation is kept in Fountain).`,
         )
       )
         return;
@@ -490,25 +526,18 @@ export function App() {
       try {
         const vaultId = await ensureVault(mender.ref, token);
         if (!vaultId) return;
-        const environmentId = await ensureEnvironment();
-        await client.removeTeammate(mender.teammate.agent_id);
-        await client.addTeammate({
-          agent_id: mender.teammate.agent_id,
-          name: agentName(mender.ref),
-          ...(environmentId ? { environment_id: environmentId } : {}),
-          vault_id: vaultId,
-        });
+        await client.terminate(mender.conversation.id);
         setTurns([]);
         setEvents([]);
-        await refreshTeam();
-        say("Token attached. Audit again and the mender will clone with it.");
+        say("Token attached. The mender is auditing again, cloning with it.");
+        void drive(mender.agent.id, vaultId, AUDIT_PROMPT);
       } catch (err) {
         say(describeError(err));
       } finally {
         setBusy(false);
       }
     },
-    [client, settings, ensureVault, ensureEnvironment, refreshTeam, say],
+    [client, settings, ensureVault, drive, say],
   );
 
   const retire = useCallback(
@@ -516,17 +545,17 @@ export function App() {
       if (!client || !settings) return;
       if (!window.confirm(`Retire the mender for ${refLabel(mender.ref)}? Its computer, clone and patch go away; the conversation stays in Fountain.`)) return;
       try {
-        await client.removeTeammate(mender.teammate.agent_id);
+        await client.terminate(mender.conversation.id);
         if (selected === mender.key) {
           setSelected(null);
           saveSelected(settings.baseUrl, null);
         }
-        await refreshTeam();
+        await refreshRoster();
       } catch (err) {
         say(describeError(err));
       }
     },
-    [client, settings, selected, refreshTeam, say],
+    [client, settings, selected, refreshRoster, say],
   );
 
   // ── render ────────────────────────────────────────────────────────────────
@@ -545,7 +574,8 @@ export function App() {
     );
 
   const pendingKey = adding && !menders.some((m) => m.key === adding) ? adding : null;
-  const agentId = current?.teammate.agent_id ?? null;
+  const agentId = current?.agent.id ?? null;
+  const vaultId = current?.conversation.vault_id ?? null;
   const canDrive = !busy && !working && agentId !== null;
 
   return (
@@ -559,8 +589,8 @@ export function App() {
             <button key={m.key} className={m.key === selected ? "repobtn active" : "repobtn"} onClick={() => select(m.key)}>
               <code>{refLabel(m.ref)}</code>
               <span className="repostate">
-                {m.teammate.unread && m.key !== selected && <i className="unread" />}
-                {m.teammate.presence.state === "working" ? "working" : ""}
+                {m.conversation.unread && m.key !== selected && <i className="unread" />}
+                {m.conversation.status === "running" ? "working" : ""}
               </span>
             </button>
           ))}
@@ -570,7 +600,7 @@ export function App() {
               <span className="repostate">hiring…</span>
             </div>
           )}
-          {team !== null && menders.length === 0 && !pendingKey && <p className="fineprint">No repos yet.</p>}
+          {roster !== null && menders.length === 0 && !pendingKey && <p className="fineprint">No repos yet.</p>}
         </nav>
         <AddRepoForm disabled={adding !== null} connected={ghAuth} onAdd={(v, t) => void addRepo(v, t)} />
         <div className="rail-foot">
@@ -594,8 +624,8 @@ export function App() {
               <a href={repoUrl(current.ref)} target="_blank" rel="noreferrer">
                 <code>{refLabel(current.ref)}</code>
               </a>
-              <span className="fineprint">{working ? "working…" : current.teammate.presence.label}</span>
-              {current.teammate.conversation.vault_id ? (
+              <span className="fineprint">{working ? "working…" : statusLabel(current.conversation)}</span>
+              {current.conversation.vault_id ? (
                 <span className="private" title={`Cloning with the token in ${vaultName(current.ref)}`}>
                   private · token attached
                 </span>
@@ -603,7 +633,7 @@ export function App() {
                 <AttachToken disabled={busy || working} connected={ghAuth} onAttach={(t) => void attachToken(current, t)} />
               )}
               {view.report && (
-                <button className="linkish" disabled={!canDrive} onClick={() => agentId && void drive(agentId, AUDIT_PROMPT)}>
+                <button className="linkish" disabled={!canDrive} onClick={() => agentId && void drive(agentId, vaultId, AUDIT_PROMPT)}>
                   re-audit
                 </button>
               )}
@@ -625,7 +655,7 @@ export function App() {
               {auditFailed && (
                 <div className="status-card failed">
                   <p>{lastProse(thread) || "The mender could not audit this repository."}</p>
-                  {!current.teammate.conversation.vault_id && (
+                  {!current.conversation.vault_id && (
                     <p className="hint">
                       If <code>{refLabel(current.ref)}</code> is private, that is why: this mender has no token, so it
                       cloned anonymously.{" "}
@@ -635,13 +665,13 @@ export function App() {
                     </p>
                   )}
                   <div className="status-actions">
-                    <button className="primary" disabled={!canDrive} onClick={() => agentId && void drive(agentId, AUDIT_PROMPT)}>
+                    <button className="primary" disabled={!canDrive} onClick={() => agentId && void drive(agentId, vaultId, AUDIT_PROMPT)}>
                       Retry
                     </button>
                     <button className="danger" disabled={busy} onClick={() => void retire(current)}>
                       Remove
                     </button>
-                    {!current.teammate.conversation.vault_id && (
+                    {!current.conversation.vault_id && (
                       <AttachToken
                         disabled={busy || working}
                         connected={ghAuth}
@@ -658,7 +688,7 @@ export function App() {
                   repo={current.ref}
                   onMend={
                     view.report.summary.quickWin + view.report.summary.needsReview > 0
-                      ? () => agentId && void drive(agentId, MEND_PROMPT)
+                      ? () => agentId && void drive(agentId, vaultId, MEND_PROMPT)
                       : undefined
                   }
                   mendLabel={view.plan ? "Mend again" : "Mend it"}
@@ -683,7 +713,7 @@ export function App() {
                     which is what the pull-request panel builds from.
                   </p>
                   <div className="status-actions">
-                    <button className="primary" disabled={!canDrive} onClick={() => agentId && void drive(agentId, MEND_PROMPT)}>
+                    <button className="primary" disabled={!canDrive} onClick={() => agentId && void drive(agentId, vaultId, MEND_PROMPT)}>
                       Mend again
                     </button>
                   </div>
@@ -695,9 +725,9 @@ export function App() {
                   selected={pickedFixes}
                   draft={view.draft}
                   agentBusy={busy || working}
-                  onRequestDraft={() => agentId && void drive(agentId, prDraftPrompt(pickedFixes), 1)}
+                  onRequestDraft={() => agentId && void drive(agentId, vaultId, prDraftPrompt(pickedFixes), 1)}
                   onAuthChange={setGhAuth}
-                  clonesWithOwnToken={current.teammate.conversation.vault_id !== null}
+                  clonesWithOwnToken={current.conversation.vault_id !== null}
                   appInfo={appInfo}
                 />
               )}
@@ -707,7 +737,7 @@ export function App() {
               {view.plan && !working && (
                 <div className="starters">
                   {STARTERS.map((q) => (
-                    <button key={q} className="starter" disabled={!canDrive} onClick={() => agentId && void drive(agentId, q, 1)}>
+                    <button key={q} className="starter" disabled={!canDrive} onClick={() => agentId && void drive(agentId, vaultId, q, 1)}>
                       {q}
                     </button>
                   ))}
@@ -723,7 +753,7 @@ export function App() {
                   ? "Ask for a change — “drop fix 3”, “explain the riskiest one”, “open a PR”"
                   : `Ask about the audit of ${refLabel(current.ref)}`
               }
-              onSend={(text) => agentId && void drive(agentId, text, 1)}
+              onSend={(text) => agentId && void drive(agentId, vaultId, text, 1)}
             />
           </>
         ) : (

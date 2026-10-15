@@ -40,7 +40,6 @@ import {
   describeMode,
   effectivePolicy,
   loadPanelWidth,
-  mcpCaveat,
   mcpServersOf,
   policyBites,
   policyRows,
@@ -288,7 +287,6 @@ export function DetailsPanel({ conversationId, onClose }: { conversationId: stri
             {servers.some((s) => s.envKeys.length || s.headerKeys.length) && (
               <p className="details-note">Names only: the values are credentials, and the proxy withholds them rather than putting the owner's keys in a member's browser.</p>
             )}
-            <p className="details-note">{mcpCaveat}</p>
           </Section>
 
           <EgressSection key={conversation.id} conversationId={conversation.id} lastActiveAt={conversation.last_active_at ?? conversation.updated_at} feed={stages} />

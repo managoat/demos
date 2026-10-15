@@ -6,9 +6,8 @@ zone tables stay on screen; the agent does the work.
 
 It is a static single-page app with no backend of its own — it talks only to
 the [Fountain](https://github.com/managoat/fountain) API, where the desk
-runs as a teammate (an agent in a sandbox with a Cloudflare token in a vault).
-Client patterns (OAuth, SSE, API client) follow
-[fountain-team](../fountain-team).
+runs as an agent in a sandbox with a Cloudflare token in a vault, on one
+conversation bound to the `dns-desk` channel.
 
 ## Run it
 
@@ -18,10 +17,11 @@ bun run dev        # http://localhost:5174
 ```
 
 On first load, enter your Fountain URL and **Sign in with Fountain** (OAuth
-code + PKCE; the token is an API key), or paste an API key. Then either pick a
-teammate already running the `dns-desk` agent, or let the app hire one: it
-creates the agent with the built-in operating rules and adds it to your team
-with the vault you choose.
+code + PKCE; the token is an API key), or paste an API key. Then choose the
+vault and either pick an existing `dns-desk` agent or let the app create one
+with the built-in operating rules. The first request opens the desk's
+conversation (`POST /api/conversations` with `channel_id: "dns-desk"`); later
+ones resume it, and a retired machine is replaced the same way.
 
 The vault must hold `CLOUDFLARE_API_TOKEN` (Zone → DNS → Edit). The desk
 operates every zone the token can see, so the token's zone list — not the
@@ -88,7 +88,7 @@ To work on the UI without a live Fountain, run the mock
 on a desk with a zone and a plan awaiting approval.
 
 No state outside the browser: settings in `localStorage`
-(`dns-desk.settings`), the chosen teammate per Fountain URL
+(`dns-desk.settings`), the chosen agent and vault per Fountain URL
 (`dns-desk.desk`).
 
 ## License

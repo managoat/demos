@@ -36,18 +36,11 @@ export const DEMOS: readonly Demo[] = [
       "Start a run, watch the agent work turn by turn, and drive it. Chat, timeline and raw views of the same conversation, plus the machine it shares with its siblings.",
   },
   {
-    id: "fountain-team",
-    glyph: "👥",
-    name: "Team",
-    blurb:
-      "Your agents as teammates in a messaging app. Roster on the left, thread on the right, routines on a schedule, images and search. Enter to send.",
-  },
-  {
     id: "fountain-workbench",
     glyph: "🧰",
     name: "Workbench",
     blurb:
-      "A dev workstation the team shares. A project is an environment and a vault, work items live in it, and putting a teammate on one is a first prompt rather than four steps of setup.",
+      "A dev workstation the team shares. A project is an environment and a vault, work items live in it, and putting an agent on one is a first prompt rather than four steps of setup.",
   },
   {
     id: "briefing-room",
@@ -85,25 +78,11 @@ export const DEMOS: readonly Demo[] = [
       "A DNS operator for your Cloudflare zones. Ask in plain words, read the plan as a diff, approve. The zone tables stay on screen while the agent does the work.",
   },
   {
-    id: "watchtower",
-    glyph: "🗼",
-    name: "Watchtower",
-    blurb:
-      "An SRE teammate on a cron: uptime, latency, TLS expiry and DNS for every site you name. When a tile turns red, ask it to investigate. It has real tools.",
-  },
-  {
     id: "mend",
     glyph: "🔦",
     name: "Mend",
     blurb:
       "What an audit finds across a repository's CI, manifests, Dockerfiles and cloud templates, and what an agent does once you hand it that tool. Mechanical fixes applied, judgement calls argued, one patch back.",
-  },
-  {
-    id: "rounds",
-    glyph: "🔁",
-    name: "Rounds",
-    blurb:
-      "Dependabot for infrastructure config. Enrol a repository and it gets audited on a schedule; an agent fixes what it can verify and opens the pull request. Never twice for the same finding, never again for one you closed.",
   },
   {
     id: "arena",

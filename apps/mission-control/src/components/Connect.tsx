@@ -1,12 +1,13 @@
 /**
- * Assemble the crew: reuse a teammate already running the Mission Control
- * coordinator (and the Mission Worker agent, if present), or create both
- * from the built-in specs. The coordinator joins the team; workers are
- * launched per task, one fresh computer each.
+ * Assemble the crew: reuse an existing Mission Control coordinator agent
+ * (and the Mission Worker agent, if present), or create both from the
+ * built-in specs. The coordinator runs on one conversation bound to the
+ * mission-control channel; workers are launched per task, one fresh
+ * computer each.
  */
 import { useEffect, useMemo, useState } from "react";
 import { describeError, type FountainClient } from "../api/client";
-import type { Catalog, Teammate } from "../api/types";
+import type { Agent, Catalog } from "../api/types";
 import type { Crew } from "../lib/crew";
 import {
   COORDINATOR_DESCRIPTION,
@@ -41,7 +42,7 @@ export function Connect(props: {
   onSignOut: () => void;
 }) {
   const { client } = props;
-  const [team, setTeam] = useState<Teammate[] | null>(null);
+  const [agents, setAgents] = useState<Agent[] | null>(null);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [model, setModel] = useState("");
   const [busy, setBusy] = useState(false);
@@ -49,10 +50,10 @@ export function Connect(props: {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([client.listTeam(), client.getCatalog()])
-      .then(([t, c]) => {
+    Promise.all([client.listAgents(COORDINATOR_NAME), client.getCatalog()])
+      .then(([a, c]) => {
         if (cancelled) return;
-        setTeam(t);
+        setAgents(a);
         setCatalog(c);
         const all = Object.values(c.models).flat();
         setModel((cur) => cur || (all.includes(DEFAULT_MODEL) ? DEFAULT_MODEL : all.find((m) => m.startsWith("anthropic/")) ?? all[0] ?? ""));
@@ -64,8 +65,8 @@ export function Connect(props: {
   }, [client]);
 
   const existing = useMemo(
-    () => (team ?? []).filter((t) => t.agent.name === COORDINATOR_NAME || t.name === COORDINATOR_NAME),
-    [team],
+    () => (agents ?? []).filter((a) => a.name === COORDINATOR_NAME),
+    [agents],
   );
   const models = useMemo(
     () => [...new Set(Object.values(catalog?.models ?? {}).flat())].filter((m) => acpRuntime(m, catalog?.runtimes ?? [])),
@@ -112,7 +113,6 @@ export function Connect(props: {
         runtime: runtimeFor(model, catalog.runtimes),
         system: COORDINATOR_PROMPT,
       });
-      await client.addTeammate({ agent_id: coordinator.id, name: COORDINATOR_NAME });
       props.onReady({ coordinatorId: coordinator.id, workerId });
     } catch (err) {
       setError(describeError(err));
@@ -127,17 +127,17 @@ export function Connect(props: {
           MISSION<span>CONTROL</span>
         </div>
         {error && <p className="error">{error}</p>}
-        {team === null ? (
-          <p className="fineprint">Loading your team…</p>
+        {agents === null ? (
+          <p className="fineprint">Loading your agents…</p>
         ) : (
           <>
             {existing.length > 0 && (
               <div className="connect-section">
-                <h3>Already on your team</h3>
-                {existing.map((t) => (
-                  <button key={t.agent_id} className="rowbtn" disabled={busy} onClick={() => void reuse(t.agent_id)}>
-                    <b>{t.name}</b>
-                    <span>{t.presence.label}</span>
+                <h3>Use an existing coordinator</h3>
+                {existing.map((a) => (
+                  <button key={a.id} className="rowbtn" disabled={busy} onClick={() => void reuse(a.id)}>
+                    <b>{a.name}</b>
+                    <span>{a.model}</span>
                   </button>
                 ))}
               </div>
@@ -145,7 +145,7 @@ export function Connect(props: {
             <div className="connect-section">
               <h3>{existing.length ? "Or assemble a fresh crew" : "Assemble the crew"}</h3>
               <p className="fineprint">
-                Creates a <code>{COORDINATOR_NAME}</code> coordinator on your team (it plans and synthesizes, never
+                Creates a <code>{COORDINATOR_NAME}</code> coordinator agent (it plans and synthesizes, never
                 executes) and a <code>{WORKER_NAME}</code> agent launched once per task, each on its own computer.
               </p>
               <label>

@@ -1,11 +1,11 @@
 /**
- * Pick the desk: reuse a teammate that already runs the dns-desk agent, or
- * create the agent from the built-in spec and hire it with the vault that
- * holds the Cloudflare token.
+ * Pick the desk: the vault that holds the Cloudflare token, and either an
+ * existing dns-desk agent or a new one created from the built-in spec.
  */
 import { useEffect, useMemo, useState } from "react";
 import { describeError, type FountainClient } from "../api/client";
-import type { Catalog, Teammate, Vault } from "../api/types";
+import type { Agent, Catalog, Vault } from "../api/types";
+import type { DeskRef } from "../lib/desk";
 import { AGENT_DESCRIPTION, AGENT_NAME, SYSTEM_PROMPT, TOKEN_KEY } from "../lib/spec";
 
 /**
@@ -26,11 +26,11 @@ function runtimeFor(model: string, runtimes: string[]): string {
 
 export function Connect(props: {
   client: FountainClient;
-  onReady: (agentId: string) => void;
+  onReady: (desk: DeskRef) => void;
   onSignOut: () => void;
 }) {
   const { client } = props;
-  const [team, setTeam] = useState<Teammate[] | null>(null);
+  const [agents, setAgents] = useState<Agent[] | null>(null);
   const [vaults, setVaults] = useState<Vault[]>([]);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [vaultId, setVaultId] = useState("");
@@ -40,10 +40,10 @@ export function Connect(props: {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([client.listTeam(), client.listVaults(), client.getCatalog()])
-      .then(([t, v, c]) => {
+    Promise.all([client.listAgents(), client.listVaults(), client.getCatalog()])
+      .then(([a, v, c]) => {
         if (cancelled) return;
-        setTeam(t);
+        setAgents(a);
         setVaults(v);
         setCatalog(c);
         setModel((cur) => cur || Object.values(c.models).flat().find((m) => m.startsWith("anthropic/")) || Object.values(c.models).flat()[0] || "");
@@ -54,7 +54,7 @@ export function Connect(props: {
     };
   }, [client]);
 
-  const existing = useMemo(() => (team ?? []).filter((t) => t.agent.name === AGENT_NAME || t.name === AGENT_NAME), [team]);
+  const existing = useMemo(() => (agents ?? []).filter((a) => a.name === AGENT_NAME), [agents]);
   const models = useMemo(
     () => [...new Set(Object.values(catalog?.models ?? {}).flat())].filter((m) => acpRuntime(m, catalog?.runtimes ?? [])),
     [catalog],
@@ -72,8 +72,7 @@ export function Connect(props: {
         runtime: runtimeFor(model, catalog.runtimes),
         system: SYSTEM_PROMPT,
       });
-      await client.addTeammate({ agent_id: agent.id, vault_id: vaultId });
-      props.onReady(agent.id);
+      props.onReady({ agentId: agent.id, vaultId });
     } catch (err) {
       setError(describeError(err));
       setBusy(false);
@@ -87,27 +86,14 @@ export function Connect(props: {
           DNS<span>Desk</span>
         </div>
         {error && <p className="error">{error}</p>}
-        {team === null ? (
-          <p className="fineprint">Loading your team…</p>
+        {agents === null ? (
+          <p className="fineprint">Loading your agents…</p>
         ) : (
           <>
-            {existing.length > 0 && (
-              <div className="connect-section">
-                <h3>Already on your team</h3>
-                {existing.map((t) => (
-                  <button key={t.agent_id} className="rowbtn" onClick={() => props.onReady(t.agent_id)}>
-                    <b>{t.name}</b>
-                    <span>{t.presence.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
             <div className="connect-section">
-              <h3>{existing.length ? "Or hire a fresh desk" : "Hire the desk"}</h3>
               <p className="fineprint">
-                Creates a <code>{AGENT_NAME}</code> agent with the desk's operating rules, hired with a vault that must
-                hold <code>{TOKEN_KEY}</code> — a Cloudflare token scoped to just the zones it should manage
-                (Zone → DNS → Edit).
+                The desk runs with a vault that must hold <code>{TOKEN_KEY}</code> — a Cloudflare token scoped to just
+                the zones it should manage (Zone → DNS → Edit).
               </p>
               <label>
                 Vault with the Cloudflare token
@@ -121,6 +107,23 @@ export function Connect(props: {
                 </select>
               </label>
               {vaults.length === 0 && <p className="fineprint">No vaults yet — create one in Fountain (Vaults → New) with the token, then reload.</p>}
+            </div>
+            {existing.length > 0 && (
+              <div className="connect-section">
+                <h3>Use an existing desk agent</h3>
+                {existing.map((a) => (
+                  <button key={a.id} className="rowbtn" disabled={!vaultId} onClick={() => props.onReady({ agentId: a.id, vaultId })}>
+                    <b>{a.name}</b>
+                    <span>{a.model}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="connect-section">
+              <h3>{existing.length ? "Or create a fresh desk agent" : "Create the desk agent"}</h3>
+              <p className="fineprint">
+                Creates a <code>{AGENT_NAME}</code> agent with the desk's operating rules.
+              </p>
               <label>
                 Brain
                 <select value={model} onChange={(e) => setModel(e.target.value)}>
@@ -132,7 +135,7 @@ export function Connect(props: {
                 </select>
               </label>
               <button className="primary" onClick={() => void hire()} disabled={busy || !vaultId || !model}>
-                {busy ? "Hiring…" : "Create agent & hire"}
+                {busy ? "Creating…" : "Create agent"}
               </button>
             </div>
           </>

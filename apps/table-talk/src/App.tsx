@@ -1,17 +1,18 @@
 /**
- * Table Talk: one analyst teammate, one conversation per dataset. The left
+ * Table Talk: one analyst agent, one conversation per dataset. The left
  * rail is a localStorage index of conversation ids; everything shown is
  * derived from turns + table-report blocks (lib/protocol.ts) — the
- * conversation is the analysis notebook. Streaming/reconnect follows
- * jhgaylor/dns-desk.
+ * conversation is the analysis notebook. A new dataset rotates the
+ * `table-talk` channel to a fresh conversation; follow-ups go to the
+ * dataset's own. Streaming/reconnect follows dns-desk.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, describeError, FountainClient } from "./api/client";
-import type { LogEvent, TeamEvent, Teammate, Turn } from "./api/types";
+import type { Conversation, LogEvent, StreamEvent, Turn } from "./api/types";
 import { blocksForTurn } from "./lib/acp";
-import { clearAnalystId, loadAnalystId, saveAnalystId } from "./lib/analyst";
+import { CHANNEL, clearAnalystId, loadAnalystId, presenceLabel, saveAnalystId } from "./lib/analyst";
 import type { Dataset } from "./lib/csv";
-import { forgetDataset, loadDatasets, repointDataset, saveDataset, type DatasetEntry } from "./lib/datasets";
+import { forgetDataset, loadDatasets, saveDataset, type DatasetEntry } from "./lib/datasets";
 import { fmtNum } from "./lib/format";
 import { completeLoginIfCallback, revoke } from "./lib/oauth";
 import { buildDataPrompt, hasReportFence, parseDataPrompt, parseReports, stripBlocks, type TableReport } from "./lib/protocol";
@@ -41,7 +42,8 @@ export function App() {
   const [connectError, setConnectError] = useState<string | null>(null);
 
   const [analystId, setAnalystId] = useState<string | null>(null);
-  const [teammate, setTeammate] = useState<Teammate | null>(null);
+  /** The conversation the channel is bound to now — the newest dataset's, while it is live. */
+  const [current, setCurrent] = useState<Conversation | null>(null);
   const [datasets, setDatasets] = useState<DatasetEntry[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -96,7 +98,7 @@ export function App() {
     clearSettings();
     setSettings(null);
     setAnalystId(null);
-    setTeammate(null);
+    setCurrent(null);
     setDatasets([]);
     setActiveId(null);
     setPhase("connect");
@@ -104,21 +106,22 @@ export function App() {
 
   // ── the analyst and the active conversation ───────────────────────────────
 
-  const refreshTeammate = useCallback(async () => {
+  const refreshAnalyst = useCallback(async () => {
     if (!client || !analystId) return;
     try {
-      setTeammate(await client.getTeammate(analystId));
+      await client.getAgent(analystId);
+      setCurrent(await client.findConversation(analystId, CHANNEL));
     } catch {
-      // Removed in Fountain — hire again on the next analyze.
-      setTeammate(null);
+      // Deleted in Fountain — set up again on the next analyze.
+      setCurrent(null);
       if (settings) clearAnalystId(settings.baseUrl);
       setAnalystId(null);
     }
   }, [client, analystId, settings]);
 
   useEffect(() => {
-    if (phase === "app" && analystId) void refreshTeammate();
-  }, [phase, analystId, refreshTeammate]);
+    if (phase === "app" && analystId) void refreshAnalyst();
+  }, [phase, analystId, refreshAnalyst]);
 
   const reloadThread = useCallback(async () => {
     if (!client || !activeId) return;
@@ -148,33 +151,30 @@ export function App() {
 
     const connect = () => {
       if (stopped) return;
-      void client.streamTeam({
+      void client.streamEvents({
         lastEventId,
         streams: STREAMS,
         signal: ctrl.signal,
         onOpen: () => {
           setConnected(true);
           backoff = 1000;
-          void refreshTeammate();
+          void refreshAnalyst();
           void reloadThread();
         },
         onMessage: (msg) => {
           if (msg.id) lastEventId = msg.id;
-          if (msg.event === "team") {
-            void refreshTeammate();
+          if (msg.event === "conversations") {
+            void refreshAnalyst();
             return;
           }
-          let ev: TeamEvent;
+          let ev: StreamEvent;
           try {
-            ev = JSON.parse(msg.data) as TeamEvent;
+            ev = JSON.parse(msg.data) as StreamEvent;
           } catch {
             return;
           }
           if (msg.id) ev.id = Number(msg.id);
-          if (ev.conversation_id !== activeIdRef.current) {
-            if (ev.agent_id === analystId) void refreshTeammate();
-            return;
-          }
+          if (ev.conversation_id !== activeIdRef.current) return;
           setEvents((es) => (es.some((e) => e.id === ev.id) ? es : [...es, ev]));
           if (ev.kind === "stage" && ev.stage === "turn") {
             void client.listTurns(ev.conversation_id).then(setTurns).catch(() => undefined);
@@ -194,11 +194,11 @@ export function App() {
       stopped = true;
       ctrl.abort();
     };
-  }, [client, phase, analystId, refreshTeammate, reloadThread]);
+  }, [client, phase, analystId, refreshAnalyst, reloadThread]);
 
   // ── derived: the thread of the active dataset ─────────────────────────────
 
-  const runtime = teammate?.conversation.runtime ?? "claude";
+  const runtime = current?.runtime ?? "claude";
   const thread: Entry[] = useMemo(() => {
     const sorted = [...turns].sort((a, b) => a.turn_number - b.turn_number);
     const byTurn = new Map<string, LogEvent[]>();
@@ -223,7 +223,7 @@ export function App() {
   }, [turns, events, runtime]);
 
   const working = thread.some((t) => t.turn.ended_at === null && t.turn.status !== "failed");
-  const live = activeId !== null && teammate?.conversation.id === activeId;
+  const live = activeId !== null && current?.id === activeId;
   const activeEntry = datasets.find((d) => d.conversationId === activeId) ?? null;
 
   // ── hiring and sending, with a patient retry while the computer starts ────
@@ -250,23 +250,18 @@ export function App() {
   const ensureAnalyst = useCallback(async (): Promise<string> => {
     if (!client || !settings) throw new Error("Not connected.");
     if (analystId) return analystId;
-    const team = await client.listTeam();
-    let agentId = team.find((t) => t.agent.name === AGENT_NAME)?.agent_id ?? null;
-    if (!agentId) {
-      setStatus("Hiring your analyst…");
-      const existing = (await client.findAgents(AGENT_NAME)).find((a) => a.name === AGENT_NAME);
-      const agent = existing
-        ? await client.updateAgent(existing.id, { description: AGENT_DESCRIPTION, system: SYSTEM_PROMPT })
-        : await client.createAgent({
-            name: AGENT_NAME,
-            description: AGENT_DESCRIPTION,
-            model: AGENT_MODEL,
-            runtime: AGENT_RUNTIME,
-            system: SYSTEM_PROMPT,
-          });
-      await client.addTeammate({ agent_id: agent.id });
-      agentId = agent.id;
-    }
+    setStatus("Setting up your analyst…");
+    const existing = (await client.findAgents(AGENT_NAME)).find((a) => a.name === AGENT_NAME);
+    const agent = existing
+      ? await client.updateAgent(existing.id, { description: AGENT_DESCRIPTION, system: SYSTEM_PROMPT })
+      : await client.createAgent({
+          name: AGENT_NAME,
+          description: AGENT_DESCRIPTION,
+          model: AGENT_MODEL,
+          runtime: AGENT_RUNTIME,
+          system: SYSTEM_PROMPT,
+        });
+    const agentId = agent.id;
     saveAnalystId(settings.baseUrl, agentId);
     setAnalystId(agentId);
     return agentId;
@@ -279,27 +274,27 @@ export function App() {
       setStatus(null);
       try {
         const agentId = await ensureAnalyst();
-        const tm = await client.getTeammate(agentId);
-        // Each dataset gets its own conversation: rotate to a fresh thread
-        // unless the current one is still unused (a just-hired analyst).
-        if (tm.conversation.turn_count > 0 || datasets.some((d) => d.conversationId === tm.conversation.id)) {
-          await withStartupRetry(() => client.startFreshThread(agentId));
-        }
+        // Each dataset gets its own conversation: rotate the channel to a
+        // fresh one, with the data as its first turn.
         setStatus("Sending the data…");
-        const res = await withStartupRetry(() =>
-          client.sendMessage(agentId, buildDataPrompt(dataset.filename, dataset.csvText, dataset.notice)),
+        const conv = await withStartupRetry(() =>
+          client.startFresh({
+            agent_id: agentId,
+            channel_id: CHANNEL,
+            prompt: buildDataPrompt(dataset.filename, dataset.csvText, dataset.notice),
+          }),
         );
+        setCurrent(conv);
         setDatasets(
           saveDataset(settings.baseUrl, {
-            conversationId: res.conversation_id,
+            conversationId: conv.id,
             filename: dataset.filename,
             rows: dataset.rows.length,
             cols: dataset.headers.length,
             createdAt: new Date().toISOString(),
           }),
         );
-        setActiveId(res.conversation_id);
-        void refreshTeammate();
+        setActiveId(conv.id);
       } catch (err) {
         say(describeError(err));
       } finally {
@@ -307,32 +302,25 @@ export function App() {
         setStatus(null);
       }
     },
-    [client, settings, datasets, ensureAnalyst, withStartupRetry, refreshTeammate, say],
+    [client, settings, ensureAnalyst, withStartupRetry, say],
   );
 
   const send = useCallback(
     async (text: string) => {
-      if (!client || !settings || !analystId || !activeId || !text.trim()) return;
+      if (!client || !settings || !activeId || !text.trim()) return;
       setBusy(true);
       try {
-        const res = await withStartupRetry(() => client.sendMessage(analystId, text.trim()));
-        if (res.conversation_id !== activeId) {
-          // The old conversation was past resuming; the analysis continues in
-          // a replacement (the CSV may need re-dropping — the analyst will say).
-          setDatasets(repointDataset(settings.baseUrl, activeId, res.conversation_id));
-          setActiveId(res.conversation_id);
-        } else {
-          await reloadThread();
-        }
-        void refreshTeammate();
+        await withStartupRetry(() => client.prompt(activeId, text.trim()));
+        await reloadThread();
       } catch (err) {
-        say(describeError(err));
+        if (err instanceof ApiError && err.status === 410) say("This dataset's conversation has ended — drop the CSV in again to keep going.");
+        else say(describeError(err));
       } finally {
         setBusy(false);
         setStatus(null);
       }
     },
-    [client, settings, analystId, activeId, withStartupRetry, reloadThread, refreshTeammate, say],
+    [client, settings, activeId, withStartupRetry, reloadThread, say],
   );
 
   const forget = useCallback(
@@ -375,7 +363,7 @@ export function App() {
                 <b>{d.filename}</b>
                 <span>
                   {fmtNum(d.rows)} × {fmtNum(d.cols)}
-                  {teammate?.conversation.id === d.conversationId ? " · live" : ""}
+                  {current?.id === d.conversationId ? " · live" : ""}
                 </span>
               </button>
               <button className="railx" title="Forget this dataset" onClick={() => forget(d.conversationId)}>
@@ -388,7 +376,7 @@ export function App() {
         <div className="rail-foot">
           <div className="head-status">
             <span className={connected ? "dot on" : "dot"} title={connected ? "live" : analystId ? "reconnecting" : "no analyst yet"} />
-            <span className="fineprint">{working ? "analyzing…" : teammate?.presence.label ?? "no analyst yet"}</span>
+            <span className="fineprint">{working ? "analyzing…" : analystId ? presenceLabel(current) : "no analyst yet"}</span>
           </div>
           <button className="linkish" onClick={signOut}>
             sign out

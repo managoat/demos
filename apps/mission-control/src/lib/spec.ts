@@ -1,5 +1,5 @@
 /**
- * The two agents Mission Control hires: the coordinator (a teammate that
+ * The two agents Mission Control hires: the coordinator (an agent that
  * plans and synthesizes, never executes) and the worker (one fresh sandbox
  * per task). The prompts are the other half of `protocol.ts` — change one,
  * change both.

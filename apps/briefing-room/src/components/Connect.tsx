@@ -1,11 +1,11 @@
 /**
- * Pick the researcher: reuse a teammate that already runs the briefing-room
- * agent, or create the agent from the built-in spec and hire it. No vault —
+ * Pick the researcher: an existing briefing-room agent, or a new one created
+ * from the built-in spec. No vault —
  * the researcher reads the open web and holds no credentials.
  */
 import { useEffect, useMemo, useState } from "react";
 import { describeError, type FountainClient } from "../api/client";
-import type { Catalog, Teammate } from "../api/types";
+import type { Agent, Catalog } from "../api/types";
 import { AGENT_DESCRIPTION, AGENT_NAME, SYSTEM_PROMPT } from "../lib/spec";
 
 /**
@@ -30,7 +30,7 @@ export function Connect(props: {
   onSignOut: () => void;
 }) {
   const { client } = props;
-  const [team, setTeam] = useState<Teammate[] | null>(null);
+  const [agents, setAgents] = useState<Agent[] | null>(null);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [model, setModel] = useState("");
   const [busy, setBusy] = useState(false);
@@ -38,10 +38,10 @@ export function Connect(props: {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([client.listTeam(), client.getCatalog()])
-      .then(([t, c]) => {
+    Promise.all([client.listAgents(), client.getCatalog()])
+      .then(([a, c]) => {
         if (cancelled) return;
-        setTeam(t);
+        setAgents(a);
         setCatalog(c);
         setModel((cur) => cur || Object.values(c.models).flat().find((m) => m.startsWith("anthropic/")) || Object.values(c.models).flat()[0] || "");
       })
@@ -51,7 +51,7 @@ export function Connect(props: {
     };
   }, [client]);
 
-  const existing = useMemo(() => (team ?? []).filter((t) => t.agent.name === AGENT_NAME || t.name === AGENT_NAME || t.name === "Briefing Room"), [team]);
+  const existing = useMemo(() => (agents ?? []).filter((a) => a.name === AGENT_NAME), [agents]);
   const models = useMemo(
     () => [...new Set(Object.values(catalog?.models ?? {}).flat())].filter((m) => acpRuntime(m, catalog?.runtimes ?? [])),
     [catalog],
@@ -69,7 +69,6 @@ export function Connect(props: {
         runtime: runtimeFor(model, catalog.runtimes),
         system: SYSTEM_PROMPT,
       });
-      await client.addTeammate({ agent_id: agent.id, name: "Briefing Room" });
       props.onReady(agent.id);
     } catch (err) {
       setError(describeError(err));
@@ -84,25 +83,25 @@ export function Connect(props: {
           Briefing <span>Room</span>
         </div>
         {error && <p className="error">{error}</p>}
-        {team === null ? (
-          <p className="fineprint">Loading your team…</p>
+        {agents === null ? (
+          <p className="fineprint">Loading your agents…</p>
         ) : (
           <>
             {existing.length > 0 && (
               <div className="connect-section">
-                <h3>Already on your team</h3>
-                {existing.map((t) => (
-                  <button key={t.agent_id} className="rowbtn" onClick={() => props.onReady(t.agent_id)}>
-                    <b>{t.name}</b>
-                    <span>{t.presence.label}</span>
+                <h3>Use an existing researcher agent</h3>
+                {existing.map((a) => (
+                  <button key={a.id} className="rowbtn" onClick={() => props.onReady(a.id)}>
+                    <b>{a.name}</b>
+                    <span>{a.model}</span>
                   </button>
                 ))}
               </div>
             )}
             <div className="connect-section">
-              <h3>{existing.length ? "Or hire a fresh researcher" : "Hire the researcher"}</h3>
+              <h3>{existing.length ? "Or create a fresh researcher agent" : "Create the researcher agent"}</h3>
               <p className="fineprint">
-                Creates a <code>{AGENT_NAME}</code> agent with the room's operating rules and adds it to your team.
+                Creates a <code>{AGENT_NAME}</code> agent with the room's operating rules.
                 It gets its own computer with internet access; it holds no credentials of yours.
               </p>
               <label>
@@ -116,7 +115,7 @@ export function Connect(props: {
                 </select>
               </label>
               <button className="primary" onClick={() => void hire()} disabled={busy || !model}>
-                {busy ? "Hiring…" : "Create agent & hire"}
+                {busy ? "Creating…" : "Create agent"}
               </button>
             </div>
           </>

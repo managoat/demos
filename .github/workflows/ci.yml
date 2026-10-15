@@ -2,7 +2,7 @@
 # that changed.
 #
 # This is the check the split repositories could not run: a change to
-# packages/fountain-app is compiled against all fourteen consumers here,
+# packages/fountain-app is compiled against every consumer here,
 # rather than against whichever repository happened to get the patch first.
 # The whole sweep is about a minute, so there is nothing to save by narrowing
 # it.
