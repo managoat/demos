@@ -137,7 +137,7 @@ function Shell({ onSettings, onSignOut }: { onSettings: () => void; onSignOut: (
         {drawer && <div className="drawer-backdrop" onClick={() => setDrawer(false)} />}
         <main className="main">
           {route.page === "index" && <IndexPage />}
-          {route.page === "new" && <NewPage key={route.sandboxId ?? ""} parentId={route.parentId} sandboxId={route.sandboxId} />}
+          {route.page === "new" && <NewPage parentId={route.parentId} />}
           {route.page === "show" && <ShowPage key={route.id} id={route.id} />}
           {route.page === "logs" && <LogsPage key={route.id} id={route.id} />}
           {route.page === "sandbox" && <SandboxPage key={route.id} id={route.id} />}

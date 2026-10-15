@@ -13,14 +13,6 @@ import { channelFor, conversationTitle } from "../../shared/channel";
 import type { ImageInput } from "../../shared/images";
 import type { ItemDto as WorkItem } from "./api";
 
-/** A computer to start on instead of a new one (ADR 0023): the same teammate's, on the same item. */
-export interface JoinTarget {
-  sandboxId: string;
-  label: string;
-  /** The agent the computer belongs to; a home is never shared across identities. */
-  agentId: string;
-}
-
 export interface StartInput {
   item: WorkItem;
   agent: { id: string; name: string };
@@ -30,7 +22,6 @@ export interface StartInput {
   includeNotes: boolean;
   /** Screenshots to attach to that first prompt. */
   images?: ImageInput[];
-  join?: JoinTarget | null;
 }
 
 /** What the browser POSTs to `/f/<project>/api/conversations`; the server decides the rest. */
@@ -47,7 +38,6 @@ export function startBody(projectId: string, input: StartInput): ConversationInp
   // the conversation only brings the computer up and there is no turn to
   // attach them to.
   if (prompt && input.images?.length) body.images = input.images;
-  if (input.join) body.sandbox_id = input.join.sandboxId;
   return body;
 }
 

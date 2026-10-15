@@ -143,12 +143,6 @@ export class FountainClient {
 
   // ── sandboxes ───────────────────────────────────────────────────────────
 
-  /** Every machine the caller has provisioned, newest first, with the conversations on each. */
-  async listSandboxes(statuses?: string[]): Promise<SandboxDetail[]> {
-    const qs = statuses?.length ? `?status=${encodeURIComponent(statuses.join(","))}` : "";
-    return (await this.json<{ data: SandboxDetail[] }>("GET", `/api/sandboxes${qs}`)).data;
-  }
-
   async getSandbox(id: string): Promise<SandboxDetail> {
     return (await this.json<{ data: SandboxDetail }>("GET", `/api/sandboxes/${id}`)).data;
   }
@@ -355,14 +349,6 @@ export function describeError(err: unknown): string {
         return "Vault not found.";
       case "sandbox_not_found":
         return "That machine does not exist (or is not yours).";
-      case "sandbox_not_attachable":
-        return "That machine cannot take a conversation right now — it is still starting, or it is gone.";
-      case "sandbox_identity_mismatch":
-        return "That machine was built for a different agent, environment or vault.";
-      case "sandbox_runtime_mismatch":
-        return "The agent's runtime changed since that machine was built — start on a fresh one.";
-      case "sandbox_at_capacity":
-        return "That machine is busy with another conversation's turn — wait for it to finish.";
       case "not_found":
         return "Not found.";
       default:

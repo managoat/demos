@@ -51,10 +51,6 @@ describe("startBody", () => {
     expect(body).not.toHaveProperty("images");
     expect(body).not.toHaveProperty("prompt");
   });
-  test("joining a computer names it; the server checks it is the same teammate's, on this item", () => {
-    const body = startBody("p1", { item, agent, prompt: "go", includeNotes: false, join: { sandboxId: "sb1", label: "sprite-sb1", agentId: "a1" } });
-    expect(body.sandbox_id).toBe("sb1");
-  });
 });
 
 describe("splitAsk", () => {
