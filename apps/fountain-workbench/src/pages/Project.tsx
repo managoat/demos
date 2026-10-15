@@ -215,7 +215,7 @@ export function Project({ view: named }: { view: ProjectView | null }) {
             }}
             disabled={team.length === 0}
           >
-            <option value="">{team.length === 0 ? `No agents on ${project.ownerEmail}'s Fountain` : "Nobody yet"}</option>
+            <option value="">{team.length === 0 ? `No agents on ${project.ownerEmail}'s Managoat` : "Nobody yet"}</option>
             {team.map((a) => {
               const fit = agentFits(a, project);
               return (

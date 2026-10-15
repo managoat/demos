@@ -98,14 +98,14 @@ export function BrokeringPanel({ dto, error, bindingsUrl }: { dto: BrokeringDto 
         </p>
       )}
       {(!dto.environment && dto.vault) || (dto.environment && !dto.vault) ? (
-        <p className="muted small">{dto.environment ? "The vault" : "The environment"} is unset, or gone from Fountain; only the other's secrets are listed.</p>
+        <p className="muted small">{dto.environment ? "The vault" : "The environment"} is unset, or gone from Managoat; only the other's secrets are listed.</p>
       ) : null}
       <details className="subcard">
         <summary>
           Every binding on your account <span className="count">{dto.bindings.length}</span>
         </summary>
         {dto.bindings.length === 0 ? (
-          <p className="muted small">None yet. GitHub tokens are brokered to GitHub even so — Fountain's catalog default.</p>
+          <p className="muted small">None yet. GitHub tokens are brokered to GitHub even so — Managoat's catalog default.</p>
         ) : (
           <ul className="secret-list">
             {dto.bindings.map((b) => (
@@ -120,7 +120,7 @@ export function BrokeringPanel({ dto, error, bindingsUrl }: { dto: BrokeringDto 
         )}
         <p className="small">
           <a href={bindingsUrl} target="_blank" rel="noreferrer">
-            Edit bindings on Fountain ↗
+            Edit bindings on Managoat ↗
           </a>
         </p>
       </details>

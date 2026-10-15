@@ -167,7 +167,7 @@ function ComputerChanges({ comp, loaded, snaps, tick }: { comp: Computer; loaded
         )}
       </div>
       <div className="stack tight pad">
-        {!ready && <p className="muted small">Fountain reads a running computer only; this one is {status}. {snaps.length > 0 ? "Below is the last state its hook reported." : ""}</p>}
+        {!ready && <p className="muted small">Managoat reads a running computer only; this one is {status}. {snaps.length > 0 ? "Below is the last state its hook reported." : ""}</p>}
         {repos.length === 0 && ready && <p className="muted small">No checkout reported yet, and nothing under {WORK_DIR}. The hook posts on the agent's first edit.</p>}
         {repos.map((repo) => (
           <RepoChanges key={repo} sandboxId={sandboxId} ready={ready} repo={repo} snap={latest(snaps, repo)} tick={tick} />
@@ -185,9 +185,9 @@ function latest(snaps: SnapshotDto[], repo: string): SnapshotDto | null {
 export function diskError(err: unknown, repo: string): string {
   switch (errorCode(err)) {
     case "sandbox_not_ready":
-      return "The computer is parked. Fountain does not wake one to read it; the next prompt will.";
+      return "The computer is parked. Managoat does not wake one to read it; the next prompt will.";
     case "path_outside_sandbox":
-      return `Fountain reads under ${READABLE_ROOT} only, and this checkout is at ${repo}. Mount it under ${WORK_DIR} in the environment.`;
+      return `Managoat reads under ${READABLE_ROOT} only, and this checkout is at ${repo}. Mount it under ${WORK_DIR} in the environment.`;
     case "not_a_repository":
       return `${repo} is not a git repository.`;
     case "path_not_found":
@@ -262,7 +262,7 @@ function RepoChanges({ sandboxId, ready, repo, snap, tick }: { sandboxId: string
       {untracked.map((u) => (
         <UntrackedFile key={u.path} sandboxId={sandboxId} ready={ready} path={`${repo}/${u.path}`} name={u.path} />
       ))}
-      {diff?.truncated && <p className="muted small">Fountain cut the diff at its limit; the rest is on the machine.</p>}
+      {diff?.truncated && <p className="muted small">Managoat cut the diff at its limit; the rest is on the machine.</p>}
       {diff && files.length === 0 && untracked.length === 0 && listed.length === 0 && <p className="muted small">Clean: nothing differs from HEAD.</p>}
     </div>
   );
@@ -367,7 +367,7 @@ function UntrackedFile({ sandboxId, ready, path, name }: { sandboxId: string; re
                 <tr className="meta">
                   <td className="no" />
                   <td className="no" />
-                  <td>… cut at Fountain's limit</td>
+                  <td>… cut at Managoat's limit</td>
                 </tr>
               )}
             </tbody>

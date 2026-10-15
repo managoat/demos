@@ -145,7 +145,7 @@ export function brokerFailure(reason: string): string {
     case "backend_lacks_network_policy":
       return "this computer's provider cannot pin egress to the broker, so a brokered conversation will not run on it";
     case "broker_unreachable":
-      return "the broker did not answer, and Fountain will not start a sandbox with credentials in the clear instead";
+      return "the broker did not answer, and Managoat will not start a sandbox with credentials in the clear instead";
     default:
       return reason;
   }

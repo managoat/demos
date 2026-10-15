@@ -17,9 +17,9 @@ export function describeError(err: unknown): string {
       case "vault_not_allowed":
         return "That agent does not allow the chosen vault.";
       case "unauthorized":
-        return "Your session has ended, or the project owner's Fountain key no longer works. Sign in again.";
+        return "Your session has ended, or the project owner's Managoat key no longer works. Sign in again.";
       case "rate_limited":
-        return "Slow down — Fountain rate-limited that request.";
+        return "Slow down — Managoat rate-limited that request.";
       case "broker_unavailable":
         return "The egress broker did not answer, so its log cannot be read right now.";
       case "brokerage_not_enabled":

@@ -73,7 +73,7 @@ describe("a permission request that is over", () => {
   });
 
   test("the timeout and the turn ending each say what happened", () => {
-    expect(render(ask({ outcome: "timeout" }))).toContain("Fountain refused it");
+    expect(render(ask({ outcome: "timeout" }))).toContain("Managoat refused it");
     expect(render(ask({ outcome: "turn_ended" }))).toContain("The turn ended before anyone answered");
   });
 

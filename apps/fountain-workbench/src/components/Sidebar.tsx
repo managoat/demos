@@ -185,7 +185,7 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
             <button
               type="button"
               className="icon small-icon"
-              title={`Take ${computerLabel(comp)} out of "${item.title}". It is already down; its conversations stay on Fountain, and the work item puts it back.`}
+              title={`Take ${computerLabel(comp)} out of "${item.title}". It is already down; its conversations stay on Managoat, and the work item puts it back.`}
               aria-label={`Remove ${computerLabel(comp)} from ${item.title}`}
               onClick={(e) => {
                 e.preventDefault();
@@ -298,7 +298,7 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
         <button
           type="button"
           className="icon small-icon"
-          title={items.length === 0 ? "Add a work item first" : agents.size === 0 ? "No agents on this Fountain" : "New conversation"}
+          title={items.length === 0 ? "Add a work item first" : agents.size === 0 ? "No agents on this Managoat" : "New conversation"}
           onClick={() => setDialog({ agentId: null, itemId: currentItem })}
           disabled={agents.size === 0 || items.length === 0}
         >

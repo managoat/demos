@@ -105,7 +105,7 @@ export function StartDialog({ itemId, initialAgentId, onClose }: { itemId?: stri
         <label>
           Teammate <span className="hint">Whoever you pick joins the work item when the conversation starts.</span>
           <select value={agentId} onChange={(e) => setAgentId(e.target.value)} required>
-            {all.length === 0 && <option value="">No agents on this Fountain</option>}
+            {all.length === 0 && <option value="">No agents on this Managoat</option>}
             {onItem.length > 0 && <optgroup label="On this work item">{onItem.map(option)}</optgroup>}
             {others.length > 0 && <optgroup label={onItem.length ? "Rest of the team" : "Team"}>{others.map(option)}</optgroup>}
           </select>

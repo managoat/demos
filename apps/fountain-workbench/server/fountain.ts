@@ -134,7 +134,7 @@ export class FountainHttpError extends Error {
     readonly status: number,
     readonly body: string,
   ) {
-    super(`Fountain answered ${status}`);
+    super(`Managoat answered ${status}`);
   }
 }
 

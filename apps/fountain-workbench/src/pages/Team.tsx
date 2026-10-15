@@ -19,7 +19,7 @@ export function Team() {
         <div>
           <h1>Team</h1>
           <div className="muted small">
-            {isOwner ? "Your" : `${project.ownerEmail}'s`} agents on Fountain. Pull one onto a work item to talk to it there; the project supplies the environment and vault.
+            {isOwner ? "Your" : `${project.ownerEmail}'s`} agents on Managoat. Pull one onto a work item to talk to it there; the project supplies the environment and vault.
           </div>
         </div>
         {isOwner && (
@@ -33,7 +33,7 @@ export function Team() {
       {resourcesLoaded && team.length === 0 && (
         <div className="empty card">
           <p className="strong">No agents yet.</p>
-          <p className="muted">{isOwner ? "Create one in the Fountain console; it shows up here." : `${project.ownerEmail} has not created any agents on Fountain yet.`}</p>
+          <p className="muted">{isOwner ? "Create one with the Managoat CLI, the API or the Conversations app; it shows up here." : `${project.ownerEmail} has not created any agents on Managoat yet.`}</p>
         </div>
       )}
 

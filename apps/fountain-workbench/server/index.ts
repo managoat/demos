@@ -17,4 +17,4 @@ const server = Bun.serve({
   fetch: app,
 });
 
-console.log(`workbench: listening on http://localhost:${server.port} · Fountain ${config.fountainUrl} · data ${config.dbPath}${config.staticDir ? ` · serving ${config.staticDir}` : ""}`);
+console.log(`workbench: listening on http://localhost:${server.port} · Managoat ${config.fountainUrl} · data ${config.dbPath}${config.staticDir ? ` · serving ${config.staticDir}` : ""}`);

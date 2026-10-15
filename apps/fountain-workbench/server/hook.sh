@@ -11,7 +11,7 @@
 #   /home/sprite/.claude/settings.local.json     runs it on Claude Code's Stop and PostToolUse
 #
 # The snapshot is *state*, not bytes: branch, head, upstream, ahead/behind and
-# porcelain status. The diff itself is read by the workbench through Fountain
+# porcelain status. The diff itself is read by the workbench through Managoat
 # (`GET /api/sandboxes/:id/diff`, ADR 0039), which redacts the sandbox's
 # secrets on the way out; a hook posting raw diffs would not. What the hook
 # adds is what that read cannot tell: which branch, how far ahead, which

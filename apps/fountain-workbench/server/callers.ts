@@ -63,7 +63,7 @@ export async function authenticate(ctx: AppContext, req: Request): Promise<Calle
   const header = req.headers.get("authorization") ?? "";
   const key = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
   if (!key) {
-    throw new HttpError(401, "unauthenticated", "Send a Fountain API key as `Authorization: Bearer …`; inside a sandbox that is $FOUNTAIN_TOKEN.");
+    throw new HttpError(401, "unauthenticated", "Send a Managoat API key as `Authorization: Bearer …`; inside a sandbox that is $FOUNTAIN_TOKEN.");
   }
   const email = await whose(ctx, key);
   const user = ctx.db.getUser(email);
@@ -89,11 +89,11 @@ async function whose(ctx: AppContext, key: string): Promise<string> {
   try {
     who = await new FountainClient(ctx.config.fountainUrl, key).me();
   } catch (err) {
-    if (err instanceof FountainHttpError && (err.status === 401 || err.status === 403)) throw new HttpError(401, "bad_key", "Fountain rejected that key.");
+    if (err instanceof FountainHttpError && (err.status === 401 || err.status === 403)) throw new HttpError(401, "bad_key", "Managoat rejected that key.");
     throw new HttpError(502, "fountain_unreachable", `Could not reach ${ctx.config.fountainUrl} to verify the key.`);
   }
   const email = who.email.trim().toLowerCase();
-  if (!email) throw new HttpError(502, "no_email", "Fountain did not say who the key belongs to.");
+  if (!email) throw new HttpError(502, "no_email", "Managoat did not say who the key belongs to.");
   verified.set(hash, { email, at: Date.now() });
   return email;
 }
@@ -107,7 +107,7 @@ async function pin(ctx: AppContext, user: UserRow, key: string, req: Request): P
   const id = req.headers.get(CONVERSATION_HEADER)?.trim();
   if (!id) return null;
   const conv = await new FountainClient(ctx.config.fountainUrl, key).conversation(id);
-  if (!conv) throw new HttpError(404, "no_conversation", `Fountain has no conversation ${id} for this key.`);
+  if (!conv) throw new HttpError(404, "no_conversation", `Managoat has no conversation ${id} for this key.`);
   const ref = parseChannel(conv.channel_id);
   if (!ref) {
     throw new HttpError(404, "not_a_workbench_conversation", "That conversation is not on a workbench work item, so there is no project to be in. Drop the header to reach your projects by name.");

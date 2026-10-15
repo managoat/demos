@@ -38,7 +38,7 @@ export function App() {
           saveSettings(s);
           setSettings(s);
         } catch {
-          setOauthError("Signed in, but that Fountain could not be reached.");
+          setOauthError("Signed in, but that Managoat server could not be reached.");
         }
       })
       .catch((err) => setOauthError(err instanceof Error ? err.message : String(err)))
@@ -102,7 +102,8 @@ function Shell({ onSettings, onSignOut }: { onSettings: () => void; onSignOut: (
           ☰
         </button>
         <a href={paths.index} className="brand">
-          ⛲ Fountain
+          <img src={`${import.meta.env.BASE_URL}managoat.png`} alt="" className="brand-mark" />
+          Managoat
         </a>
         <a href={paths.index} className={`navlink ${convPage ? "on" : ""}`}>
           Conversations
@@ -119,7 +120,7 @@ function Shell({ onSettings, onSignOut }: { onSettings: () => void; onSignOut: (
         <span className={`link-dot ${connected ? "on" : "off"}`} title={connected ? "Live" : "Reconnecting…"} />
         <span className="muted small host">{client.baseUrl.replace(/^https?:\/\//, "")}</span>
         <span className="spacer" />
-        <a href={`${client.baseUrl}/help`} className="navlink small" target="_blank" rel="noreferrer noopener" title="Fountain help">
+        <a href={`${client.baseUrl}/docs`} className="navlink small" target="_blank" rel="noreferrer noopener" title="Managoat help">
           Help
         </a>
         <button type="button" className="icon" onClick={cycleTheme} title={`Theme: ${theme} (click to change)`} aria-label={`Theme: ${theme}`}>

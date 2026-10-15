@@ -113,7 +113,7 @@ export function createOAuth(clientId: string): OAuthClient {
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify({ grant_type: "authorization_code", code, code_verifier: verifier, client_id: clientId, redirect_uri: redirectUri() }),
       });
-      if (!res.ok) throw new Error("Fountain rejected the sign-in. Try again.");
+      if (!res.ok) throw new Error("Managoat rejected the sign-in. Try again.");
       const body = (await res.json()) as { access_token: string };
       return { baseUrl, apiKey: body.access_token, hash: hash ?? "" };
     },

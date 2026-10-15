@@ -125,7 +125,7 @@ describe("the Changes view", () => {
     const m = await mount(<Changes item={item} computers={[computer({ status: "suspended" })]} />);
     await wait(20);
     const html = m.container.innerHTML;
-    expect(html).toContain("Fountain reads a running computer only");
+    expect(html).toContain("Managoat reads a running computer only");
     expect(html).toContain("suspended");
     expect(html).toContain("wb/fix-foo");
     // The status still lists what moved, since there is no diff to show it.
@@ -141,7 +141,7 @@ describe("the Changes view", () => {
     diffAnswer = () => Promise.reject(new FountainError("path_outside_sandbox", { status: 422, code: "path_outside_sandbox" }));
     const m = await mount(<Changes item={item} computers={[computer({})]} />);
     await wait(20);
-    expect(m.container.innerHTML).toContain("Fountain reads under /home/sprite only, and this checkout is at /workspace/thing");
+    expect(m.container.innerHTML).toContain("Managoat reads under /home/sprite only, and this checkout is at /workspace/thing");
     diffAnswer = () => Promise.resolve({ diff: DIFF, path: "/home/sprite/work/thing", ref: null, repo_root: "/home/sprite/work/thing", staged: false, truncated: false });
     await m.unmount();
   });

@@ -186,7 +186,7 @@ export function AgentFormPage({ id }: { id: string | "new" }) {
           </Field>
           <Field
             label="Model"
-            hint={unknownModel ? "Not one of the models Fountain lists — it will be passed to the runtime as-is." : "provider/model, e.g. anthropic/claude-sonnet-4-6"}
+            hint={unknownModel ? "Not one of the models Managoat lists — it will be passed to the runtime as-is." : "provider/model, e.g. anthropic/claude-sonnet-4-6"}
           >
             <input list="model-suggestions" value={model} onChange={(e) => setModel(e.target.value)} required pattern="^[a-z0-9_-]+/[a-z0-9._-]+$" className="mono" />
             <datalist id="model-suggestions">
