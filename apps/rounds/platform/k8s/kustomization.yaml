@@ -12,7 +12,7 @@ images:
   - name: ghcr.io/managoat/rounds
     # Pinned by .github/workflows/build.yml on every build of this app. `unpinned` is a placeholder
     # that does not exist: the app does not run until CI has replaced it.
-    newTag: sha-bf5d1e7deeb51ef045c73bcfc2994e9a250116fb
+    newTag: sha-1ff2287351855c9d00541e705c7b32b6cd8d5d82
 patches:
   # What app.yaml can't say: plain settings, and more memory than the platform's default.
   - patch: |-
