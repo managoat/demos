@@ -239,20 +239,11 @@ export function skillsCaveat(sandboxStatus: string | null | undefined): string |
 // ── the computer, and the conversation ───────────────────────────────────
 
 /**
- * How a computer is shared, in the workbench's own terms. `ephemeral` is one
- * conversation's machine, reclaimed with it; `persistent` is the agent
- * identity's home, which every conversation of that identity lands on —
- * across work items, and across conversations started outside the workbench
- * entirely. The second is worth saying on the page, because the sidebar's
- * item → computer → conversation tree quietly assumes the first.
+ * How a computer is shared, in the workbench's own terms. Every conversation
+ * gets a machine of its own (`ephemeral`), reclaimed with it.
  */
 export function describeMode(mode: string | null | undefined): { label: string; note: string | null } {
-  if (mode === "persistent")
-    return {
-      label: "persistent",
-      note: "The teammate's own machine, shared by every conversation on this environment and vault — including ones on other work items.",
-    };
-  if (mode === "ephemeral") return { label: "ephemeral", note: "This conversation's own machine, reclaimed when the last conversation on it ends." };
+  if (mode === "ephemeral") return { label: "ephemeral", note: "This conversation's own machine, reclaimed when the conversation ends." };
   return { label: mode ?? "—", note: null };
 }
 

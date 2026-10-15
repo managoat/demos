@@ -1,6 +1,6 @@
 /**
- * One machine: what it is, the conversations on it, and a way to open
- * another one there (`sandbox_id` on POST /api/conversations).
+ * One machine: what it is and the conversation it runs. Every conversation
+ * gets a sandbox of its own, reclaimed with it.
  */
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
@@ -9,8 +9,6 @@ import { describeError } from "../api/client";
 import type { SandboxDetail } from "../api/types";
 import { conversationLabel, formatTime, shortId } from "../lib/format";
 import { StatusPill } from "../components/StatusPill";
-
-const ATTACHABLE = new Set(["ready", "suspended"]);
 
 export function SandboxPage({ id }: { id: string }) {
   const { client, agents, conversations } = useStore();
@@ -59,7 +57,6 @@ export function SandboxPage({ id }: { id: string }) {
   }
 
   const agent = sandbox.agent_id ? agents.get(sandbox.agent_id) ?? null : null;
-  const attachable = ATTACHABLE.has(sandbox.status);
   const busy = sandbox.conversations.filter((c) => c.mid_turn).length;
 
   return (
@@ -73,17 +70,7 @@ export function SandboxPage({ id }: { id: string }) {
             <span className="mono">{sandbox.sprite_name}</span>
           </h1>
           <span className={`pill ${sandbox.status}`}>{sandbox.status}</span>
-          {sandbox.mode === "persistent" && <span className="home-badge static">⌂ home</span>}
         </div>
-        <a
-          href={paths.new({ sandbox: sandbox.id })}
-          className={`button small ${attachable ? "" : "disabled"}`}
-          aria-disabled={!attachable}
-          onClick={(e) => !attachable && e.preventDefault()}
-          title={attachable ? "Open another conversation on this machine's disk" : "Only a ready or suspended machine takes a new conversation"}
-        >
-          New conversation here
-        </a>
       </header>
 
       {error && <div className="error">{error}</div>}
@@ -93,11 +80,7 @@ export function SandboxPage({ id }: { id: string }) {
           <dt>Mode</dt>
           <dd>
             {sandbox.mode ?? "—"}
-            <span className="hint">
-              {sandbox.mode === "persistent"
-                ? "The agent identity's home: every conversation of this agent, environment and vault lands here and shares the disk. It is kept when a conversation ends."
-                : "One conversation's machine, reclaimed with it."}
-            </span>
+            <span className="hint">One conversation's machine, reclaimed with it.</span>
           </dd>
           <dt>Provider</dt>
           <dd>

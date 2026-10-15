@@ -2,13 +2,11 @@
  * The sidebar's model: the project's work items, each with its computers —
  * one per sandbox, the active team members on that item — each with the
  * conversations on it, live ones first. A computer belongs to the work
- * item it was started for (the server enforces it on a join), so the tree
- * is item → computer → conversation. Pure functions; the component is
+ * item it was started for, so the tree is item → computer → conversation. Pure functions; the component is
  * components/Sidebar.tsx.
  *
  * A computer is live while a conversation still holds it (pending, running
- * or idle); the sandbox record, when we have it, has the last word. Fountain
- * attaches a second conversation only to a `ready` or `suspended` sandbox.
+ * or idle); the sandbox record, when we have it, has the last word.
  *
  * **The tree does not reorder itself.** It once sorted every level by
  * `last_active_at`, which Fountain moves on every line of runtime output —
@@ -27,7 +25,6 @@ import { computerKey } from "../../shared/computers";
 import { isClosed, type ClosedStatus } from "../../shared/status";
 
 export const LIVE_STATUSES = new Set<Conversation["status"]>(["pending", "running", "idle"]);
-export const ATTACHABLE = new Set<string>(["ready", "suspended"]);
 
 export interface Computer {
   /** The sandbox id, or `conv:<id>` for a conversation that never got one (shared/computers.ts). */
@@ -110,11 +107,6 @@ export function isLive(c: Pick<Computer, "sandboxId" | "sandbox" | "conversation
   if (!c.sandboxId) return c.conversations.some((x) => x.status === "pending" || x.status === "running");
   if (c.sandbox && (c.sandbox.status === "terminated" || c.sandbox.status === "failed")) return false;
   return c.conversations.some((x) => LIVE_STATUSES.has(x.status));
-}
-
-/** Whether "+ Here" can work right now: the record says ready or suspended. */
-export function attachable(c: Pick<Computer, "sandbox">): boolean {
-  return !!c.sandbox && ATTACHABLE.has(c.sandbox.status);
 }
 
 /** The work item a conversation belongs to, off its channel. */

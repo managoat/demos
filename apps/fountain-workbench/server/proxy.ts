@@ -10,7 +10,7 @@
  *                                           computers their work items have removed (server/projects.ts)
  *   POST /api/conversations                 start one; channel must name an item of this project and is
  *                                           re-minted per conversation; environment and vault are the project's;
- *                                           a sandbox_id must be a computer of that same item, same teammate
+ *                                           every conversation gets a computer of its own (no sandbox_id)
  *   *    /api/conversations/:id/…           get, turns, events, prompts (images checked against
  *                                           Fountain's rules), read, interrupt, terminate, requests,
  *                                           tree, stream, a turn's image bytes, egress (the broker's
@@ -384,24 +384,6 @@ async function startConversation(ctx: AppContext, { project, client }: Scope, re
   }
   if (project.environment_id) out.environment_id = project.environment_id;
   if (project.vault_id) out.vault_id = project.vault_id;
-  if (typeof body.sandbox_id === "string" && body.sandbox_id) {
-    // Joining a computer: it must be one of this project's conversations' — same agent, same project.
-    const convs = await client.conversations({ roots_only: "false" });
-    for (const c of convs) remember(c);
-    const host = convs.find((c) => c.sandbox_id === body.sandbox_id && parseChannel(c.channel_id)?.projectId === project.id);
-    if (!host) throw new HttpError(404, "not_found", "That computer is not one of this project's.");
-    if (host.agent_id !== body.agent_id) throw new HttpError(422, "agent_mismatch", "A computer is shared only by conversations of the same teammate.");
-    // A computer belongs to the work item it was started for: the checkout and
-    // the disk are that item's context. Fountain would share it by identity
-    // alone; the workbench does not.
-    if (parseChannel(host.channel_id)?.itemId !== item.id) throw new HttpError(422, "item_mismatch", "That computer belongs to another work item.");
-    // Removed from the item, so not one of its computers any more. Nothing in
-    // the app offers this, but the route is the boundary, not the button.
-    if (removedSet(ctx, project.id).has(removedKey(item.id, body.sandbox_id))) {
-      throw new HttpError(422, "computer_removed", "That computer was removed from this work item. Put it back first, or start a new one.");
-    }
-    out.sandbox_id = body.sandbox_id;
-  }
 
   const res = await client.fetch("/api/conversations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(out) });
   const text = await res.text();

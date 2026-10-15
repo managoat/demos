@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Conversation, SandboxRecord } from "../types";
-import { attachable, clampWidth, coarseTime, computerLabel, computersOf, groupByItem, hueOf, itemIdOf, matchesFilter, relativeTime, shelve, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, stateOf, threadLabel } from "./sidebar";
+import { clampWidth, coarseTime, computerLabel, computersOf, groupByItem, hueOf, itemIdOf, matchesFilter, relativeTime, shelve, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, stateOf, threadLabel } from "./sidebar";
 
 function conv(over: Partial<Conversation>): Conversation {
   return { id: "c", status: "idle", runtime: "claude", inserted_at: "2026-08-24T00:00:00Z", ...over } as Conversation;
@@ -64,7 +64,7 @@ describe("computersOf", () => {
     }
   });
 
-  test("the sandbox record overrides: a terminated sandbox is not live, a ready one is attachable", () => {
+  test("the sandbox record overrides: a terminated sandbox is not live", () => {
     const sandboxes = new Map<string, SandboxRecord>([
       ["sb1", { id: "sb1", status: "terminated", sprite_name: "fountain-50e06232-abc", conversations: [] } as unknown as SandboxRecord],
       ["sb2", { id: "sb2", status: "ready", sprite_name: "fountain-50e06232-def", conversations: [] } as unknown as SandboxRecord],
@@ -77,8 +77,6 @@ describe("computersOf", () => {
     const by = new Map(cs.map((c) => [c.key, c]));
     expect(by.get("sb1")!.live).toBe(false);
     expect(by.get("sb2")!.live).toBe(true);
-    expect(attachable(by.get("sb2")!)).toBe(true);
-    expect(attachable(by.get("sb3")!)).toBe(false);
     expect(computerLabel(by.get("sb2")!)).toBe("def");
     expect(computerLabel({ sandbox: null, sandboxId: "0123456789ab" })).toBe("01234567");
   });

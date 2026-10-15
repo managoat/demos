@@ -77,10 +77,9 @@ describe("the explorer", () => {
     expect(html).toContain("kai proposes: won&#x27;t do");
   });
 
-  test("a dead computer's row is where it is taken out of the item; a live one's slot is the +", async () => {
+  test("a dead computer's row is where it is taken out of the item; a live one's is not", async () => {
     // The clutter is felt here, so the control is here. Only on a dead one:
-    // it takes the slot "+" has on a live computer, and there is nothing
-    // running for it to interrupt.
+    // there is nothing running for it to interrupt.
     window.location.hash = "#/p/p1/c/a1c";
     const gone = await mount(<Sidebar open onNavigate={() => {}} />);
     expect(gone.container.innerHTML).toContain("Remove sb2 from A proposal waiting on you");
@@ -94,9 +93,9 @@ describe("the explorer", () => {
 
     window.location.hash = "#/p/p1/c/h1";
     const live = await mount(<Sidebar open onNavigate={() => {}} />);
-    // sb1 is up: its slot offers another conversation, not a removal.
+    // sb1 is up: nothing to remove, and no second conversation to open on it.
     expect(live.container.innerHTML).not.toContain("Remove sb1");
-    expect(live.container.innerHTML).toContain("Another conversation with kai");
+    expect(live.container.innerHTML).not.toContain("Another conversation with kai");
     await live.unmount();
     window.location.hash = "";
   });

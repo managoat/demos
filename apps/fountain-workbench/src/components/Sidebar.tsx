@@ -2,11 +2,9 @@
  * The project's work, beside every page: each work item with its computers
  * — one collapsible per sandbox: the teammate on it, the machine's name and
  * state, the conversations on it inside. A computer belongs to the item it
- * was started for; "+" on a live one opens another conversation with the
- * same teammate there, on that item, and "×" on a dead one takes it out of
- * the item for good — the same slot, for the opposite reason. Items with a live computer first,
- * closed items — done, won't do and on ice alike — folded away, each still saying
- * which of the two it was.
+ * was started for, and "×" on a dead one takes it out of the item for good.
+ * Items with a live computer first, closed items — done, won't do and on ice
+ * alike — folded away, each still saying which of the two it was.
  *
  * The items sit on shelves by state — waiting on you, working, up, to do,
  * closed — each a fold with a count, so the work that needs you is at the
@@ -29,9 +27,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useProject } from "../store";
 import { href, navigate, useRoute } from "../router";
-import { attachable, clampWidth, CLOSED_GLYPH, coarseTime, computerLabel, groupByItem, hueOf, loadFolds, loadSidebarWidth, matchesFilter, saveFolds, saveSidebarWidth, shelve, stateOf, STATE_GLYPH, STATE_LABEL, threadLabel, type Computer, type ItemGroup, type ItemState } from "../lib/sidebar";
+import { clampWidth, CLOSED_GLYPH, coarseTime, computerLabel, groupByItem, hueOf, loadFolds, loadSidebarWidth, matchesFilter, saveFolds, saveSidebarWidth, shelve, stateOf, STATE_GLYPH, STATE_LABEL, threadLabel, type Computer, type ItemGroup, type ItemState } from "../lib/sidebar";
 import { defaultTeammate, isClosed, proposerName, statusLabel, type WorkItem } from "../lib/workbench";
-import { itemAsPrompt, splitAsk, type JoinTarget } from "../lib/start";
+import { itemAsPrompt, splitAsk } from "../lib/start";
 import { describeError } from "../lib/errors";
 import { ItemStatusPill } from "./ItemStatus";
 import { StartDialog } from "./StartDialog";
@@ -40,7 +38,7 @@ import type { Conversation } from "../types";
 export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }) {
   const { project, items, conversations, agents, sandboxes, createItem, startConversation, removeComputers, toast } = useProject();
   const route = useRoute();
-  const [dialog, setDialog] = useState<{ join: JoinTarget | null; agentId: string | null; itemId: string | null } | null>(null);
+  const [dialog, setDialog] = useState<{ agentId: string | null; itemId: string | null } | null>(null);
   const [folds, setFolds] = useState<Set<ItemState>>(() => loadFolds());
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -154,8 +152,6 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
 
   const computer = (item: WorkItem, comp: Computer) => {
     const agent = comp.agentId ? agents.get(comp.agentId) ?? null : null;
-    const canJoin = comp.live && !!comp.sandboxId && !!agent;
-    const joinable = canJoin && attachable(comp);
     const newest = comp.conversations[0];
     const accent = `hsl(${hueOf(comp.sandboxId ?? comp.key)} 60% 55%)`;
     // Collapse hides the conversation you are in; the row it is under says so.
@@ -177,28 +173,12 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
             {comp.busy ? <span className="live-dot" /> : null}
             {comp.sandbox?.status ?? (comp.live ? "up" : "gone")}
           </span>
-          {canJoin && (
-            <button
-              type="button"
-              className="icon small-icon"
-              disabled={!joinable}
-              title={joinable ? `Another conversation with ${agent!.name} on this computer, on "${item.title}"` : comp.sandbox ? `The computer is ${comp.sandbox.status}; a second conversation attaches once it is ready` : "Checking the computer…"}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setDialog({ join: { sandboxId: comp.sandboxId!, label: computerLabel(comp), agentId: agent!.id }, agentId: agent!.id, itemId: item.id });
-              }}
-            >
-              +
-            </button>
-          )}
           {/*
             A dead computer's row is where the clutter is actually felt, so
-            this is where it goes. Only a dead one: it takes the slot the "+"
-            has on a live computer, which is the same slot for the opposite
-            reason, and it never has anything to interrupt. That is also why
-            it does not ask first the way the work item's does — nothing is
-            running, nothing is deleted, and the toast says where it went.
+            this is where it goes. Only a dead one: it never has anything to
+            interrupt. That is also why it does not ask first the way the work
+            item's does — nothing is running, nothing is deleted, and the
+            toast says where it went.
             `preventDefault` on the way out keeps the summary from folding.
           */}
           {!comp.live && (
@@ -279,7 +259,7 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
             disabled={agents.size === 0}
             onClick={() => {
               setExpanded(g.item.id);
-              setDialog({ join: null, agentId: null, itemId: g.item.id });
+              setDialog({ agentId: null, itemId: g.item.id });
             }}
           >
             +
@@ -319,7 +299,7 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
           type="button"
           className="icon small-icon"
           title={items.length === 0 ? "Add a work item first" : agents.size === 0 ? "No agents on this Fountain" : "New conversation"}
-          onClick={() => setDialog({ join: null, agentId: null, itemId: currentItem })}
+          onClick={() => setDialog({ agentId: null, itemId: currentItem })}
           disabled={agents.size === 0 || items.length === 0}
         >
           +
@@ -404,7 +384,7 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
           shelves.map((sh) => shelf(sh.state, sh.groups))
         )}
       </div>
-      {dialog && <StartDialog itemId={dialog.itemId} join={dialog.join} initialAgentId={dialog.agentId} onClose={() => setDialog(null)} />}
+      {dialog && <StartDialog itemId={dialog.itemId} initialAgentId={dialog.agentId} onClose={() => setDialog(null)} />}
       <div className="sidebar-resize" onPointerDown={startResize} role="separator" aria-orientation="vertical" aria-label="Resize the explorer" />
     </aside>
   );

@@ -146,8 +146,7 @@ describe("skills", () => {
 });
 
 describe("the computer", () => {
-  test("persistent is called out, because the tree assumes it is not", () => {
-    expect(describeMode("persistent").note).toContain("other work items");
+  test("the mode is described in the workbench's terms", () => {
     expect(describeMode("ephemeral").note).toContain("reclaimed");
     expect(describeMode(null)).toEqual({ label: "—", note: null });
   });
