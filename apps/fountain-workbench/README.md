@@ -129,24 +129,15 @@ things move only when you move them. The row at the top of the tree starts a
 work item where you read them: type a title, press Enter, and it is in the
 list — the composer stays open for the next one, and the page you are on does
 not move.
-When a Fountain supports it (ADR 0023, *one sandbox, many conversations*),
-"**+**" on a computer that is already up opens a second conversation with
-the same teammate on the same machine, on the same item: shared checkout and
-disk, separate transcript. (Fountain itself would share the machine by
-identity alone; the item rule is the workbench's, enforced by its server.) Against an older
-Fountain the button still works; the conversation starts on a new computer and
-the app says so. The sandbox identity `(owner, agent, environment, vault)`
-falls out of the tree — same project, same agent — which is what makes sharing
-a computer legal, whichever member opens the second conversation.
 
 **And what is inside the machine.** A transcript says what an agent said; it
 never said what it was *running with*. So a teammate reaches for a tool you did
 not know it had, or fails to reach one you were sure it had, and there is
 nowhere to look. **Details** — the top bar's ◨ while you are on a conversation,
 opening a panel down the right — is that place: the teammate and model behind
-the thread, the computer under it (sprite, provider, and whether it is this
-conversation's own machine or the teammate's), the skills and MCP servers
-loaded into it, and the permission policy actually in force. All of it was
+the thread, the computer under it (sprite, provider, and its sandbox mode),
+the skills and MCP servers loaded into it, and the permission policy actually
+in force. All of it was
 already on the wire and none of it was on a screen. It is the explorer's
 mirror, down to the dragged edge and the remembered width, because the tree
 says what there is and this says what one of them is made of.

@@ -9,7 +9,7 @@ with a type-only import; plain-fetch servers acquire no SDK runtime behavior.
 |---|---|
 | Mission Control | `createConversation` forwards the complete generated input |
 | Fountain Conversations | `StartInput` aliases the generated input; image media types come from it |
-| Workbench browser | `startBody` returns the generated input; work-item prompt/channel, image and join decisions remain app-owned |
+| Workbench browser | `startBody` returns the generated input; work-item prompt/channel and image decisions remain app-owned |
 | Salon server | Create and restore build generated inputs; plain fetch keeps host-key/proxy behavior |
 | Drydock | `createConversation` forwards the entire generated input; a separately named thread helper retains ephemeral/fresh provisioning and old omission policies |
 | Fountain Team | Side-thread helper derives its deliberately narrow identity/title input from the generated type; its identity and omission policy stays explicit |

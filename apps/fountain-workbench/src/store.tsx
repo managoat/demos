@@ -581,14 +581,11 @@ export function ProjectProvider({ projectId, children, fallback }: { projectId: 
   const startConversation = useCallback<ProjectStore["startConversation"]>(
     async (input) => {
       const conversation = await fountain.api.data<Conversation>("POST", "/api/conversations", { body: startBody(projectId, input) });
-      if (input.join && conversation.sandbox_id !== input.join.sandboxId) {
-        toast("This Fountain does not share a computer between conversations yet — started on a new one.", "error");
-      }
       void refresh();
       void reload(); // the server put the teammate on the item
       return conversation;
     },
-    [fountain, projectId, toast, refresh, reload],
+    [fountain, projectId, refresh, reload],
   );
 
   const value = useMemo<ProjectStore | null>(

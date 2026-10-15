@@ -16,17 +16,6 @@ export function describeError(err: unknown): string {
         return "The sandbox is still coming up — try again in a moment.";
       case "sandbox_not_found":
         return "That computer is gone.";
-      case "sandbox_not_attachable": {
-        // Fountain says which state it is in: "the sandbox is starting; …".
-        const m = /sandbox is (\w+)/.exec(err.message ?? "");
-        return m ? `That computer is ${m[1]} — a second conversation attaches once it is ready (or suspended).` : "That computer cannot take another conversation until it is ready.";
-      }
-      case "sandbox_identity_mismatch":
-        return "A computer is shared only by conversations of the same teammate in the same project.";
-      case "sandbox_runtime_mismatch":
-        return "That computer runs a different runtime.";
-      case "sandbox_at_capacity":
-        return "That computer is busy with another conversation's turn — try again when it finishes.";
       case "environment_not_allowed":
         return "That agent does not allow the chosen environment.";
       case "vault_not_allowed":

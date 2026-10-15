@@ -151,7 +151,7 @@ const fountain = Bun.serve({
         agent_id: (body.agent_id as string) ?? null,
         environment_id: (body.environment_id as string) ?? null,
         vault_id: (body.vault_id as string) ?? null,
-        sandbox_id: (body.sandbox_id as string) ?? "sb-new",
+        sandbox_id: "sb-new",
         status: "pending",
         inserted_at: "2026-08-23T00:00:00Z",
       };
@@ -630,18 +630,10 @@ describe("the project-scoped proxy", () => {
     expect(posted[posted.length - 1]!.body.prompt).toBe("Work item: ship bar\n\nbar is slow");
   });
 
-  test("joining a computer: only one of the project's, with the same teammate, from the same work item", async () => {
-    const otherItem = (await (await call("bob", "POST", `/api/projects/${projectId}/items`, { title: "elsewhere" })).json()).data.id;
-    const crossItem = await call("bob", "POST", `/f/${projectId}/api/conversations`, { agent_id: "a1", channel_id: `workbench:${projectId}/${otherItem}`, sandbox_id: "sb1" });
-    expect(crossItem.status).toBe(422);
-    expect((await crossItem.json()).error).toBe("item_mismatch");
-    const other = await call("bob", "POST", `/f/${projectId}/api/conversations`, { agent_id: "a1", channel_id: `workbench:${projectId}/${itemId}`, sandbox_id: "sb2" });
-    expect(other.status).toBe(404);
-    const mismatch = await call("bob", "POST", `/f/${projectId}/api/conversations`, { agent_id: "a2", channel_id: `workbench:${projectId}/${itemId}`, sandbox_id: "sb1" });
-    expect(mismatch.status).toBe(422);
-    const ok = await call("bob", "POST", `/f/${projectId}/api/conversations`, { agent_id: "a1", channel_id: `workbench:${projectId}/${itemId}`, sandbox_id: "sb1" });
-    expect(ok.status).toBe(201);
-    expect(posted[posted.length - 1]!.body.sandbox_id).toBe("sb1");
+  test("a sandbox_id is never forwarded: every conversation gets a computer of its own", async () => {
+    const res = await call("bob", "POST", `/f/${projectId}/api/conversations`, { agent_id: "a1", channel_id: `workbench:${projectId}/${itemId}`, sandbox_id: "sb1" });
+    expect(res.status).toBe(201);
+    expect(posted[posted.length - 1]!.body).not.toHaveProperty("sandbox_id");
   });
 
   test("prompts are forwarded with their body", async () => {
@@ -737,7 +729,7 @@ describe("the project-scoped proxy", () => {
   });
 
   test("a computer is the project's if a conversation of the project is on it", async () => {
-    // sb1 hosts c1 (ours) — and, after the join above, a second conversation of ours.
+    // sb1 hosts c1 (ours).
     const ok = await call("bob", "GET", `/f/${projectId}/api/sandboxes/sb1`);
     expect(ok.status).toBe(200);
     const rec = (await ok.json()).data;
@@ -1317,12 +1309,6 @@ describe("removing a computer from a work item", () => {
     // opens has to still be searchable from inside.
     const inside = (await (await call("bob", "GET", `/f/${projectId}/api/search?q=haystack&conversation_id=r1`)).json()) as { data: FakeHit[] };
     expect(inside.data.map((h) => h.conversation_id)).toEqual(["r1"]);
-  });
-
-  test("a removed computer cannot be joined, whatever the browser sends", async () => {
-    const res = await call("bob", "POST", `/f/${projectId}/api/conversations`, { agent_id: "a1", channel_id: `workbench:${projectId}/${itemA}`, sandbox_id: "sbR" });
-    expect(res.status).toBe(422);
-    expect((await res.json()).error).toBe("computer_removed");
   });
 
   test("a computer that never got a sandbox goes by the key the tree gave it", async () => {

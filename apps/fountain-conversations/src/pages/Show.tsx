@@ -2,14 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 import { useStore } from "../store";
 import { navigate, paths } from "../router";
 import { describeError, THREAD_STREAMS } from "../api/client";
-import type { Conversation, ImageInput, LogEvent, SandboxDetail, TreeNode, Turn, UserEvent } from "../api/types";
+import type { Conversation, ImageInput, LogEvent, TreeNode, Turn, UserEvent } from "../api/types";
 import { arrange, isSection, timeline, type Section } from "../lib/blocks";
 import { childMode, defaultOpen, eventVisible, formatDurationMs, hiddenInPretty, sectionDuration, stageExtra, stageIcon } from "../lib/stages";
 import { loadPrefs, savePrefs, type ViewMode } from "../lib/prefs";
 import { conversationLabel, formatClock, formatTime, shortId } from "../lib/format";
 import { BlockView } from "../components/Blocks";
 import { StatusPill } from "../components/StatusPill";
-import { HomeBadge } from "../components/HomeBadge";
 import { ImagePicker } from "../components/ImagePicker";
 import { renderMarkdown } from "../lib/markdown";
 import { TurnImages } from "../components/TurnImages";
@@ -79,25 +78,6 @@ export function ShowPage({ id }: { id: string }) {
       if (ev.kind === "stage") client.getConversation(id).then(setConv).catch(() => undefined);
     });
   }, [subscribe, client, id]);
-
-  // The home badge's hover list: the machine's other conversations. Only a
-  // persistent sandbox has any; re-read when the list changes.
-  const homeId = current?.sandbox?.mode === "persistent" ? current.sandbox.id : null;
-  const [home, setHome] = useState<SandboxDetail | null>(null);
-  useEffect(() => {
-    if (!homeId) {
-      setHome(null);
-      return;
-    }
-    let cancelled = false;
-    client
-      .getSandbox(homeId)
-      .then((s) => !cancelled && setHome(s))
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [client, homeId, conversations]);
 
   useEffect(() => {
     if (!showTree) return;
@@ -218,9 +198,6 @@ export function ShowPage({ id }: { id: string }) {
                 </a>
                 {current.sandbox.provider ? ` (${current.sandbox.provider})` : ""} · {current.sandbox.status}
               </span>
-            )}
-            {current?.sandbox?.mode === "persistent" && (
-              <HomeBadge sandbox={current.sandbox} currentId={current.id} siblings={home?.conversations ?? null} />
             )}
             {runner && (
               <span title={runner.path ?? undefined}>

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 export type Route =
   | { page: "index" }
-  | { page: "new"; parentId?: string; sandboxId?: string }
+  | { page: "new"; parentId?: string }
   | { page: "show"; id: string }
   | { page: "logs"; id: string }
   | { page: "sandbox"; id: string }
@@ -24,9 +24,7 @@ export function parseRoute(hash: string): Route {
     const q = new URLSearchParams(m[1] ?? "");
     const route: Route = { page: "new" };
     const parent = q.get("parent");
-    const sandbox = q.get("sandbox");
     if (parent && UUID.test(parent)) route.parentId = parent;
-    if (sandbox && UUID.test(sandbox)) route.sandboxId = sandbox;
     return route;
   }
   if ((m = /^\/sandboxes\/([0-9a-f-]{36})$/.exec(h))) return { page: "sandbox", id: m[1]! };
@@ -55,11 +53,10 @@ export function navigate(hash: string): void {
 
 export const paths = {
   index: "#/",
-  /** `parent` opens a sub-conversation; `sandbox` opens one on a machine you already have. */
-  new: (opts: { parent?: string; sandbox?: string } = {}) => {
+  /** `parent` opens a sub-conversation. */
+  new: (opts: { parent?: string } = {}) => {
     const q = new URLSearchParams();
     if (opts.parent) q.set("parent", opts.parent);
-    if (opts.sandbox) q.set("sandbox", opts.sandbox);
     const qs = q.toString();
     return qs ? `#/new?${qs}` : "#/new";
   },

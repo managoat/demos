@@ -3,20 +3,18 @@
  * pick a teammate (an agent), write the first prompt. Starting is also what
  * puts the teammate on the item, so this dialog is the whole of assigning
  * one. The project supplies the environment and vault (the server enforces
- * that whatever this sends). Optionally join a computer another conversation
- * of the same agent already has (`sandbox_id`, ADR 0023).
+ * that whatever this sends). Every conversation gets a computer of its own.
  */
 import { useState, type FormEvent } from "react";
 import { useProject } from "../store";
 import type { Agent } from "../types";
 import { agentFits, defaultTeammate, type WorkItem } from "../lib/workbench";
-import { buildPrompt, type JoinTarget } from "../lib/start";
+import { buildPrompt } from "../lib/start";
 import { describeError } from "../lib/errors";
 import { href, navigate } from "../router";
-import { AgentAvatar } from "./AgentAvatar";
 import { AttachmentStrip, useAttachments } from "./Attachments";
 
-export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?: string | null; join?: JoinTarget | null; initialAgentId?: string | null; onClose: () => void }) {
+export function StartDialog({ itemId, initialAgentId, onClose }: { itemId?: string | null; initialAgentId?: string | null; onClose: () => void }) {
   const { project, items, agents, environments, vaults, startConversation } = useProject();
   const open = items.filter((w) => w.status === "open");
   const fixed = itemId ? items.find((w) => w.id === itemId) ?? null : null;
@@ -25,9 +23,9 @@ export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?
   const all = [...agents.values()].sort((a, b) => a.name.localeCompare(b.name));
   const onItem = item ? all.filter((a) => item.agentIds.includes(a.id)) : [];
   const others = item ? all.filter((a) => !item.agentIds.includes(a.id)) : all;
-  // Who this is about: the computer's teammate, or the one the caller named,
-  // or someone already on the item, or the project's default — then anybody.
-  const [agentId, setAgentId] = useState<string>(join?.agentId ?? initialAgentId ?? onItem[0]?.id ?? defaultTeammate(project, agents)?.id ?? all[0]?.id ?? "");
+  // Who this is about: the one the caller named, or someone already on the
+  // item, or the project's default — then anybody.
+  const [agentId, setAgentId] = useState<string>(initialAgentId ?? onItem[0]?.id ?? defaultTeammate(project, agents)?.id ?? all[0]?.id ?? "");
   const [prompt, setPrompt] = useState("");
   const [includeNotes, setIncludeNotes] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -47,7 +45,7 @@ export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?
     setBusy(true);
     setError(null);
     try {
-      const conversation = await startConversation({ item, agent, prompt, includeNotes, images: attachments.payload, join });
+      const conversation = await startConversation({ item, agent, prompt, includeNotes, images: attachments.payload });
       navigate(href.conversation(project.id, conversation.id));
       onClose();
     } catch (err) {
@@ -69,11 +67,9 @@ export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <form className={`modal${attachments.dragging ? " dropping" : ""}`} onClick={(e) => e.stopPropagation()} onSubmit={submit} {...attachments.dropzone}>
-        <h2 className="h2">{join ? `New conversation on ${join.label}` : "Start a conversation"}</h2>
+        <h2 className="h2">Start a conversation</h2>
         <p className="muted small">
-          {join
-            ? "Same teammate, same computer: the checkout and everything on disk are shared, the transcript is its own."
-            : `The conversation is bound to a work item and runs with ${project.name}'s environment and vault, on ${project.ownerEmail}'s account.`}
+          The conversation is bound to a work item and runs with {project.name}'s environment and vault, on {project.ownerEmail}'s account.
         </p>
 
         {fixed ? (
@@ -106,24 +102,14 @@ export function StartDialog({ itemId, join, initialAgentId, onClose }: { itemId?
           </label>
         )}
 
-        {join ? (
-          <div className="field">
-            <span className="field-label">Teammate</span>
-            <div className="row">
-              {agent && <AgentAvatar agent={agent} size={24} />}
-              <span className="strong">{agent?.name ?? "?"}</span>
-            </div>
-          </div>
-        ) : (
-          <label>
-            Teammate <span className="hint">Whoever you pick joins the work item when the conversation starts.</span>
-            <select value={agentId} onChange={(e) => setAgentId(e.target.value)} required>
-              {all.length === 0 && <option value="">No agents on this Fountain</option>}
-              {onItem.length > 0 && <optgroup label="On this work item">{onItem.map(option)}</optgroup>}
-              {others.length > 0 && <optgroup label={onItem.length ? "Rest of the team" : "Team"}>{others.map(option)}</optgroup>}
-            </select>
-          </label>
-        )}
+        <label>
+          Teammate <span className="hint">Whoever you pick joins the work item when the conversation starts.</span>
+          <select value={agentId} onChange={(e) => setAgentId(e.target.value)} required>
+            {all.length === 0 && <option value="">No agents on this Fountain</option>}
+            {onItem.length > 0 && <optgroup label="On this work item">{onItem.map(option)}</optgroup>}
+            {others.length > 0 && <optgroup label={onItem.length ? "Rest of the team" : "Team"}>{others.map(option)}</optgroup>}
+          </select>
+        </label>
         {agent && (
           <div className="muted small">
             {agent.runtime} · {agent.model} · env {envName} · vault {vaultName}
