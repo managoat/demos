@@ -162,10 +162,6 @@ export function describeError(err: unknown): string {
         return "That contender is still answering the last prompt.";
       case "provisioning":
         return "The contender's computer is still starting — hold on.";
-      case "subscription_required":
-        return "An active Fountain subscription is required.";
-      case "sandbox_quota_exceeded":
-        return "Sandbox quota reached — fewer contenders, or retire some conversations in Fountain.";
       case "not_found":
         return "Not found.";
       default:

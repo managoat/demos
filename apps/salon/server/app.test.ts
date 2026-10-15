@@ -38,19 +38,6 @@ const KEYS: Record<string, { id: string; email: string }> = {
   ftn_sprite: { id: "u-host", email: "host@example.com" },
 };
 
-/** Accounts the egress broker is on for: connections exist there. Shaped from one real call (server/connectors.test.ts). */
-const CONNECTIONS: Record<string, Record<string, unknown>[]> = {
-  ftn_host: [
-    { id: "c-google", provider: "google", provider_id: null, account_email: "host@example.com", status: "active", scopes: [], env_key: "GOOGLE_ACCESS_TOKEN" },
-    { id: "c-linear", provider: "mcp-linear-app", provider_id: "p-linear", account_email: "mcp-linear-app", status: "active", scopes: [], env_key: "MCP_LINEAR_APP_ACCESS_TOKEN" },
-    { id: "c-slack", provider: "slack", provider_id: null, account_email: "hosty", status: "active", scopes: [], env_key: "SLACK_ACCESS_TOKEN" },
-  ],
-};
-const PROVIDERS = [
-  { id: "google", slug: "google", name: "Google (Gmail, Calendar)", kind: "oauth2", platform: true, mcp_url: null },
-  { id: "slack", slug: "slack", name: "Slack", kind: "oauth2", platform: true, mcp_url: null },
-  { id: "p-linear", slug: "mcp-linear-app", name: "mcp-linear-app", kind: "mcp", platform: false, mcp_url: "https://mcp.linear.app/mcp" },
-];
 const OLD_KEY = derivedKey({ ...DEFAULT_SETTINGS });
 const GITHUB_PRIVATE_KEY = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 
@@ -137,16 +124,10 @@ beforeAll(() => {
       if (p === "/api/catalog")
         return json({
           data: {
-            runtimes: ["claude", "codex", "gemini", "opencode"],
-            models: { claude: ["anthropic/claude-opus-5", "anthropic/claude-sonnet-5"], codex: ["openai/gpt-5.5"], gemini: ["google/gemini-3.7-flash"], opencode: ["anthropic/claude-opus-5", "openai/gpt-5.5"] },
-            mcp_servers: [{ name: "Linear", url: "https://mcp.linear.app/mcp", slug: "linear", dcr: true, verified_on: "2026-09-01" }],
+            runtimes: ["claude", "codex", "gemini"],
+            models: { claude: ["anthropic/claude-opus-5", "anthropic/claude-sonnet-5"], codex: ["openai/gpt-5.5"], gemini: ["google/gemini-3.7-flash"] },
           },
         });
-      // Connections exist only for a brokered account; elsewhere the routes are a 404 with this code.
-      if (p === "/api/connections" || p === "/api/connection-providers") {
-        if (!CONNECTIONS[key]) return json({ error: "connections_not_enabled" }, 404);
-        return json({ data: p === "/api/connections" ? CONNECTIONS[key] : PROVIDERS });
-      }
       // Environments, shaped from the docs' tour and one real create (2026-09-02): `{data: {id, name, repositories, packages, setup_script}}`.
       if (p === "/api/environments" && req.method === "POST") {
         const body = (await req.json()) as Record<string, unknown>;
@@ -201,7 +182,7 @@ beforeAll(() => {
       }
       if (p === "/api/conversations" && req.method === "POST") {
         const body = (await req.json()) as Record<string, unknown>;
-        if (body.agent_id === "a-broke") return json({ error: "insufficient_credits", message: "no credit", upgrade_url: "x" }, 402);
+        if (body.agent_id === "a-broke") return json({ error: "fleet_full", message: "no room" }, 503);
         const id = `c-${crypto.randomUUID().slice(0, 8)}`;
         // A conversation names the machine it runs on; the fake's is ready from the start, with an empty disk until a test fills it.
         state.sandboxes.set(`sb-${id}`, { key, status: "ready", disk: {}, diffs: {}, refs: [] });
@@ -321,7 +302,7 @@ async function signIn(key: string): Promise<string> {
   return cookie;
 }
 
-const SETTINGS = { model: "anthropic/claude-opus-5", skills: [], connectorIds: [] };
+const SETTINGS = { model: "anthropic/claude-opus-5", skills: [] };
 
 async function startChat(cookie: string, settings: Record<string, unknown> = SETTINGS, prompt = "hello room"): Promise<Record<string, any>> {
   const res = await call("POST", "/api/chats", { cookie, body: { prompt, settings } });
@@ -353,27 +334,15 @@ describe("sign-in", () => {
 });
 
 describe("menu", () => {
-  test("a brokered host sees every provider's models and their connections, never their agents", async () => {
+  test("a host sees every provider's models, never their agents", async () => {
     const cookie = await signIn("ftn_host");
     const res = await call("GET", "/api/me/menu", { cookie });
     expect(res.status).toBe(200);
     const { data } = (await res.json()) as { data: Record<string, any> };
     expect(data.models).toEqual(["anthropic/claude-opus-5", "anthropic/claude-sonnet-5", "openai/gpt-5.5", "google/gemini-3.7-flash"]);
-    expect(data.connectors.enabled).toBe(true);
-    expect(data.connectors.connectUrl).toBe(`${fakeUrl}/account/connections`);
-    expect(data.connectors.items).toEqual([
-      { id: "c-google", label: "Gmail", account: "host@example.com", usable: true, why: null },
-      { id: "c-linear", label: "Linear", account: null, usable: true, why: null },
-      { id: "c-slack", label: "Slack", account: "hosty", usable: false, why: "Not usable in a Salon chat yet" },
-    ]);
+    expect(data).not.toHaveProperty("connectors");
     expect(data).not.toHaveProperty("agents");
     expect(JSON.stringify(data)).not.toContain("secret");
-  });
-  test("an account without the broker gets an empty, disabled connectors list", async () => {
-    const cookie = await signIn("ftn_guest");
-    const { data } = (await (await call("GET", "/api/me/menu", { cookie })).json()) as { data: Record<string, any> };
-    expect(data.connectors).toMatchObject({ enabled: false, items: [] });
-    expect(data.models.length).toBeGreaterThan(0);
   });
 });
 
@@ -384,7 +353,7 @@ describe("starting a chat", () => {
     expect(state.agentPosts).toHaveLength(0);
     expect(chat.agentId).toBe("a-old");
     expect(chat.role).toBe("owner");
-    expect(chat.settings).toEqual({ model: "anthropic/claude-opus-5", skills: [], connectors: [] });
+    expect(chat.settings).toEqual({ model: "anthropic/claude-opus-5", skills: [] });
     const conv = state.conversations.get("ftn_host")![0]!;
     expect(conv.request).toMatchObject({ agent_id: "a-old", prompt: "hello room", channel_id: `salon:${chat.id}`, fresh: true });
     expect((conv.request as Record<string, unknown>).environment_id).toBeUndefined();
@@ -413,53 +382,34 @@ describe("starting a chat", () => {
     expect(state.agentPosts).toHaveLength(1);
   });
 
-  test("skills and connectors go on the agent — skills.sh installs and mcp_servers on the connection — and into its name and key", async () => {
+  test("skills go on the agent as skills.sh installs, and into its name and key", async () => {
     const cookie = await signIn("ftn_host");
-    const chat = await startChat(cookie, { ...SETTINGS, skills: ["xlsx", "pdf"], connectorIds: ["c-linear", "c-google"] });
+    const chat = await startChat(cookie, { ...SETTINGS, skills: ["xlsx", "pdf"] });
     expect(state.agentPosts).toHaveLength(1);
     const made = state.agentPosts[0]!.body;
-    expect(made.name).toBe("Salon · Opus 5 · gmail, linear, pdf, xlsx");
+    expect(made.name).toBe("Salon · Opus 5 · pdf, xlsx");
     expect(made.runtime).toBe("claude");
     expect(made.skills).toEqual([
       { source: "anthropics/skills", name: "pdf", ref: "53048666b05b4799081517d00e09e0a2dd688678" },
       { source: "anthropics/skills", name: "xlsx", ref: "53048666b05b4799081517d00e09e0a2dd688678" },
     ]);
-    expect(made.mcp_servers).toEqual({
-      gmail: { connection: "c-google" },
-      linear: { type: "http", url: "https://mcp.linear.app/mcp", connection: "c-linear" },
-    });
-    const key = derivedKey({ ...DEFAULT_SETTINGS, skills: ["pdf", "xlsx"], connectorIds: ["c-google", "c-linear"] });
+    expect(made.mcp_servers).toBeUndefined();
+    const key = derivedKey({ ...DEFAULT_SETTINGS, skills: ["pdf", "xlsx"] });
     expect((made.metadata as { salon: { key: string } }).salon.key).toBe(key);
-    expect(chat.settings).toEqual({
-      model: "anthropic/claude-opus-5",
-      skills: ["pdf", "xlsx"],
-      connectors: [
-        { id: "c-google", label: "Gmail" },
-        { id: "c-linear", label: "Linear" },
-      ],
-    });
+    expect(chat.settings).toEqual({ model: "anthropic/claude-opus-5", skills: ["pdf", "xlsx"] });
     // The same choices in another order are the same agent.
-    await startChat(cookie, { ...SETTINGS, skills: ["pdf", "xlsx"], connectorIds: ["c-google", "c-linear"] });
+    await startChat(cookie, { ...SETTINGS, skills: ["pdf", "xlsx"] });
     expect(state.agentPosts).toHaveLength(1);
     // One skill fewer is another agent.
-    await startChat(cookie, { ...SETTINGS, skills: ["pdf"], connectorIds: ["c-google", "c-linear"] });
+    await startChat(cookie, { ...SETTINGS, skills: ["pdf"] });
     expect(state.agentPosts).toHaveLength(2);
   });
 
-  test("bad settings, a stale or unusable connector and an empty prompt are refused before Fountain is asked", async () => {
+  test("bad settings and an empty prompt are refused before Fountain is asked", async () => {
     const cookie = await signIn("ftn_host");
     expect((await call("POST", "/api/chats", { cookie, body: { prompt: "x", settings: { model: "mistral/large" } } })).status).toBe(422);
     expect((await call("POST", "/api/chats", { cookie, body: { prompt: "x", settings: { ...SETTINGS, skills: ["cooking"] } } })).status).toBe(422);
     expect((await call("POST", "/api/chats", { cookie, body: { prompt: "", settings: SETTINGS } })).status).toBe(422);
-    const gone = await call("POST", "/api/chats", { cookie, body: { prompt: "x", settings: { ...SETTINGS, connectorIds: ["c-nope"] } } });
-    expect(gone.status).toBe(404);
-    expect(((await gone.json()) as { error: string }).error).toBe("connector_not_found");
-    const slack = await call("POST", "/api/chats", { cookie, body: { prompt: "x", settings: { ...SETTINGS, connectorIds: ["c-slack"] } } });
-    expect(slack.status).toBe(422);
-    expect(((await slack.json()) as { error: string }).error).toBe("connector_unusable");
-    // A guest's account has no connections at all.
-    const guest = await signIn("ftn_guest");
-    expect((await call("POST", "/api/chats", { cookie: guest, body: { prompt: "x", settings: { ...SETTINGS, connectorIds: ["c-google"] } } })).status).toBe(404);
     expect(state.conversations.size).toBe(0);
     expect(state.agentPosts).toHaveLength(0);
   });
@@ -468,8 +418,8 @@ describe("starting a chat", () => {
     const cookie = await signIn("ftn_host");
     state.agents.set("ftn_host", [{ id: "a-broke", name: "Broke", runtime: "claude", model: "anthropic/claude-opus-5", metadata: { salon: { key: OLD_KEY } } }]);
     const res = await call("POST", "/api/chats", { cookie, body: { prompt: "x", settings: SETTINGS } });
-    expect(res.status).toBe(402);
-    expect(((await res.json()) as { error: string }).error).toBe("insufficient_credits");
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { error: string }).error).toBe("fleet_full");
   });
 });
 

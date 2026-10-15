@@ -24,7 +24,7 @@ you paste in once.
   the turn's prompt and output nested under it) and *Raw* mode (the bytes as
   stored, `reattach` included); per-stream toggles for `acp` / `stdout` /
   `stderr` / `stage`; follow-up prompts with images; interrupt, terminate,
-  delete; the sandbox's provider, runner and preview URL; token usage; the
+  delete; the sandbox's provider and preview URL; token usage; the
   spawn tree drawn as a graph, with sub-conversation navigation; a link to
   the raw log.
 - **Keyboard** — `?` for the sheet, `g c` / `g l` / `g a` / `g e` / `g v` to
@@ -34,8 +34,7 @@ you paste in once.
 - **Agents** — list, search, filter by runtime; create/edit with runtime, model
   (suggestions from `GET /api/catalog`), system prompt, environment, sandbox
   provider, skills (GitHub via skills.sh or inline SKILL.md), MCP servers,
-  launch-time allowlists for environments and vaults, avatar upload or
-  generation (`POST /api/avatars/generate`).
+  launch-time allowlists for environments and vaults, avatar upload.
 - **Environments** — list; create/edit with packages, env vars, repositories,
   setup script, network policy; secrets set/deleted (write-only, encrypted at
   rest).
@@ -100,7 +99,7 @@ the server is `https://fountain-conversations.demo.managoat.com`.
 | Transcript | `GET /api/conversations/:id/turns` + `/events?blocks=true` (paged until drained) |
 | Prompt, interrupt, terminate, delete, read | `POST …/prompts`, `POST …/interrupt`, `POST …/terminate`, `DELETE`, `POST …/read` |
 | Spawn tree, images | `GET …/tree`, `GET …/turns/:turn_id/images/:position` |
-| Agents / environments / vaults | `/api/agents`, `/api/environments` (+ `/secrets`), `/api/vaults` (+ `/secrets`), `/api/agents/:id/avatar`, `GET /api/catalog`, `POST /api/avatars/generate` |
+| Agents / environments / vaults | `/api/agents`, `/api/environments` (+ `/secrets`), `/api/vaults` (+ `/secrets`), `/api/agents/:id/avatar`, `GET /api/catalog` |
 
 `EventSource` cannot send an `Authorization` header, so the stream is read
 with `fetch` (`src/lib/sse.ts`). Markdown in replies is rendered by a small

@@ -1,6 +1,6 @@
 /**
  * The two menus on the composer: the model pill on the right, and the "+"
- * on the left — photos, skills, connectors, people. The shape is the one the
+ * on the left — photos, a repository, skills, people. The shape is the one the
  * desktop chat apps taught. Nothing here asks for an agent or a computer;
  * the server derives those from these picks (server/agents.ts).
  */
@@ -58,7 +58,6 @@ export interface Extras {
 
 export function AddMenu({
   settings,
-  menu,
   menuError,
   onChange,
   extras,
@@ -68,7 +67,6 @@ export function AddMenu({
   onProjectsChanged,
 }: {
   settings: ChatSettings;
-  menu: MenuDto | null;
   menuError: string | null;
   onChange: (s: ChatSettings) => void;
   extras: Extras;
@@ -78,7 +76,7 @@ export function AddMenu({
   onProjectsChanged: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [view, setView] = useState<"root" | "skills" | "connectors" | "people" | "projects" | "new-project">("root");
+  const [view, setView] = useState<"root" | "skills" | "people" | "projects" | "new-project">("root");
   const [email, setEmail] = useState("");
   const close = useCallback(() => {
     setOpen(false);
@@ -90,12 +88,7 @@ export function AddMenu({
     const skills = settings.skills.includes(id) ? settings.skills.filter((s) => s !== id) : [...settings.skills, id].sort();
     onChange({ ...settings, skills });
   };
-  const toggleConnector = (id: string) => {
-    const connectorIds = settings.connectorIds.includes(id) ? settings.connectorIds.filter((c) => c !== id) : [...settings.connectorIds, id].sort();
-    onChange({ ...settings, connectorIds });
-  };
   const chosenSkills = skillNames(settings.skills);
-  const chosenConnectors = connectorLabels(settings.connectorIds, menu);
 
   const addEmail = () => {
     const e = email.trim().toLowerCase();
@@ -103,8 +96,6 @@ export function AddMenu({
     if (!extras.invitees.includes(e)) onExtras({ invitees: [...extras.invitees, e] });
     setEmail("");
   };
-
-  const connectors = menu?.connectors ?? null;
 
   return (
     <div className="pill-wrap">
@@ -126,12 +117,6 @@ export function AddMenu({
             <div className="menu-sep" />
             <MenuItem label="Repository" detail={project ? project.name : "Open this session in a GitHub repository"} arrow onClick={() => setView("projects")} />
             <MenuItem label="Skills" detail={chosenSkills.length ? chosenSkills.join(", ") : "PDFs, spreadsheets, slides and more"} arrow onClick={() => setView("skills")} />
-            <MenuItem
-              label="Connectors"
-              detail={chosenConnectors.length ? chosenConnectors.join(", ") : connectors && !connectors.enabled ? "Not available on your account yet" : "Gmail and other accounts you have linked"}
-              arrow
-              onClick={() => setView("connectors")}
-            />
             <div className="menu-sep" />
             <MenuItem label="People" detail={extras.invitees.length ? `${extras.invitees.length} invited` : "Invite by email; they see it when they sign in"} arrow onClick={() => setView("people")} />
             {menuError && <div className="menu-problem">{menuError}</div>}
@@ -174,36 +159,6 @@ export function AddMenu({
               <MenuItem key={s.id} toggle label={s.name} detail={s.blurb} checked={settings.skills.includes(s.id)} onClick={() => toggleSkill(s.id)} />
             ))}
             <MenuHeading>Each one teaches the chat how to work with that kind of file.</MenuHeading>
-          </>
-        )}
-        {view === "connectors" && (
-          <>
-            <MenuBack onClick={() => setView("root")} />
-            {!connectors && <MenuHeading>{menuError ?? "Loading…"}</MenuHeading>}
-            {connectors && !connectors.enabled && (
-              <MenuHeading>
-                Connectors let a chat read and send from accounts you have linked on Fountain, such as Gmail. They are not switched on for your Fountain account yet — it is a limited-access feature, so ask Fountain to enable it for you.
-              </MenuHeading>
-            )}
-            {connectors?.enabled && (
-              <>
-                {connectors.items.length === 0 && <MenuHeading>Nothing linked yet.</MenuHeading>}
-                {connectors.items.map((c) => (
-                  <MenuItem
-                    key={c.id}
-                    toggle
-                    label={c.account ? `${c.label} · ${c.account}` : c.label}
-                    detail={c.why ?? undefined}
-                    checked={settings.connectorIds.includes(c.id)}
-                    disabled={!c.usable}
-                    onClick={() => toggleConnector(c.id)}
-                  />
-                ))}
-                <div className="menu-sep" />
-                <MenuItem label="Connect another…" detail="Opens the Connections page on your Fountain" onClick={() => window.open(connectors.connectUrl, "_blank", "noopener")} />
-                {connectors.items.some((c) => c.usable) && <MenuHeading>Anyone in the chat can ask it to use what you turn on here.</MenuHeading>}
-              </>
-            )}
           </>
         )}
         {view === "people" && (
@@ -362,25 +317,12 @@ export function NewProject({ onMade }: { onMade: (p: ProjectDto) => void }) {
   );
 }
 
-/** "Gmail", "Linear" for the chosen connector ids; an id the menu no longer lists is left out. */
-function connectorLabels(ids: readonly string[], menu: MenuDto | null): string[] {
-  const items = menu?.connectors.items ?? [];
-  return ids.flatMap((id) => {
-    const c = items.find((x) => x.id === id);
-    return c ? [c.label] : [];
-  });
-}
-
 /** What the "+" has added, as chips on the composer. */
-export function Chips({ settings, menu, extras, onChange, onExtras, projects }: { settings: ChatSettings; menu: MenuDto | null; extras: Extras; onChange: (s: ChatSettings) => void; onExtras: (e: Extras) => void; projects: ProjectDto[] }) {
+export function Chips({ settings, extras, onChange, onExtras, projects }: { settings: ChatSettings; extras: Extras; onChange: (s: ChatSettings) => void; onExtras: (e: Extras) => void; projects: ProjectDto[] }) {
   const chips: { key: string; label: string; clear: () => void }[] = [];
   const project = settings.projectId ? projects.find((p) => p.id === settings.projectId) : null;
   if (project) chips.push({ key: `proj:${project.id}`, label: `⌥ ${project.name}`, clear: () => onChange({ ...settings, projectId: null }) });
   for (const s of SKILLS) if (settings.skills.includes(s.id)) chips.push({ key: `s:${s.id}`, label: s.name, clear: () => onChange({ ...settings, skills: settings.skills.filter((x) => x !== s.id) }) });
-  for (const id of settings.connectorIds) {
-    const c = menu?.connectors.items.find((x) => x.id === id);
-    chips.push({ key: `c:${id}`, label: c ? c.label : "Connector", clear: () => onChange({ ...settings, connectorIds: settings.connectorIds.filter((x) => x !== id) }) });
-  }
   for (const e of extras.invitees) chips.push({ key: `p:${e}`, label: `@ ${e}`, clear: () => onExtras({ invitees: extras.invitees.filter((x) => x !== e) }) });
   if (chips.length === 0) return null;
   return (

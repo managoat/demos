@@ -45,7 +45,7 @@ export interface ChatRow {
   model: string;
   /** JSON: skill ids (`shared/skills.ts`). */
   skills: string;
-  /** JSON: `[{id, label}]` — the connections attached, and the names the header shows. */
+  /** JSON: `[{id, label}]` — the connections attached before Fountain removed Connections. New rows write `[]`; nothing reads it. */
   connectors: string;
   preset_id: string | null;
   preset_name: string | null;

@@ -8,7 +8,7 @@ import type { Config } from "./config";
 import { ProjectEvents } from "./context";
 import { Cipher } from "./crypto";
 import { Db } from "./db";
-import { resetCostCache } from "./cost";
+import { resetCostCache, setCostClock } from "./cost";
 import { resetMcpCache } from "./mcp";
 import { itemDto, proposalFields } from "./projects";
 import { resetProxyCache } from "./proxy";
@@ -102,8 +102,6 @@ function ask(conversationId: string, id: number, requestId: string, tool: string
   rows.push({ id, stage: "request", state: "started", ts: at, data: { request_id: requestId, tool, options: [{ optionId: "o-once", kind: "allow_once" }], timeout_ms: 5 * 60 * 1000 } });
   if (closedBy) rows.push({ id: id + 1, stage: "request", state: "done", ts: at, data: { request_id: requestId, outcome: closedBy } });
 }
-/** An instance with billing switched off answers 404 there; flip this to be one. */
-let billingEnabled = true;
 /**
  * Keys the egress broker is on for. Fountain's own rule: off, the bindings
  * routes answer 404 `brokerage_not_enabled` and a conversation's egress page
@@ -114,17 +112,18 @@ const brokered = new Set<string>();
 const egressOf: Record<string, { id: number; host: string; path: string; method: string; service: string | null; credential_keys: string[]; status: number | null; error: string | null }[]> = {};
 /** Every egress read the fake was asked for, with the paging it was sent. */
 const egressAsked: { id: string; limit: string | null; before: string | null }[] = [];
-/**
- * The fake's billing period, anchored to now rather than written out: the
- * per-period cost route measures against the wall clock (a turn still running
- * accrues only as far as *now*), so a hard-coded month would pass today and
- * fail next year.
- */
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** One instant every relative timestamp in these tests is measured from, so the arithmetic is exact. */
 const NOW = Date.now();
-const PERIOD_START = new Date(NOW - 10 * DAY_MS).toISOString();
-const PERIOD_END = new Date(NOW + 20 * DAY_MS).toISOString();
+/**
+ * The per-period cost route measures the calendar month against its clock (a
+ * turn still running accrues only as far as *now*). These tests pin that clock
+ * to ten days into a month, so the window opens exactly ten days back and the
+ * arithmetic does not depend on today's date.
+ */
+const COST_NOW = Date.UTC(2026, 7, 11);
+const PERIOD_START = new Date(Date.UTC(2026, 7, 1)).toISOString();
+const PERIOD_END = new Date(Date.UTC(2026, 8, 1)).toISOString();
 
 function whose(req: Request): string | null {
   const auth = req.headers.get("authorization") ?? "";
@@ -240,17 +239,6 @@ const fountain = Bun.serve({
       const narrow = q === "leaky" || !only.length ? null : only[only.length - 1];
       const all = (hits[key] ?? []).filter((h) => h.snippet.includes(q) && (!narrow || h.conversation_id === narrow));
       return Response.json({ data: all.slice(offset, offset + limit), meta: { limit, offset, has_more: offset + limit < all.length } });
-    }
-    if (path === "/api/account/billing") {
-      if (!billingEnabled) return Response.json({ error: "not_found", billing: "disabled" }, { status: 404 });
-      return Response.json({
-        data: {
-          status: "active",
-          period: { start: PERIOD_START, end: PERIOD_END, source: "subscription" },
-          plan: { name: "Team", slug: "team", monthly_cents: 9900, included_turn_hours: 100 },
-          usage: { conversations: 12, turns: 40, turn_hours: 7.5, turn_hours_included: 100, turn_hours_remaining: 92.5, sandbox_minutes: 900 },
-        },
-      });
     }
     if (path === "/api/agents")
       return Response.json({
@@ -2070,7 +2058,6 @@ describe("what a project cost, for the owner who paid for it", () => {
   const goneItem = "deleteditem";
 
   beforeAll(() => {
-    billingEnabled = true;
     const conv = (id: string, channel: string | null, turns: number, input: number, output: number, at: string): FakeConv => ({
       id,
       channel_id: channel,
@@ -2096,22 +2083,11 @@ describe("what a project cost, for the owner who paid for it", () => {
     convs["key-bob"] = [conv("kb1", "workbench:bobproj/bobitem", 6, 900, 400, "2026-08-14T00:00:00Z")];
   });
 
-  afterAll(() => {
-    billingEnabled = true;
-  });
 
   const costOf = async (who: string) => (await (await call(who, "GET", "/api/me/cost")).json()).data as import("./cost").CostDto;
 
   test("no session, no bill", async () => {
     expect((await call(null, "GET", "/api/me/cost")).status).toBe(401);
-  });
-
-  test("the bill is the account's, as Fountain reports it — never per project, because Fountain does not attribute it", async () => {
-    const cost = await costOf("alice");
-    expect(cost.billingUnavailable).toBeNull();
-    expect(cost.billing!.plan!.name).toBe("Team");
-    expect(cost.billing!.usage!.turn_hours).toBe(7.5);
-    expect(cost.billing!.period!.source).toBe("subscription");
   });
 
   test("the breakdown sums the conversations by the work item their channel names", async () => {
@@ -2161,15 +2137,6 @@ describe("what a project cost, for the owner who paid for it", () => {
     const alice = await costOf("alice");
     expect(alice.projects.map((p) => p.id)).not.toContain("bobproj");
   });
-
-  test("billing switched off is said, not faked; the breakdown still stands", async () => {
-    billingEnabled = false;
-    const cost = await costOf("alice");
-    expect(cost.billing).toBeNull();
-    expect(cost.billingUnavailable).toBe("disabled");
-    expect(cost.projects.find((p) => p.id === projectId)!.turns).toBe(6);
-    billingEnabled = true;
-  });
 });
 
 // ── the same work, in the unit the bill is in, over the window it covers ──
@@ -2180,12 +2147,12 @@ describe("what a project cost, for the owner who paid for it", () => {
 // number beside it. The clock matters here: the window is real, and a turn
 // still running accrues only as far as now.
 
-describe("what a project cost this billing period, measured in turn hours", () => {
+describe("what a project took this month, measured in turn hours", () => {
   let cp = "";
   let thisMonth = "";
   let mixed = "";
   const HOUR_MS = 60 * 60 * 1000;
-  const ago = (ms: number) => new Date(NOW - ms).toISOString();
+  const ago = (ms: number) => new Date(COST_NOW - ms).toISOString();
   /** Carol owns more than this describe's project, so never index the list. */
   const mine = (p: import("./cost").PeriodCostDto) => p.projects.find((x) => x.id === cp)!;
 
@@ -2214,7 +2181,7 @@ describe("what a project cost this billing period, measured in turn hours", () =
   });
 
   beforeAll(async () => {
-    billingEnabled = true;
+    setCostClock(COST_NOW);
     await signIn("carol");
     cp = (await (await call("carol", "POST", "/api/projects", { name: "Carol's", environmentId: "e1", vaultId: "v1" })).json()).data.id;
     thisMonth = (await (await call("carol", "POST", `/api/projects/${cp}/items`, { title: "this month" })).json()).data.id;
@@ -2252,7 +2219,7 @@ describe("what a project cost this billing period, measured in turn hours", () =
   });
 
   afterAll(() => {
-    billingEnabled = true;
+    setCostClock();
     turnsBroken.delete("cbroken");
     convs["key-carol"] = [];
   });
@@ -2263,14 +2230,11 @@ describe("what a project cost this billing period, measured in turn hours", () =
     expect((await call(null, "GET", "/api/me/cost/period")).status).toBe(401);
   });
 
-  test("the window is the bill's own, and measuring stops at now rather than at a period end that has not happened", async () => {
+  test("the window is the calendar month, and measuring stops at now rather than at a month end that has not happened", async () => {
     const p = await periodOf("carol");
-    expect(p.period).toEqual({ start: PERIOD_START, end: PERIOD_END, source: "subscription" });
-    // The period runs 20 days into the future; the measurement does not.
-    expect(Date.parse(p.measuredTo)).toBeLessThanOrEqual(Date.now() + 1000);
-    expect(Date.parse(p.measuredTo)).toBeGreaterThan(Date.now() - 60_000);
-    // The account figure is Fountain's, carried, not computed from our sum.
-    expect(p.accountTurnHours).toBe(7.5);
+    expect(p.period).toEqual({ start: PERIOD_START, end: PERIOD_END });
+    // The month runs 21 days past the clock; the measurement does not.
+    expect(p.measuredTo).toBe(new Date(COST_NOW).toISOString());
   });
 
   test("a turn's own start and end are the measure, and a turn straddling the period start counts only the part inside", async () => {
@@ -2296,10 +2260,9 @@ describe("what a project cost this billing period, measured in turn hours", () =
   test("a turn still running accrues as far as now and no further; one that never started bills nothing", async () => {
     const p = await periodOf("carol");
     const item = mine(p).items.find((w) => w.id === mixed)!;
-    // c4's turn began an hour ago and has not ended: an hour, plus however
-    // long this test took. c5 has a turn with no start, which is not a turn.
-    expect(item.seconds).toBeGreaterThanOrEqual(3600);
-    expect(item.seconds).toBeLessThan(3660);
+    // c4's turn began an hour ago and has not ended: an hour, to the clock.
+    // c5 has a turn with no start, which is not a turn.
+    expect(item.seconds).toBe(3600);
     expect(item.turns).toBe(1);
     expect(item.conversations).toBe(1);
   });
@@ -2364,17 +2327,6 @@ describe("what a project cost this billing period, measured in turn hours", () =
     const alice = await periodOf("alice");
     expect(alice.projects.map((x) => x.id)).not.toContain(cp);
     expect(alice.projects.map((x) => x.id)).toContain(projectId);
-  });
-
-  test("billing switched off falls back to the calendar month and offers no account figure to be a share of", async () => {
-    billingEnabled = false;
-    const p = await periodOf("carol");
-    expect(p.period.source).toBe("calendar_month");
-    expect(p.accountTurnHours).toBeNull();
-    // The window changed, so the numbers did; that it still measured has not.
-    expect(p.fanout.candidates).toBe(7);
-    expect(p.projects.map((x) => x.id)).toContain(cp);
-    billingEnabled = true;
   });
 });
 

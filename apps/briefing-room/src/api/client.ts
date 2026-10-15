@@ -166,8 +166,6 @@ export function describeError(err: unknown): string {
         return "The researcher is still working on the last request.";
       case "provisioning":
         return "The researcher's computer is still starting — try again shortly.";
-      case "subscription_required":
-        return "An active Fountain subscription is required.";
       case "not_found":
         return "Not found.";
       default:

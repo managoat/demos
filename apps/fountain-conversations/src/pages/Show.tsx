@@ -20,7 +20,7 @@ import { RawView } from "../components/RawView";
 const GLYPH: Record<string, string> = { claude: "✦", codex: "◇", gemini: "◈", opencode: "◉" };
 
 export function ShowPage({ id }: { id: string }) {
-  const { client, conversations, agents, subscribe, refresh, toast, canPrompt } = useStore();
+  const { client, conversations, agents, subscribe, refresh, toast } = useStore();
   const [conv, setConv] = useState<Conversation | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [events, setEvents] = useState<LogEvent[]>([]);
@@ -177,7 +177,6 @@ export function ShowPage({ id }: { id: string }) {
     setPref({ visibleStreams: [...set] });
   };
   const usage = current?.usage_total;
-  const runner = current?.sandbox?.runner;
 
   return (
     <div className="show">
@@ -197,12 +196,6 @@ export function ShowPage({ id }: { id: string }) {
                   {current.sandbox.sprite_name}
                 </a>
                 {current.sandbox.provider ? ` (${current.sandbox.provider})` : ""} · {current.sandbox.status}
-              </span>
-            )}
-            {runner && (
-              <span title={runner.path ?? undefined}>
-                {" · "}
-                <span className={runner.online ? "ok" : "warn"}>●</span> {runner.name ?? runner.hostname ?? "runner"}
               </span>
             )}
             {current && <span className="mono"> · {shortId(current.id)}</span>}
@@ -334,37 +327,28 @@ export function ShowPage({ id }: { id: string }) {
         )}
       </div>
 
-      {!canPrompt ? (
-        <div className="readonly-banner">
-          Read-only: your credit balance is spent, so you can view this conversation and stop running work but not send prompts.{" "}
-          <a href={`${client.baseUrl}/account/billing`} target="_blank" rel="noreferrer noopener">
-            Buy credits ↗
-          </a>
+      <form
+        className="composer"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void send();
+        }}
+      >
+        <div className="composer-main">
+          <textarea
+            rows={1}
+            value={draft}
+            placeholder={live ? "Follow-up prompt… (Enter to send, Shift+Enter for a new line)" : "This conversation is finished — a prompt starts nothing here."}
+            disabled={!live}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={onKey}
+          />
+          <ImagePicker images={images} onChange={setImages} />
         </div>
-      ) : (
-        <form
-          className="composer"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void send();
-          }}
-        >
-          <div className="composer-main">
-            <textarea
-              rows={1}
-              value={draft}
-              placeholder={live ? "Follow-up prompt… (Enter to send, Shift+Enter for a new line)" : "This conversation is finished — a prompt starts nothing here."}
-              disabled={!live}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={onKey}
-            />
-            <ImagePicker images={images} onChange={setImages} />
-          </div>
-          <button type="submit" className="send" disabled={!live || sending || !draft.trim()} aria-label="Send">
-            ↑
-          </button>
-        </form>
-      )}
+        <button type="submit" className="send" disabled={!live || sending || !draft.trim()} aria-label="Send">
+          ↑
+        </button>
+      </form>
     </div>
   );
 }

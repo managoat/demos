@@ -85,13 +85,6 @@ export function SandboxPage({ id }: { id: string }) {
           <dt>Provider</dt>
           <dd>
             {sandbox.provider ?? "—"}
-            {sandbox.runner && (
-              <span className="muted">
-                {" "}
-                · {sandbox.runner.name ?? sandbox.runner.hostname ?? "runner"} {sandbox.runner.online ? "(online)" : "(offline)"}
-                {sandbox.runner.path && <span className="mono"> · {sandbox.runner.path}</span>}
-              </span>
-            )}
           </dd>
           <dt>Agent</dt>
           <dd>

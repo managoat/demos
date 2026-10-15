@@ -481,7 +481,7 @@ function Control(props: {
             setWorkerEvents((map) => (map[conv.id] ? map : { ...map, [conv.id]: [] }));
             setLocalAssign((map) => ({ ...map, [missionId]: { ...(map[missionId] ?? {}), [task.id]: conv.id } }));
           } catch (err) {
-            if (err instanceof ApiError && err.code === "sandbox_quota_exceeded") {
+            if (err instanceof ApiError && err.code === "fleet_full") {
               if (!autoLaunchRef.current.has(missionId)) {
                 autoLaunchRef.current.add(missionId);
                 say(`${describeError(err)} Launching what fits — the rest go as computers free up.`);

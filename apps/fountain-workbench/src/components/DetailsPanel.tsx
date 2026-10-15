@@ -33,10 +33,9 @@ import { AgentAvatar } from "./AgentAvatar";
 import { EgressSection } from "./EgressSection";
 import { StatusPill } from "./StatusPill";
 import { computerLabel, itemIdOf, relativeTime } from "../lib/sidebar";
-import { conversationLabel, formatCompact, formatTime, shortId } from "../lib/format";
+import { formatCompact, formatTime, shortId } from "../lib/format";
 import {
   clampPanelWidth,
-  cotenants,
   describeMode,
   effectivePolicy,
   loadPanelWidth,
@@ -121,7 +120,6 @@ export function DetailsPanel({ conversationId, onClose }: { conversationId: stri
   const servers = mcpServersOf(agent);
   const policy = effectivePolicy(agent?.permission_policy, conversation?.permission_policy);
   const mode = describeMode(sandbox?.mode);
-  const others = conversation ? cotenants(conversation.id, conversations, sandboxId) : [];
   const environment = environments.get(conversation?.environment_id ?? project.environmentId ?? "") ?? null;
   const vault = vaults.get(conversation?.vault_id ?? project.vaultId ?? "") ?? null;
   const skillNote = skillsCaveat(sandbox?.status);
@@ -204,35 +202,11 @@ export function DetailsPanel({ conversationId, onClose }: { conversationId: stri
                     </a>
                   </Row>
                 )}
-                {sandbox?.runner && (
-                  <>
-                    <Row label="runner">
-                      {sandbox.runner.name ?? sandbox.runner.hostname ?? "—"} <span className="muted">{sandbox.runner.online ? "online" : "offline"}</span>
-                    </Row>
-                    {sandbox.runner.path && (
-                      <Row label="path">
-                        <code className="details-id">{sandbox.runner.path}</code>
-                      </Row>
-                    )}
-                  </>
-                )}
                 <Row label="environment">{environment ? environment.name : <span className="muted">—</span>}</Row>
                 <Row label="vault">{vault ? vault.name : <span className="muted">—</span>}</Row>
                 <Row label="id">
                   <code className="details-id">{sandboxId}</code>
                 </Row>
-                {others.length > 0 && (
-                  <div className="details-sub">
-                    <span className="details-sub-title">also on it</span>
-                    <ul className="details-list">
-                      {others.map((c) => (
-                        <li key={c.id}>
-                          <a href={href.conversation(project.id, c.id)}>{conversationLabel(c, c.first_prompt)}</a>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
               </>
             )}
           </Section>

@@ -21,7 +21,6 @@ import { imagesProblem } from "../shared/images";
 import { runtimeFor } from "../shared/models";
 import { parseSettings } from "../shared/settings";
 import { agentFor, type ProjectContext } from "./agents";
-import type { ChosenConnector } from "./connectors";
 import { authenticate, chatAccess, ownerClient, requireOwner, userClient, type AppContext } from "./context";
 import { randomToken } from "./crypto";
 import { now, type ChatRow, type Role, type UserRow } from "./db";
@@ -37,8 +36,8 @@ export interface ChatDto {
   members: { email: string; addedAt: string }[];
   conversationId: string;
   agentId: string;
-  /** What the chat was started with, as the header shows it: "Opus 5 · Gmail, PDFs". */
-  settings: { model: string; skills: string[]; connectors: ChosenConnector[] };
+  /** What the chat was started with, as the header shows it: "Opus 5 · PDFs". */
+  settings: { model: string; skills: string[] };
   /** The project the chat was started in, when it was. */
   project: { id: string; name: string; repoUrl: string; base: string } | null;
   createdAt: string;
@@ -63,7 +62,7 @@ function toDto(ctx: AppContext, chat: ChatRow, role: Role, conv: ConversationSum
     members: ctx.db.members(chat.id).map((m) => ({ email: m.email, addedAt: m.added_at })),
     conversationId: chat.conversation_id,
     agentId: chat.agent_id,
-    settings: { model: chat.model, skills: parseJson<string[]>(chat.skills, []), connectors: parseJson<ChosenConnector[]>(chat.connectors, []) },
+    settings: { model: chat.model, skills: parseJson<string[]>(chat.skills, []) },
     project: projectOf(ctx, chat),
     archivedAt: chat.archived_at,
     createdAt: chat.created_at,
@@ -159,12 +158,10 @@ export async function create(ctx: AppContext, req: Request): Promise<Response> {
   }
   const id = crypto.randomUUID();
   let conversation: ConversationSummary;
-  let connectors: ChosenConnector[];
   let agentId: string;
   try {
     const made = await agentFor(client, settings, ctx.config.publicUrl, project);
     agentId = made.agentId;
-    connectors = made.connectors;
     const tagged = projectRow && (ctx.db.projectMembers(projectRow.id).length > 0 || user.email !== host.email) ? withAuthor(user.email, prompt) : prompt;
     const create: ConversationInput = { agent_id: agentId, prompt: tagged, channel_id: `salon:${id}`, fresh: true };
     if (images) create.images = images;
@@ -185,7 +182,8 @@ export async function create(ctx: AppContext, req: Request): Promise<Response> {
     runtime: runtimeFor(settings.model),
     model: settings.model,
     skills: JSON.stringify(settings.skills),
-    connectors: JSON.stringify(connectors),
+    // Fountain removed Connections; the column stays for rows written before.
+    connectors: "[]",
     preset_id: settings.presetId,
     preset_name: null,
     environment_id: settings.environmentId,

@@ -22,23 +22,18 @@ nothing about agents, environments or runtimes anywhere.
 - **Settings, not setup.** The model pill is one list grouped by brand
   (Anthropic / OpenAI / Google) from Fountain's catalog; the `+` menu is
   *Add photos*, *Skills ›* (PDFs, Word documents, Spreadsheets, Slides,
-  Posters & visuals — checkmark toggles), *Connectors ›* (the accounts you
-  have linked on Fountain, such as Gmail, plus *Connect another…*), and
+  Posters & visuals — checkmark toggles), *Repository ›*, and
   *People ›*. Everything is optional. Enter starts the chat.
 - **One agent per combination, derived.** A chat's settings are a model,
-  some skills and some connectors. The server derives the agent Fountain
+  some skills. The server derives the agent Fountain
   needs — the runtime the model's provider implies, a prompt written for a
-  chat room, the skills as skills.sh installs, the connectors as
-  `mcp_servers`, no environment — once per distinct combination
-  (`Salon · Opus 5 · gmail, pdf`) and finds it again by a hash in
+  chat room, the skills as skills.sh installs, no environment — once per
+  distinct combination (`Salon · Opus 5 · pdf`) and finds it again by a hash in
   `metadata.salon.key`. Your own agents are never listed or touched.
   (`server/agents.ts`, `shared/settings.ts`, `shared/skills.ts`)
-- **Connectors need the broker.** Connections exist only for Fountain
-  accounts the egress broker is on for; elsewhere the Connectors submenu
-  says so instead of showing an empty list. Google attaches as Fountain's
-  own Gmail server; a remote MCP server you connected (Linear, Notion, …)
-  attaches with the connection's bearer; Outlook and Slack show as not
-  usable in a chat yet.
+- **No connectors.** Fountain removed Connections (v0.23.0), so Salon no
+  longer offers a Connectors submenu. The key's tuple keeps an always-empty
+  `connectors` entry so agents derived before then are still found.
 - **The host pays.** A chat is a Fountain conversation under the host's key,
   bound to `channel_id = salon:<chat>`. Guests never hold that key: their
   browser runs an ordinary SDK client whose base URL is `/f/<chat>`, a proxy

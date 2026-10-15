@@ -1,5 +1,5 @@
 /**
- * What a chat is started with: a model, some skills, some connectors. Not an
+ * What a chat is started with: a model and some skills. Not an
  * agent and an environment — the server materialises whatever Fountain
  * needs from these (server/agents.ts), once per distinct combination.
  */
@@ -11,8 +11,6 @@ export interface ChatSettings {
   model: string;
   /** Ids from `shared/skills.ts`. */
   skills: string[];
-  /** Ids of the host's Fountain connections (`GET /api/connections`). */
-  connectorIds: string[];
   /**
    * A Salon project (shared/projects.ts): a repository the chat's computer
    * starts with a checkout of. The server turns it into `environmentId`
@@ -31,7 +29,6 @@ export interface ChatSettings {
 export const DEFAULT_SETTINGS: ChatSettings = {
   model: "anthropic/claude-opus-5",
   skills: [],
-  connectorIds: [],
   projectId: null,
   presetId: null,
   environmentId: null,
@@ -50,12 +47,9 @@ export function parseSettings(v: unknown): ChatSettings | string {
   if (skills === null) return "Skills must be a list.";
   const unknown = skills.find((s) => !isSkillId(s));
   if (unknown !== undefined) return `"${unknown}" is not a skill Salon offers.`;
-  const connectorIds = idList(r.connectorIds);
-  if (connectorIds === null) return "Connectors must be a list.";
   return {
     model,
     skills,
-    connectorIds,
     projectId: optId(r.projectId),
     presetId: optId(r.presetId),
     environmentId: optId(r.environmentId),
@@ -77,7 +71,9 @@ function optId(v: unknown): string | null {
 /**
  * The key a derived agent is found again by (`metadata.salon.key`): a hash
  * of the whole tuple, lists sorted, so the same choices in any order name
- * the same agent. Change the shape and every derived agent is orphaned.
+ * the same agent. Change the shape and every derived agent is orphaned —
+ * which is why `connectors` stays in the tuple, always empty, after Fountain
+ * removed Connections: the keys of agents derived before then still match.
  */
 export function derivedKey(s: ChatSettings): string {
   return `salon:v2:${fnv1a64(canonical(s))}`;
@@ -89,7 +85,7 @@ export function canonical(s: ChatSettings): string {
     runtime: runtimeFor(s.model),
     model: s.model,
     skills: [...new Set(s.skills)].sort(),
-    connectors: [...new Set(s.connectorIds)].sort(),
+    connectors: [],
     preset: s.presetId ?? null,
     environment: s.environmentId ?? null,
     vault: s.vaultId ?? null,

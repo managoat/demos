@@ -15,7 +15,6 @@ export function loadSettings(): ChatSettings {
       ...DEFAULT_SETTINGS,
       model,
       skills: Array.isArray(v.skills) ? v.skills.filter(isSkillId) : [],
-      connectorIds: Array.isArray(v.connectorIds) ? v.connectorIds.filter((x): x is string => typeof x === "string") : [],
       projectId: typeof v.projectId === "string" && v.projectId ? v.projectId : null,
     };
   } catch {

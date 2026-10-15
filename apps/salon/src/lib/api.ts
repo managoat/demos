@@ -51,19 +51,9 @@ export interface GitHubRepo {
   pushedAt: string | null;
 }
 
-/** One of the host's Fountain connections, as the Connectors submenu shows it. */
-export interface ConnectorDto {
-  id: string;
-  label: string;
-  account: string | null;
-  usable: boolean;
-  why: string | null;
-}
-
 /** What the composer's menus are made of (server/menu.ts). */
 export interface MenuDto {
   models: string[];
-  connectors: { enabled: boolean; items: ConnectorDto[]; connectUrl: string };
 }
 
 export interface ChatDto {
@@ -74,7 +64,7 @@ export interface ChatDto {
   members: { email: string; addedAt: string }[];
   conversationId: string;
   agentId: string;
-  settings: { model: string; skills: string[]; connectors: { id: string; label: string }[] };
+  settings: { model: string; skills: string[] };
   project: { id: string; name: string; repoUrl: string; base: string } | null;
   archivedAt: string | null;
   createdAt: string;
@@ -236,8 +226,8 @@ export function joinUrl(token: string): string {
   return `${window.location.origin}${window.location.pathname}#/join/${token}`;
 }
 
-/** "Opus 5 · Gmail, PDFs" — what a chat was started with, for its header and the list. */
+/** "Opus 5 · PDFs" — what a chat was started with, for its header and the list. */
 export function settingsLine(settings: ChatDto["settings"], modelLabel: (m: string) => string, skillNames: (ids: readonly string[]) => string[], project: ChatDto["project"] = null): string {
-  const extras = [...(project ? [project.name] : []), ...settings.connectors.map((c) => c.label), ...skillNames(settings.skills)];
+  const extras = [...(project ? [project.name] : []), ...skillNames(settings.skills)];
   return `${modelLabel(settings.model)}${extras.length ? ` · ${extras.join(", ")}` : ""}`;
 }

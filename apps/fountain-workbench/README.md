@@ -77,43 +77,37 @@ Fountain; the owner shares a project by email, and it appears for that person
 the next time they sign in. Members see the same work items and the same
 conversations, and start their own — and every conversation in the project
 runs on the **owner's** Fountain account: the owner's agents, environments,
-vaults, computers and bill. A member never holds the owner's key; the
+vaults and computers. A member never holds the owner's key; the
 workbench server does, and lets the member through only to that project's
 conversations.
 
-**The owner pays, so the owner can see it.** Because every conversation in a
-project runs on the owner's account, the owner is billed for work members
-started, and had no view of what that came to. **Cost** (on the projects page,
-and on a project you own) is that view: your Fountain bill for the period —
-plan, turn hours, sandbox minutes — and underneath it, where the work went,
+**The owner's key runs it, so the owner can see it.** Because every
+conversation in a project runs on the owner's account, the owner's key carries
+work members started, and had no view of what that came to. **Cost** (on the
+projects page, and on a project you own) is that view: where the work went,
 per project and per work item, so "this item burned a day of Opus" is visible
-before it burns two. It is your own account and only the projects you own; a
+before it burns two. Fountain is self-hosted and keeps no bill, so this is
+work, not money. It is your own account and only the projects you own; a
 member sees their own, never yours. It hangs off `/api/me/cost` and
 deliberately not off the project proxy — that is the boundary a member
-crosses, and a bill does not belong on the far side of it.
+crosses, and an account's usage does not belong on the far side of it.
 
-The breakdown is in the bill's own unit over the bill's own window, so it is a
-division of the account figure rather than a second number beside it. A
-Fountain turn carries `started_at` and `ended_at`; summing those intervals
-clipped to the billing period, grouped by the work item each conversation's
-channel names, is per-project **turn hours this period** — and the page shows
-each project's share of the turn hours Fountain reports for the whole account,
-with the difference called what it is: work on your key that no project of
-yours accounts for. The arithmetic deliberately copies Fountain's own meter
-(`Fountain.Billing.turn_hours_used/2`): intervals summed rather than unioned,
-because two conversations each running an hour on one machine are two hours of
-work; a turn still in flight accruing only as far as *now*. Tokens stay on the
-page as the second unit they are — lifetime per project, and per period the
-turns that finished inside it — and sandbox minutes Fountain attributes to
-nothing, so neither does the page.
+The first view is lifetime tokens and turns per project. The second is turn
+time this month: a Fountain turn carries `started_at` and `ended_at`; summing
+those intervals clipped to the calendar month (UTC), grouped by the work item
+each conversation's channel names, is per-project **turn hours this month**,
+shown as each project's share of what is measured. Intervals are summed rather
+than unioned, because two conversations each running an hour are two hours of
+work; a turn still in flight accrues only as far as *now*. Tokens stay on the
+page as the second unit they are — lifetime per project, and per month the
+turns that finished inside it.
 
 That costs a request per conversation: turns are per conversation and the
 endpoint takes no window, so it is `GET /api/me/cost/period`, a second route
 the page fetches after it has painted, rather than more of the first. Three
 things keep the fan-out down, and each one reports what it did instead of
-quietly shrinking the answer — only projects you own are fetched (what ran
-elsewhere is the bill's figure minus this one, which is subtraction); a
-conversation whose last activity predates the period cannot hold a turn inside
+quietly shrinking the answer — only projects you own are fetched; a
+conversation whose last activity predates the month cannot hold a turn inside
 it and is never asked about; and turns are cached per conversation against its
 turn count and last activity, so a reload re-reads only what moved. A
 conversation with a turn still running is never cached — its figure grows with

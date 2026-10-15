@@ -5,7 +5,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FountainClient, describeError } from "./api/client";
-import type { Agent, Billing, Conversation, UserEvent } from "./api/types";
+import type { Agent, Conversation, UserEvent } from "./api/types";
 import type { Settings } from "./lib/settings";
 
 export type EventHandler = (ev: UserEvent) => void;
@@ -17,10 +17,6 @@ export interface Store {
   agents: Map<string, Agent>;
   connected: boolean;
   error: string | null;
-  /** Billing state, or null where the server has billing disabled (self-hosted). */
-  billing: Billing | null;
-  /** False only when credits are on and the balance is spent — prompts are refused with 402. */
-  canPrompt: boolean;
   refresh: () => Promise<Conversation[] | null>;
   /** Events for one conversation, live. Returns the unsubscribe. */
   subscribe: (conversationId: string, handler: EventHandler) => () => void;
@@ -47,7 +43,6 @@ export function StoreProvider({ settings, children }: { settings: Settings; chil
   const [agents, setAgents] = useState<Map<string, Agent>>(new Map());
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [billing, setBilling] = useState<Billing | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const handlers = useRef(new Map<string, Set<EventHandler>>());
 
@@ -74,10 +69,6 @@ export function StoreProvider({ settings, children }: { settings: Settings; chil
     client
       .listAgents()
       .then((list) => setAgents(new Map(list.map((a) => [a.id, a]))))
-      .catch(() => undefined);
-    client
-      .billing()
-      .then(setBilling)
       .catch(() => undefined);
   }, [client, refresh]);
 
@@ -161,15 +152,9 @@ export function StoreProvider({ settings, children }: { settings: Settings; chil
     };
   }, [client, refresh, scheduleRefresh]);
 
-  // The server's own gate (ee/lib/fountain/credits.ex check_balance/2): credits
-  // off → ok, comped → ok, otherwise the balance must be positive. Billing
-  // absent (404/403) means the server does not gate on it at all.
-  const canPrompt =
-    billing === null || billing.credits === null || billing.comped === true || billing.credits.balance_cents > 0;
-
   const value = useMemo<Store>(
-    () => ({ client, conversations, agents, connected, error, billing, canPrompt, refresh, subscribe, toast }),
-    [client, conversations, agents, connected, error, billing, canPrompt, refresh, subscribe, toast],
+    () => ({ client, conversations, agents, connected, error, refresh, subscribe, toast }),
+    [client, conversations, agents, connected, error, refresh, subscribe, toast],
   );
 
   return (
