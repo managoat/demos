@@ -33,17 +33,13 @@ const BUILT_WITH = "https://managoat.com/built-with";
  * the honest version: the check stays strict for the rest, and the
  * gap is a line of code somebody has to delete rather than a silence.
  *
- * salon: live at salon.demo.managoat.com since it shipped, never added to
- * built_apps/0. Remove this entry, and add salon to src/roster.ts, once the
- * fountain-side list has it.
- *
  * drydock: newest, and not on built_apps/0 either. It also does not run on the
  * reader's own Fountain account — the server holds the key and sign-in is
  * GitHub — so whether it belongs on a list of things built *with* Fountain by
  * other people is a question for the fountain side to answer before it is
  * rostered here.
  */
-const UNLISTED_UPSTREAM = new Set(["salon", "drydock"]);
+const UNLISTED_UPSTREAM = new Set(["drydock"]);
 
 const REPO_APPS = new Set(
   readdirSync(new URL("../../", import.meta.url).pathname, { withFileTypes: true })
