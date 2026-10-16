@@ -78,6 +78,13 @@ export const DEMOS: readonly Demo[] = [
       "A DNS operator for your Cloudflare zones. Ask in plain words, read the plan as a diff, approve. The zone tables stay on screen while the agent does the work.",
   },
   {
+    id: "salon",
+    glyph: "💬",
+    name: "Salon",
+    blurb:
+      "Multiplayer chat. Start a chat on your account and invite people by email or by link; everyone reads and writes the same thread, and every turn runs on your account and your model credential.",
+  },
+  {
     id: "mend",
     glyph: "🔦",
     name: "Mend",
