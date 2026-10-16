@@ -5,7 +5,7 @@
  * the SDK at `/f/<chat>` (`makeChatClient`).
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Fountain } from "@managoat/fountain-sdk";
+import { Managoat } from "@managoat/sdk";
 import type { ProjectDto } from "../shared/projects";
 import { api, ApiError, chatFountainBase, type ChatDto, type Me, type MenuDto, type NotificationDto, type WorkspaceMemberDto } from "./lib/api";
 import { describeError } from "./lib/errors";
@@ -185,6 +185,6 @@ export function SessionProvider({ me, onSignOut, initialError, children }: { me:
 }
 
 /** An SDK client for one chat. The bearer is a placeholder: the server authenticates the cookie and swaps in the host's key. */
-export function makeChatClient(chatId: string): Fountain {
-  return new Fountain({ baseUrl: chatFountainBase(chatId), apiKey: "session", appUrl: "", timeoutMs: 120_000 });
+export function makeChatClient(chatId: string): Managoat {
+  return new Managoat({ baseUrl: chatFountainBase(chatId), apiKey: "session", appUrl: "", timeoutMs: 120_000 });
 }

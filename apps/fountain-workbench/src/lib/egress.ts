@@ -16,7 +16,7 @@
  * `failed` says why the conversation could not start. Neither carries a
  * value, ever, so nothing here has one to hide.
  */
-import type { Fountain } from "@managoat/fountain-sdk";
+import type { Managoat } from "@managoat/sdk";
 import type { LogEvent } from "../types";
 import { dataOf } from "./digest";
 
@@ -47,7 +47,7 @@ export interface EgressPage {
 /** The page size. Big enough that a short conversation is one page; small enough that a busy one paints. */
 export const EGRESS_PAGE = 50;
 
-export function fetchEgress(fountain: Fountain, conversationId: string, before?: number | null): Promise<EgressPage> {
+export function fetchEgress(fountain: Managoat, conversationId: string, before?: number | null): Promise<EgressPage> {
   return fountain.request<EgressPage>("GET", `/api/conversations/${encodeURIComponent(conversationId)}/egress`, {
     query: { limit: EGRESS_PAGE, before: before ?? undefined },
   });

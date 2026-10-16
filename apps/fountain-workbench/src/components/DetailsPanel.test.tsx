@@ -31,7 +31,6 @@ const agent: Agent = {
 const conversation: Conversation = {
   id: "11111111-2222-3333-4444-555555555555",
   runtime: "claude",
-  acp: true,
   status: "idle",
   agent_id: "a1",
   sandbox_id: "sb1",

@@ -19,7 +19,7 @@
  * Everything here but `searchMessages` is pure, so the ranking, the ordering
  * and the labels are testable without a Fountain.
  */
-import type { Fountain } from "@managoat/fountain-sdk";
+import type { Managoat } from "@managoat/sdk";
 import type { Agent, Conversation, SearchHit } from "../types";
 import type { ItemDto } from "./api";
 import { conversationLabel } from "./format";
@@ -108,7 +108,7 @@ function where(conversationId: string, ctx: Context): string {
  * same number and the server is where that is reconciled.
  */
 export async function searchMessages(
-  fountain: Fountain,
+  fountain: Managoat,
   q: string,
   opts: { limit?: number; conversationId?: string; signal?: AbortSignal } = {},
 ): Promise<Messages> {
