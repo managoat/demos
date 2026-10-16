@@ -14,7 +14,7 @@
  * events into that stream when another member changes something.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Fountain } from "@managoat/fountain-sdk";
+import { Managoat } from "@managoat/sdk";
 import type { Agent, Conversation, Environment, SandboxRecord, UserEvent, Vault } from "./types";
 import { computersOf } from "./lib/sidebar";
 import { api, ApiError, projectFountainBase, type ActivityDto, type ItemDto, type ItemPatch, type Me, type ProjectDto } from "./lib/api";
@@ -202,7 +202,7 @@ export interface ProjectStore {
   items: ItemDto[];
   isOwner: boolean;
   /** Fountain from inside this project: the owner's key, this project's conversations. */
-  fountain: Fountain;
+  fountain: Managoat;
   conversations: Conversation[];
   /** Sandbox records for the project's live computers, by id — the list carries only `sandbox_id`. */
   sandboxes: Map<string, SandboxRecord>;
@@ -273,10 +273,10 @@ export function useProjectMaybe(): ProjectStore | null {
   return useContext(ProjectCtx);
 }
 
-export function makeProjectClient(projectId: string): Fountain {
+export function makeProjectClient(projectId: string): Managoat {
   // The bearer is a placeholder: the server authenticates the session cookie and swaps in the owner's key.
   // Retiring a conversation waits for Fountain to tear the computer down, which can take longer than the SDK's 30 s default.
-  return new Fountain({ baseUrl: projectFountainBase(projectId), apiKey: "session", appUrl: "", timeoutMs: 120_000 });
+  return new Managoat({ baseUrl: projectFountainBase(projectId), apiKey: "session", appUrl: "", timeoutMs: 120_000 });
 }
 
 export function ProjectProvider({ projectId, children, fallback }: { projectId: string; children: ReactNode; fallback: (state: "loading" | "missing") => ReactNode }) {

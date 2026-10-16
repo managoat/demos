@@ -1,8 +1,8 @@
-import { FountainError } from "@managoat/fountain-sdk";
+import { ManagoatError } from "@managoat/sdk";
 
 /** One line a person can act on, from whatever the SDK or the browser threw. */
 export function describeError(err: unknown): string {
-  if (err instanceof FountainError) {
+  if (err instanceof ManagoatError) {
     switch (err.code) {
       case "conversation_busy":
         return "That conversation is still working on its last prompt.";
@@ -39,5 +39,5 @@ export function describeError(err: unknown): string {
 
 /** The API's `error` code, when the failure carried one. */
 export function errorCode(err: unknown): string | undefined {
-  return err instanceof FountainError ? err.code : undefined;
+  return err instanceof ManagoatError ? err.code : undefined;
 }

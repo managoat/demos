@@ -156,7 +156,7 @@ export function DetailsPanel({ conversationId, onClose }: { conversationId: stri
             </Row>
             <Row label="model">{agent?.model ? <code>{agent.model}</code> : <span className="muted">—</span>}</Row>
             <Row label="runtime">
-              <code>{conversation.runtime}</code> {conversation.acp && <span className="tag" title="Its output is ACP session/update notifications, which is what a transcript can replay">ACP</span>}
+              <code>{conversation.runtime}</code>
             </Row>
             <Row label="status">
               <StatusPill status={conversation.status} sandbox={sandbox?.status} />

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { Fountain } from "@managoat/fountain-sdk";
+import type { Managoat } from "@managoat/sdk";
 import type { Agent, Conversation, SearchHit } from "../types";
 import type { ItemDto } from "./api";
 import { describeHits, findIsOurs, matchConversations, searchMessages, threadHits, type Context } from "./search";
@@ -92,7 +92,7 @@ test("searching one conversation names it, which is what puts the proxy on its t
       asked.push(opts.query);
       return Promise.resolve({ data: [hit("reply", "t1", 1)], meta: { has_more: true } });
     },
-  } as unknown as Fountain;
+  } as unknown as Managoat;
 
   const found = await searchMessages(fake, "gate", { conversationId: "c1", limit: 100 });
   expect(asked[0]).toEqual({ q: "gate", limit: 100, conversation_id: "c1" });

@@ -108,7 +108,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@managoat/fountain-app": "workspace:*",
-        "@managoat/fountain-sdk": "9.0.0",
+        "@managoat/sdk": "12.3.0",
         "react": "^19.1.0",
         "react-dom": "^19.1.0",
       },
@@ -178,7 +178,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@managoat/fountain-app": "workspace:*",
-        "@managoat/fountain-sdk": "9.0.0",
+        "@managoat/sdk": "12.3.0",
         "react": "^19.1.0",
         "react-dom": "^19.1.0",
       },
@@ -212,7 +212,7 @@
       "name": "@managoat/fountain-app",
       "version": "0.1.0",
       "dependencies": {
-        "@managoat/fountain-sdk": "9.0.0",
+        "@managoat/sdk": "12.3.0",
       },
       "devDependencies": {
         "@types/bun": "^1.2.0",
@@ -325,7 +325,7 @@
 
     "@managoat/fountain-app": ["@managoat/fountain-app@workspace:packages/fountain-app"],
 
-    "@managoat/fountain-sdk": ["@managoat/fountain-sdk@9.0.0", "", {}, "sha512-mhJYog2VGef8zR+6qHhX/ShBGC0h8UWAUCTQiK3QgkDrx1UgdZF4j4HBu43VsL6g5Hy9UstiriLBq/Xo7zIaVg=="],
+    "@managoat/sdk": ["@managoat/sdk@12.3.0", "", {}, "sha512-2/ERNv4+aUVkxJIrXF92cI/IIjFMWK/VHxMMzi8RnIf0dPA1h9llJSpyGCOwTikW6rUWHRMO0UERvD4l9RNq7Q=="],
 
     "@napi-rs/lzma-linux-x64-gnu": ["@napi-rs/lzma-linux-x64-gnu@1.5.1", "", { "os": "linux", "cpu": "x64" }, "sha512-oTXEIha4SsuXdTA4Iyskj0kpdx2yVXdhd75c2v3xGrHFfVMsbhTPZU/nMPL4sWKo4pBHm3aucLaqGlF696dTyQ=="],
 

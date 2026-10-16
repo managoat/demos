@@ -1,4 +1,4 @@
-import { FountainError } from "@managoat/fountain-sdk";
+import { ManagoatError } from "@managoat/sdk";
 import { ApiError } from "./api";
 
 /** One line a person can act on, from whatever the SDK, the server or the browser threw. */
@@ -51,7 +51,7 @@ export function describeError(err: unknown): string {
       return "The project's folder is not a git repository in the computer.";
   }
   if (err instanceof ApiError) return err.message;
-  if (err instanceof FountainError) {
+  if (err instanceof ManagoatError) {
     if (err.status === 0) return "Could not reach the Salon server.";
     const fields = Object.entries(err.fieldErrors)
       .map(([k, v]) => `${k} ${v.join(", ")}`)
@@ -64,7 +64,7 @@ export function describeError(err: unknown): string {
 
 /** The API's `error` code, when the failure carried one. */
 export function errorCode(err: unknown): string | undefined {
-  if (err instanceof FountainError) return err.code;
+  if (err instanceof ManagoatError) return err.code;
   if (err instanceof ApiError) return err.code;
   return undefined;
 }

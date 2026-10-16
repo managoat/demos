@@ -4,7 +4,7 @@
  * the computer is asleep or the checkout is somewhere Fountain cannot read.
  */
 import { describe, expect, mock, test } from "bun:test";
-import { FountainError } from "@managoat/fountain-sdk";
+import { ManagoatError } from "@managoat/sdk";
 import { mount, wait } from "../../test/render";
 import type { Computer } from "../lib/sidebar";
 import type { ItemDto, SnapshotDto } from "../lib/api";
@@ -138,7 +138,7 @@ describe("the Changes view", () => {
   test("a checkout Fountain cannot reach is named as the reason, not shown blank", async () => {
     asked.length = 0;
     snapshots = [{ ...snapshot, repo: "/workspace/thing" }];
-    diffAnswer = () => Promise.reject(new FountainError("path_outside_sandbox", { status: 422, code: "path_outside_sandbox" }));
+    diffAnswer = () => Promise.reject(new ManagoatError("path_outside_sandbox", { status: 422, code: "path_outside_sandbox" }));
     const m = await mount(<Changes item={item} computers={[computer({})]} />);
     await wait(20);
     expect(m.container.innerHTML).toContain("Managoat reads under /home/sprite only, and this checkout is at /workspace/thing");
@@ -194,7 +194,7 @@ test("snapshotFileCount uses the latest state of each checkout on one computer",
 });
 
 test("diskError puts Fountain's refusals into words", () => {
-  expect(diskError(new FountainError("x", { status: 409, code: "sandbox_not_ready" }), "/r")).toContain("parked");
-  expect(diskError(new FountainError("x", { status: 422, code: "not_a_repository" }), "/r")).toBe("/r is not a git repository.");
-  expect(diskError(new FountainError("x", { status: 404, code: "path_not_found" }), "/r")).toContain("no longer on the machine");
+  expect(diskError(new ManagoatError("x", { status: 409, code: "sandbox_not_ready" }), "/r")).toContain("parked");
+  expect(diskError(new ManagoatError("x", { status: 422, code: "not_a_repository" }), "/r")).toBe("/r is not a git repository.");
+  expect(diskError(new ManagoatError("x", { status: 404, code: "path_not_found" }), "/r")).toContain("no longer on the machine");
 });

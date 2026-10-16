@@ -1,7 +1,7 @@
 # Conversation input ownership
 
 Migration: [#76](https://github.com/managoat/demos/issues/76).
-SDK: `@managoat/fountain-sdk` 5.2.1, pinned in the Bun lockfile.
+SDK: `@managoat/sdk` 12.3.0, pinned in the Bun lockfile.
 `@managoat/fountain-app/types` re-exports its generated `ConversationInput`
 with a type-only import; plain-fetch servers acquire no SDK runtime behavior.
 
