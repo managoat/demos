@@ -34,9 +34,12 @@ const KEYS: Record<string, { id: string; email: string }> = {
   ftn_host: { id: "u-host", email: "Host@Example.com" },
   ftn_guest: { id: "u-guest", email: "guest@example.com" },
   ftn_other: { id: "u-other", email: "other@example.com" },
-  /** The key Fountain mints for one of the host's conversations and hands its computer as $FOUNTAIN_TOKEN. */
-  ftn_sprite: { id: "u-host", email: "host@example.com" },
 };
+
+/** The key Managoat mints for one of the host's conversations: `/api/auth/me` names that conversation. */
+function spriteKey(conversationId: string): string {
+  return `ftn_sprite:${conversationId}`;
+}
 
 const OLD_KEY = derivedKey({ ...DEFAULT_SETTINGS });
 const GITHUB_PRIVATE_KEY = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" }).toString();
@@ -118,9 +121,10 @@ beforeAll(() => {
         state.githubTokenBodies.push((await req.json()) as Record<string, unknown>);
         return json({ token: "ghs_widgets", expires_at: "2026-09-02T20:00:00Z" }, 201);
       }
-      const who = KEYS[key];
+      const sprite = key.startsWith("ftn_sprite:") ? key.slice("ftn_sprite:".length) : null;
+      const who = sprite ? { id: "u-host", email: "host@example.com" } : KEYS[key];
       if (!who) return json({ error: "unauthorized", message: "bad key" }, 401);
-      if (p === "/api/auth/me") return json(who);
+      if (p === "/api/auth/me") return json({ ...who, conversation_id: sprite });
       if (p === "/api/catalog")
         return json({
           data: {
@@ -523,7 +527,7 @@ describe("sharing", () => {
 describe("games on the agent", () => {
   const SALON = salonServer("https://salon.test");
 
-  test("with a public address, a claude agent gets Salon as an MCP server on the conversation's own key, and the note", async () => {
+  test("with a public address, the agent gets Salon as an MCP server authenticated as the conversation, and the note", async () => {
     withPublicUrl();
     const cookie = await signIn("ftn_host");
     await startChat(cookie, { ...SETTINGS, model: "anthropic/claude-sonnet-5" });
@@ -531,12 +535,8 @@ describe("games on the agent", () => {
     const made = state.agentPosts[0]!.body;
     expect(made.mcp_servers).toEqual({ salon: SALON });
     expect(made.system).toBe(`${ROOM_PROMPT}\n\n${SALON_NOTE}\n\n${GAMES_NOTE}`);
-    // The header refs are escaped for Fountain, so the runtime — not Fountain — expands them.
-    expect(SALON).toEqual({
-      type: "http",
-      url: "https://salon.test/mcp",
-      headers: { Authorization: "Bearer $${FOUNTAIN_TOKEN}", "X-Fountain-Conversation-Id": "$${FOUNTAIN_CONVERSATION_ID}" },
-    });
+    // No key or header in the agent: Managoat adds the conversation's own when the session opens.
+    expect(SALON).toEqual({ type: "http", url: "https://salon.test/mcp", auth: "conversation" });
     // The key is unchanged by it: the same pick finds the agent.
     await startChat(cookie, { ...SETTINGS, model: "anthropic/claude-sonnet-5" });
     expect(state.agentPosts).toHaveLength(1);
@@ -560,15 +560,31 @@ describe("games on the agent", () => {
     expect(state.agentPatches[1]!.body.mcp_servers).toEqual({ salon: salonServer("https://salon.example") });
   });
 
-  test("another runtime, or no public address, gets no server and no note", async () => {
+  test("an agent holding the old `$${FOUNTAIN_TOKEN}` headers is moved to the conversation-authenticated entry, once", async () => {
+    withPublicUrl();
+    const old = { type: "http", url: "https://salon.test/mcp", headers: { Authorization: "Bearer $${FOUNTAIN_TOKEN}", "X-Fountain-Conversation-Id": "$${FOUNTAIN_CONVERSATION_ID}" } };
+    state.agents.set("ftn_host", [{ id: "a-old", name: "Salon · leftover", runtime: "claude", model: "anthropic/claude-opus-5", metadata: { salon: { key: OLD_KEY } }, mcp_servers: { salon: old } }]);
+    const cookie = await signIn("ftn_host");
+    await startChat(cookie);
+    expect(state.agentPatches).toHaveLength(1);
+    expect(state.agentPatches[0]!.body.mcp_servers).toEqual({ salon: SALON });
+    // Stored back with its keys in another order (Postgres jsonb sorts them): still the same entry.
+    state.agents.set("ftn_host", [{ ...state.agents.get("ftn_host")![0]!, mcp_servers: { salon: { url: SALON.url, auth: "conversation", type: "http" } } }]);
+    await startChat(cookie);
+    expect(state.agentPatches).toHaveLength(1);
+  });
+
+  test("every runtime gets the server; no public address gets no server and no note", async () => {
     withPublicUrl();
     const cookie = await signIn("ftn_host");
     await startChat(cookie, { ...SETTINGS, model: "openai/gpt-5.5" });
-    expect(state.agentPosts[0]!.body.mcp_servers).toBeUndefined();
-    expect(state.agentPosts[0]!.body.system).toBe(`${ROOM_PROMPT}\n\n${SALON_NOTE}`);
+    expect(state.agentPosts[0]!.body.runtime).toBe("codex");
+    expect(state.agentPosts[0]!.body.mcp_servers).toEqual({ salon: SALON });
+    expect(state.agentPosts[0]!.body.system).toBe(`${ROOM_PROMPT}\n\n${SALON_NOTE}\n\n${GAMES_NOTE}`);
     ctx.config.publicUrl = null;
     await startChat(cookie, { ...SETTINGS, model: "anthropic/claude-sonnet-5" });
     expect(state.agentPosts[1]!.body.mcp_servers).toBeUndefined();
+    expect(state.agentPosts[1]!.body.system).toBe(`${ROOM_PROMPT}\n\n${SALON_NOTE}`);
     expect(state.agentPatches).toHaveLength(0);
   });
 });
@@ -669,8 +685,8 @@ describe("the MCP server", () => {
   async function rpc(body: unknown, headers: Record<string, string>): Promise<Response> {
     return app(new Request("http://salon.test/mcp", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) }));
   }
-  function forChat(conversationId: string, key = "ftn_sprite"): Record<string, string> {
-    return { authorization: `Bearer ${key}`, "x-fountain-conversation-id": conversationId };
+  function forChat(conversationId: string, key = spriteKey(conversationId)): Record<string, string> {
+    return { authorization: `Bearer ${key}` };
   }
   async function toolCall(conversationId: string, name: string, args: Record<string, unknown>): Promise<{ text: string; isError: boolean }> {
     const res = await rpc({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, forChat(conversationId));
@@ -679,23 +695,25 @@ describe("the MCP server", () => {
     return { text: r.content[0]!.text, isError: r.isError };
   }
 
-  test("the conversation's key and id name the chat; anything else is refused before a tool runs", async () => {
+  test("the conversation's key names the chat; anything else is refused before a tool runs", async () => {
     const host = await signIn("ftn_host");
     const chat = await startChat(host);
+    const other = await startChat(host);
     const init = { jsonrpc: "2.0", id: 1, method: "initialize", params: {} };
     expect((await rpc(init, {})).status).toBe(401);
-    expect((await rpc(init, { authorization: "Bearer ftn_sprite" })).status).toBe(400);
     expect((await rpc(init, forChat(chat.conversationId, "ftn_nope"))).status).toBe(401);
-    // A key of someone who does not host the chat — a guest's own key, say — finds no chat.
-    expect((await rpc(init, forChat(chat.conversationId, "ftn_guest"))).status).toBe(404);
+    // A person's own key — the host's or a guest's — names no conversation, so it is not a chat's computer.
+    expect((await rpc(init, forChat(chat.conversationId, "ftn_host"))).status).toBe(403);
+    expect((await rpc(init, forChat(chat.conversationId, "ftn_guest"))).status).toBe(403);
     expect((await rpc(init, forChat("c-nope"))).status).toBe(404);
     expect((await app(new Request("http://salon.test/mcp", { headers: forChat(chat.conversationId) }))).status).toBe(405);
 
     const ok = await rpc(init, forChat(chat.conversationId));
     expect(ok.status).toBe(200);
-    // As the runtime sends them today: the session copy of the config leaves a `$` in front of each expanded value.
-    const stray = await rpc(init, { authorization: "Bearer $ftn_sprite", "x-fountain-conversation-id": `$${chat.conversationId}` });
-    expect(stray.status).toBe(200);
+    // The id header is optional and only checked: agreeing passes, under either name; one key cannot claim another of the host's chats.
+    expect((await rpc(init, { ...forChat(chat.conversationId), "x-managoat-conversation-id": chat.conversationId })).status).toBe(200);
+    expect((await rpc(init, { ...forChat(chat.conversationId), "x-fountain-conversation-id": chat.conversationId })).status).toBe(200);
+    expect((await rpc(init, { ...forChat(chat.conversationId), "x-managoat-conversation-id": other.conversationId })).status).toBe(404);
     expect(((await ok.json()) as { result: { serverInfo: { name: string } } }).result.serverInfo.name).toBe("salon");
     const tools = ((await (await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" }, forChat(chat.conversationId))).json()) as { result: { tools: { name: string }[] } }).result.tools;
     expect(tools.map((t) => t.name)).toEqual(["start_game", "game_state"]);
@@ -771,15 +789,15 @@ describe("changes from the computer", () => {
     "",
   ].join("\n");
   const snapshot = (over: Record<string, unknown> = {}) => ({ branch: "salon/abcd1234", head: "deadbeefcafe", base: "main", status: " M README.md\n?? new.txt\n", diff: DIFF, reason: "stop", pr: null, ...over });
-  const forChat = (conversationId: string, key = "ftn_sprite") => ({ authorization: `Bearer ${key}`, "x-fountain-conversation-id": conversationId });
+  const forChat = (conversationId: string, key = spriteKey(conversationId)) => ({ authorization: `Bearer ${key}`, "x-managoat-conversation-id": conversationId });
 
   test("the hook posts on the conversation's key; the room reads it, sees it on the stream, and a stranger sees nothing", async () => {
     const { host, guest, other, chat } = await room();
     const conv = chat.conversationId as string;
     expect((await call("POST", "/hooks/changes", { body: snapshot() })).status).toBe(401);
-    expect((await call("POST", "/hooks/changes", { body: snapshot(), headers: { authorization: "Bearer ftn_sprite" } })).status).toBe(400);
+    expect((await call("POST", "/hooks/changes", { body: snapshot(), headers: { authorization: "Bearer ftn_host" } })).status).toBe(403);
     expect((await call("POST", "/hooks/changes", { body: snapshot(), headers: forChat("c-nope") })).status).toBe(404);
-    expect((await call("POST", "/hooks/changes", { body: snapshot(), headers: forChat(conv, "ftn_guest") })).status).toBe(404);
+    expect((await call("POST", "/hooks/changes", { body: snapshot(), headers: forChat(conv, "ftn_guest") })).status).toBe(403);
     expect((await call("POST", "/hooks/changes", { body: { diff: DIFF }, headers: forChat(conv) })).status).toBe(422);
     expect((await call("GET", "/hooks/changes", { headers: forChat(conv) })).status).toBe(405);
 
@@ -1033,7 +1051,7 @@ describe("the GitHub App", () => {
 
 describe("review comments", () => {
   const DIFF = ["diff --git a/README.md b/README.md", "--- a/README.md", "+++ b/README.md", "@@ -1,2 +1,3 @@", " # Hi", "-old", "+new", "+more", ""].join("\n");
-  const forChat = (conversationId: string) => ({ authorization: "Bearer ftn_sprite", "x-fountain-conversation-id": conversationId });
+  const forChat = (conversationId: string) => ({ authorization: `Bearer ${spriteKey(conversationId)}`, "x-managoat-conversation-id": conversationId });
 
   test("people comment on lines, resolve them, and send the open ones to the model as one tagged prompt", async () => {
     const { host, guest, other, chat } = await room();
@@ -1088,7 +1106,7 @@ describe("review comments", () => {
 });
 
 describe("archive and restore", () => {
-  const forChat = (conversationId: string) => ({ authorization: "Bearer ftn_sprite", "x-fountain-conversation-id": conversationId });
+  const forChat = (conversationId: string) => ({ authorization: `Bearer ${spriteKey(conversationId)}`, "x-managoat-conversation-id": conversationId });
 
   test("archive ends the conversation and keeps the chat; restore starts a new one on the branch, and the sends start over", async () => {
     const { host, guest, chat } = await room();
@@ -1234,7 +1252,7 @@ describe("the repository, read through Fountain", () => {
     expect(cut.diff.length).toBe(1_000_000);
     // The hook knew of a pull request; a read through Fountain cannot ask gh, so it keeps what the branch's last snapshot said.
     sb.diffs["main|false"] = AGAINST_MAIN;
-    const hooked = await call("POST", "/hooks/changes", { body: { branch: "salon/abcd1234", head: "deadbeefcafe", base: "main", status: "", diff: "", reason: "stop", pr: { url: "https://github.com/acme/widgets/pull/7", state: "OPEN" } }, headers: { authorization: "Bearer ftn_sprite", "x-fountain-conversation-id": chat.conversationId } });
+    const hooked = await call("POST", "/hooks/changes", { body: { branch: "salon/abcd1234", head: "deadbeefcafe", base: "main", status: "", diff: "", reason: "stop", pr: { url: "https://github.com/acme/widgets/pull/7", state: "OPEN" } }, headers: { authorization: `Bearer ${spriteKey(chat.conversationId)}`, "x-managoat-conversation-id": chat.conversationId } });
     expect(hooked.status).toBe(201);
     expect((await refresh()).pr).toEqual({ url: "https://github.com/acme/widgets/pull/7", state: "OPEN", mergeable: null });
     sb.disk[`${REPO}/.git/HEAD`] = "ref: refs/heads/other\n";
@@ -1244,7 +1262,7 @@ describe("the repository, read through Fountain", () => {
 
   test("a turn-end refresh defers to a snapshot the hook just posted, and browsers asking together share one read", async () => {
     const { host, guest, chat } = await projectChat();
-    const hooked = await call("POST", "/hooks/changes", { body: { branch: "salon/abcd1234", head: "deadbeefcafe", base: "main", status: "", diff: "", reason: "stop" }, headers: { authorization: "Bearer ftn_sprite", "x-fountain-conversation-id": chat.conversationId } });
+    const hooked = await call("POST", "/hooks/changes", { body: { branch: "salon/abcd1234", head: "deadbeefcafe", base: "main", status: "", diff: "", reason: "stop" }, headers: { authorization: `Bearer ${spriteKey(chat.conversationId)}`, "x-managoat-conversation-id": chat.conversationId } });
     expect(hooked.status).toBe(201);
     const deferred = await call("POST", `/api/chats/${chat.id}/changes/refresh`, { cookie: guest, body: { reason: "stop" } });
     expect(deferred.status).toBe(200);
