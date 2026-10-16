@@ -9,6 +9,8 @@ import { HttpError } from "./http";
 export interface FountainUser {
   id: string;
   email: string;
+  /** The conversation a sandbox key was minted for; null for a person's own key. */
+  conversation_id?: string | null;
 }
 
 export interface AgentSummary {

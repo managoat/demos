@@ -44,7 +44,7 @@ server/   Bun. app.ts is the route table; index.ts boots it.
           control.ts   room notes, presence leases, audited interrupts and permission answers
           plans.ts     durable revisioned DAG plans, approvals, proposals, sequential execution and evidence
           hub.ts       GET /api/chats/:id/stream: what Salon itself records, live (game, changes events)
-          sandbox.ts   who a computer is (bearer = $FOUNTAIN_TOKEN + conversation id), and the hook setup script
+          sandbox.ts   who a computer is (the conversation's key; /api/auth/me names its conversation), and the hook setup script
           mcp.ts       POST /mcp: Salon as an MCP server for the chat's computer (start_game, game_state)
           db.ts        SQLite, including plans/nodes/edges/events/approvals/proposals/executions, notes and control actions
 shared/   what both sides agree on: author.ts, models.ts, settings.ts, skills.ts, images.ts, games.ts (the rules),
@@ -104,29 +104,28 @@ k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) ap
    useful. Do not collapse them into a 500.
 
 5. **Games: the model starts, people play, nothing else is a turn.** The
-   derived agent (claude runtime only, and only when `PUBLIC_URL` is set)
-   carries `mcp_servers.salon = {type: "http", url: "<PUBLIC_URL>/mcp",
-   headers: {Authorization: "Bearer $${FOUNTAIN_TOKEN}",
-   "X-Fountain-Conversation-Id": "$${FOUNTAIN_CONVERSATION_ID}"}}`
-   (`agents.ts#salonServer`; an agent found without it, or with an old
-   address, is patched in place, so the derived key does not change). `$${…}`
-   is Fountain's escape: the conversation's own key is not in the
-   environment Fountain substitutes from, so the literal `${…}` must reach
-   the runtime, which expands it. `server/mcp.ts` verifies the bearer with
-   `GET /api/auth/me`, finds the chat by conversation id, and requires the
-   key's email to be the host — then `start_game` / `game_state` reach that
-   one chat. A game is a row in `games`; moves are `POST
-   /api/chats/:id/games/:g/moves` from the player whose go it is, and every
-   change goes out on `GET …/games/stream` (in-process hub, one replica).
-   The browser draws the board from the `mcp__salon__start_game` tool block
-   (`src/lib/blocks.ts#gameOf`, the live record by id), or after the last
-   turn for a game the `+` started. Known Fountain quirk (2026-09-02):
-   the ACP peer sends the agent's *raw* `mcp_servers` on `session/new`
-   (`conversation_server.ex`, `Fountain.Runtimes.ACP.mcp_servers(...)`), so
-   the runtime sees `$${X}`, expands the inner ref, and the header arrives
-   as `Bearer $ftn_…`; `mcp.ts#unescaped` drops that `$`. The project
-   `.mcp.json` copy is substituted correctly but the session copy wins.
-   Fix it in Fountain and the tolerance becomes dead code.
+   derived agent (every runtime, when `PUBLIC_URL` is set) carries
+   `mcp_servers.salon = {type: "http", url: "<PUBLIC_URL>/mcp", auth:
+   "conversation"}` (`agents.ts#salonServer`; an agent found without it, with
+   an old address, or with the old `$${FOUNTAIN_TOKEN}` headers, is patched in
+   place, so the derived key does not change). `"auth": "conversation"` is
+   Managoat's (ADR 0086): when the session opens it adds the conversation's
+   own key as `Authorization: Bearer …` and `X-Managoat-Conversation-Id`, on
+   claude, codex and gemini alike, and the key never sits in the agent. Keep
+   the entry `type: "http"`: codex refuses `sse`. `server/sandbox.ts`
+   verifies the bearer with `GET /api/auth/me`, which names the
+   `conversation_id` the key was minted for; a key that names none (a
+   person's own) is a 403, the id header is only checked against it, the
+   conversation finds the chat, and the key's email must be the host — then
+   `start_game` / `game_state` reach that one chat. A game is a row in
+   `games`; moves are `POST /api/chats/:id/games/:g/moves` from the player
+   whose go it is, and every change goes out on `GET …/games/stream`
+   (in-process hub, one replica). The browser draws the board from the
+   `mcp__salon__start_game` tool block (`src/lib/blocks.ts#gameOf`, the live
+   record by id), or after the last turn for a game the `+` started. Known
+   Managoat limit (#2835): a turn still running across a Managoat deploy
+   keeps the previous, revoked key until it ends, so its tool calls get 401
+   from `/api/auth/me` until the next turn.
 
 6. **Changes come out of the computer two ways, and go in by one function.**
    The first is the hook: `sandbox.ts#hookSetupScript` is the bash a project's
@@ -138,7 +137,7 @@ k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) ap
    runtime's cwd is `/home/sprite`, so the "project" file is that same path;
    claude-agent-acp loads `user`, `project` and `local`, and only local
    survives. The hook runs as a child of the runtime, so it holds
-   `$FOUNTAIN_TOKEN` and `$FOUNTAIN_CONVERSATION_ID`; on `session` it moves a
+   `$MANAGOAT_TOKEN` and `$MANAGOAT_CONVERSATION_ID`; on `session` it moves a
    checkout still on the base onto `salon/<conv id[0:8]>`; every run POSTs
    branch, head, `git status --porcelain`, and `git diff <merge-base>` plus
    untracked files, to `PUBLIC_URL/hooks/changes` (curl, through the
@@ -147,7 +146,7 @@ k8s/      Deployment/PVC/Service/IngressRoutes/Certificate; Flux (home-cloud) ap
    held to one post per two seconds. `changes.ts#record` is the one way a
    snapshot gets in — a sandbox exec API on Fountain would be its second
    caller, same table, same stream — it keeps the last twenty per chat,
-   cuts a diff at 1 MB and says so. The hook is claude-only, like games.
+   cuts a diff at 1 MB and says so. The hook is claude-only: it is a Claude Code hook.
    Verified end to end 2026-09-02 against `github.com/managoat/salon`.
    The second is Salon reading the computer itself, through Fountain's
    three read-only sandbox routes — `GET /api/sandboxes/:id/files`, `/file`,
@@ -366,12 +365,9 @@ A change there rolls the Fountain pods — check nothing is provisioning first.
 - Merge and push are prompts, and stay prompts: there will be no exec
   route (#1361 closed). If buttons are ever wanted, the way is a narrow
   git verb on Fountain's side (push this branch, open a PR), not a shell.
-- Games are Anthropic-only: codex and gemini get no `salon` server. The
-  model never plays; a `move` tool would make each of its moves a turn.
+- The model never plays; a `move` tool would make each of its moves a turn.
   Tic-tac-toe is the only game; `shared/games.ts` is where a second one's
   rules go, keyed by `kind`.
-- Fountain sends the raw `mcp_servers` on the ACP session (boundary 5);
-  fix there, then delete `sandbox.ts#unescaped`.
 - A refresh cannot see untracked files or `gh pr view`; if Fountain's diff
   route ever grows an `untracked` flag, `files.ts#snapshot` is the one
   place to use it. No new Fountain API is planned for Salon: what the

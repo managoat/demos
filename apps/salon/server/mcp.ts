@@ -5,11 +5,11 @@
  * (server/games.ts), and a turn spent on each would make the game slower
  * than the people playing it.
  *
- * Who is asking is the computer's own conversation key and id
- * (server/sandbox.ts — server/agents.ts writes the headers as
- * `$${FOUNTAIN_TOKEN}` and `$${FOUNTAIN_CONVERSATION_ID}`, Fountain's escape
- * for a ref the runtime expands itself). The tools then reach that one chat:
- * its people and its games, and nothing else on this server.
+ * Who is asking is the computer's own conversation key (server/sandbox.ts),
+ * which Managoat sends as the bearer because the agent's entry says
+ * `"auth": "conversation"` (server/agents.ts). The key names its conversation,
+ * and the tools then reach that one chat: its people and its games, and
+ * nothing else on this server.
  *
  * Streamable HTTP, one JSON-RPC 2.0 message per POST, answered as JSON —
  * the shape Fountain's own MCP endpoints use, and the workbench's.

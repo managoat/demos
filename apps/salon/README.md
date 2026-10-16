@@ -52,8 +52,9 @@ nothing about agents, environments or runtimes anywhere.
   player whose go it is, checked by the server (`shared/games.ts`,
   `server/games.ts`) and pushed to the other browsers on a server-sent
   stream, never a turn. The `+` at the foot of a chat starts one without
-  the model too. Anthropic models only for now: the claude runtime is the
-  one that carries an MCP server with headers into the computer.
+  the model too. Every model can start one: Managoat sends the
+  conversation's own key to Salon's MCP server on every runtime
+  (`"auth": "conversation"`).
 - **A session in a repository, through a GitHub App.** *Repository ›* in the
   `+` menu: connect GitHub, choose one of the repositories both you and the
   Salon App installation can reach, and the chat's computer starts with a

@@ -3,15 +3,22 @@
  * MCP server the model uses (server/mcp.ts) and the changes hook
  * (server/changes.ts) — and both know who is asking the same way:
  *
- *   - The bearer is the key Fountain minted for the conversation and put in
- *     the computer's environment as `$FOUNTAIN_TOKEN`. Salon asks Fountain
- *     `GET /api/auth/me` on it, the same call sign-in makes, and takes the
- *     email. The verdict is cached briefly under a hash of the key.
- *   - `X-Fountain-Conversation-Id` — `$FOUNTAIN_CONVERSATION_ID` in the same
- *     environment — names the conversation, and the conversation names the
- *     chat. The key's email must be the chat's host, because that is whose
- *     key the conversation runs on. The caller then reaches that one chat
- *     and nothing else on this server.
+ *   - The bearer is the key Managoat minted for the conversation. The MCP
+ *     server gets it as a header Managoat adds itself (`"auth": "conversation"`
+ *     on the agent's entry, server/agents.ts); the hooks read it from the
+ *     computer's environment as `$MANAGOAT_TOKEN`.
+ *   - Salon asks Managoat `GET /api/auth/me` on it, the same call sign-in
+ *     makes, and takes the email and the `conversation_id` the key was minted
+ *     for. A key that names no conversation (a person's own key) is refused:
+ *     only a chat's computer is let in here.
+ *   - The conversation names the chat, and the key's email must be the chat's
+ *     host, because that is whose key the conversation runs on. The caller
+ *     then reaches that one chat and nothing else on this server.
+ *
+ * `X-Managoat-Conversation-Id` (or the older `X-Fountain-Conversation-Id`) is
+ * optional and only checked: one that disagrees with the key is refused, so a
+ * key cannot be pointed at another of the host's chats. The verdict is cached
+ * briefly under a hash of the key.
  *
  * Nothing is issued or stored for this: a computer that can prove it is one
  * of the host's conversations is let into the chat that conversation is.
@@ -26,11 +33,12 @@ import type { ChatRow } from "./db";
 import { FountainClient, FountainHttpError } from "./fountain";
 import { HttpError } from "./http";
 
-export const CONVERSATION_HEADER = "x-fountain-conversation-id";
+export const CONVERSATION_HEADER = "x-managoat-conversation-id";
+const LEGACY_CONVERSATION_HEADER = "x-fountain-conversation-id";
 
-/** How long a key's verdict from Fountain is reused. Short: a revoked key must stop working. */
+/** How long a key's verdict from Managoat is reused. Short: a revoked key must stop working. */
 const KEY_CACHE_TTL_MS = 60 * 1000;
-const verified = new Map<string, { email: string; at: number }>();
+const verified = new Map<string, { who: KeyOwner; at: number }>();
 
 /** For tests: forget every verified key. */
 export function resetSandboxCache(): void {
@@ -43,48 +51,41 @@ export interface SandboxCaller {
   conversationId: string;
 }
 
+interface KeyOwner {
+  email: string;
+  conversationId: string | null;
+}
+
 export async function sandboxCaller(ctx: AppContext, req: Request): Promise<SandboxCaller> {
   const header = req.headers.get("authorization") ?? "";
-  const key = unescaped(header.startsWith("Bearer ") ? header.slice(7).trim() : "");
-  if (!key) throw new HttpError(401, "unauthenticated", "Send a Fountain API key as `Authorization: Bearer …`; inside a chat's computer that is $FOUNTAIN_TOKEN.");
-  const conversationId = unescaped(req.headers.get(CONVERSATION_HEADER)?.trim() ?? "");
-  if (!conversationId) throw new HttpError(400, "no_conversation", `Send the conversation id as ${CONVERSATION_HEADER}; inside a chat's computer that is $FOUNTAIN_CONVERSATION_ID.`);
-  const email = await whose(ctx, key);
+  const key = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+  if (!key) throw new HttpError(401, "unauthenticated", "Send the conversation's key as `Authorization: Bearer …`; inside a chat's computer that is $MANAGOAT_TOKEN.");
+  const { email, conversationId } = await whose(ctx, key);
+  if (!conversationId) throw new HttpError(403, "not_a_conversation_key", "That key was not minted for a conversation; only a chat's computer can call this.");
+  const claimed = (req.headers.get(CONVERSATION_HEADER) ?? req.headers.get(LEGACY_CONVERSATION_HEADER) ?? "").trim();
+  if (claimed && claimed !== conversationId) throw new HttpError(404, "no_chat", "That conversation is not a Salon chat of yours.");
   const chat = ctx.db.chatByConversation(conversationId);
   if (!chat || chat.owner_email !== email) throw new HttpError(404, "no_chat", "That conversation is not a Salon chat of yours.");
   return { email, chat, conversationId };
 }
 
-/**
- * A header value as the runtime sends it today. Fountain writes the agent's
- * `mcp_servers` into the computer twice: substituted into the project config
- * (`$${X}` → `${X}`, which the runtime expands from its environment), and raw
- * on the ACP session, where the runtime expands the inner `${X}` and leaves
- * the first `$` standing — so the token arrives as `$ftn_…`. The session copy
- * is the one the agent uses. Dropping one leading `$` accepts both, and costs
- * nothing: Fountain still has to recognise the key. Seen 2026-09-02; the
- * proper fix is Fountain sending the substituted config on the session.
- */
-function unescaped(v: string): string {
-  return v.startsWith("$") ? v.slice(1) : v;
-}
-
-/** The email Fountain says a key belongs to. */
-async function whose(ctx: AppContext, key: string): Promise<string> {
+/** Who Managoat says a key belongs to, and the conversation it was minted for. */
+async function whose(ctx: AppContext, key: string): Promise<KeyOwner> {
   const hash = await sha256(key);
   const hit = verified.get(hash);
-  if (hit && Date.now() - hit.at < KEY_CACHE_TTL_MS) return hit.email;
-  let who: { email: string };
+  if (hit && Date.now() - hit.at < KEY_CACHE_TTL_MS) return hit.who;
+  let me: { email: string; conversation_id?: string | null };
   try {
-    who = await new FountainClient(ctx.config.fountainUrl, key).me();
+    me = await new FountainClient(ctx.config.fountainUrl, key).me();
   } catch (err) {
-    if (err instanceof FountainHttpError && (err.status === 401 || err.status === 403)) throw new HttpError(401, "bad_key", "Fountain rejected that key.");
+    if (err instanceof FountainHttpError && (err.status === 401 || err.status === 403)) throw new HttpError(401, "bad_key", "Managoat rejected that key.");
     throw new HttpError(502, "fountain_unreachable", `Could not reach ${ctx.config.fountainUrl} to verify the key.`);
   }
-  const email = who.email.trim().toLowerCase();
-  if (!email) throw new HttpError(502, "no_email", "Fountain did not say who the key belongs to.");
-  verified.set(hash, { email, at: Date.now() });
-  return email;
+  const email = me.email.trim().toLowerCase();
+  if (!email) throw new HttpError(502, "no_email", "Managoat did not say who the key belongs to.");
+  const who = { email, conversationId: me.conversation_id ?? null };
+  verified.set(hash, { who, at: Date.now() });
+  return who;
 }
 
 // ── what goes into the computer ──────────────────────────────────────────
@@ -144,11 +145,11 @@ export function githubCredentialSetupScript(publicUrl: string, repoPath: string)
     `#!/usr/bin/env bash
 set -u
 [ "\${1:-}" = get ] || exit 0
-[ -n "\${FOUNTAIN_TOKEN:-}" ] || exit 0
-[ -n "\${FOUNTAIN_CONVERSATION_ID:-}" ] || exit 0
+[ -n "\${MANAGOAT_TOKEN:-}" ] || exit 0
+[ -n "\${MANAGOAT_CONVERSATION_ID:-}" ] || exit 0
 TOKEN=$(curl -sS -m 30 -X POST ${q(`${publicUrl}/hooks/github-token`)} \\
-  -H "Authorization: Bearer $FOUNTAIN_TOKEN" \\
-  -H "X-Fountain-Conversation-Id: $FOUNTAIN_CONVERSATION_ID" | jq -r '.token // empty')
+  -H "Authorization: Bearer $MANAGOAT_TOKEN" \\
+  -H "X-Managoat-Conversation-Id: $MANAGOAT_CONVERSATION_ID" | jq -r '.token // empty')
 [ -n "$TOKEN" ] || exit 0
 printf 'username=x-access-token\\npassword=%s\\n' "$TOKEN"`,
     "SALON_GITHUB_CREDENTIAL",
@@ -187,11 +188,11 @@ REPO=${q(o.repoPath)}
 BASE=${q(o.base)}
 URL=${q(`${o.publicUrl}/hooks/changes`)}
 REASON="\${1:-manual}"
-[ -n "\${FOUNTAIN_TOKEN:-}" ] || exit 0
-[ -n "\${FOUNTAIN_CONVERSATION_ID:-}" ] || exit 0
+[ -n "\${MANAGOAT_TOKEN:-}" ] || exit 0
+[ -n "\${MANAGOAT_CONVERSATION_ID:-}" ] || exit 0
 cd "$REPO" 2>/dev/null || exit 0
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
-STAMP="/tmp/salon-changes.$FOUNTAIN_CONVERSATION_ID"
+STAMP="/tmp/salon-changes.$MANAGOAT_CONVERSATION_ID"
 if [ "$REASON" = tool ] && [ -f "$STAMP" ]; then
   NOW=$(date +%s); THEN=$(stat -c %Y "$STAMP" 2>/dev/null || echo 0)
   [ $((NOW - THEN)) -ge 2 ] || exit 0
@@ -200,7 +201,7 @@ touch "$STAMP"
 if [ "$REASON" = session ]; then
   CUR=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
   if [ "$CUR" = "$BASE" ] || [ "$CUR" = HEAD ]; then
-    git checkout -q -B "salon/\${FOUNTAIN_CONVERSATION_ID:0:8}" 2>/dev/null || true
+    git checkout -q -B "salon/\${MANAGOAT_CONVERSATION_ID:0:8}" 2>/dev/null || true
   fi
 fi
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
@@ -228,8 +229,8 @@ jq -n --arg branch "$BRANCH" --arg head "$HEAD_SHA" --arg base "$BASE" --arg rea
   --rawfile status "$WORK/status" --rawfile diff "$WORK/diff" \\
   '{branch:$branch, head:$head, base:$base, status:$status, diff:$diff, reason:$reason, pr:$pr, ahead:$ahead}' > "$WORK/body" 2>/dev/null || exit 0
 curl -sS -m 30 -X POST "$URL" \\
-    -H "Authorization: Bearer $FOUNTAIN_TOKEN" \\
-    -H "X-Fountain-Conversation-Id: $FOUNTAIN_CONVERSATION_ID" \\
+    -H "Authorization: Bearer $MANAGOAT_TOKEN" \\
+    -H "X-Managoat-Conversation-Id: $MANAGOAT_CONVERSATION_ID" \\
     -H 'Content-Type: application/json' \\
     --data-binary "@$WORK/body" >/dev/null 2>&1 || true
 exit 0

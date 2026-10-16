@@ -12,9 +12,9 @@
  *     `[from someone]` tags (shared/author.ts);
  *   - the chosen skills as skills.sh installs;
  *   - Salon itself as an MCP server (`salon`, server/mcp.ts) so the model can
- *     start a game — on the claude runtime, which is the one that writes an
- *     `http` server with headers into its config, and only when this server
- *     has a public address for the computer to reach;
+ *     start a game — on every runtime, authenticated as the conversation
+ *     (`"auth": "conversation"`), and only when this server has a public
+ *     address for the computer to reach;
  *   - no environment: the computer is Fountain's default.
  *
  * Neither the games server nor the prompt is part of the key: an agent
@@ -47,7 +47,7 @@ export function codeNote(project: ProjectContext): string {
   return (
     `This chat has a repository: ${project.repoUrl}, checked out at ${project.repoPath}. The chat works on a branch of its own off ` +
     `${project.base}: if the checkout is still on ${project.base} when you start, run ` +
-    "`git checkout -b \"salon/${FOUNTAIN_CONVERSATION_ID:0:8}\"` before changing anything (the id is in your environment), and stay " +
+    "`git checkout -b \"salon/${MANAGOAT_CONVERSATION_ID:0:8}\"` before changing anything (the id is in your environment), and stay " +
     `on that branch; never commit on ${project.base}. Make the smallest change that ` +
     "does what was asked, and commit as you go with a clear message; push the branch when a piece of work is done, so nothing is " +
     "lost if the computer goes away. When someone asks for a pull request, push and open one with `gh pr create` against " +
@@ -70,15 +70,13 @@ export const GAMES_NOTE =
   "person asking is one of them unless they say otherwise — and then step back: the players click their " +
   "own moves and you are not told about them. Answer \"who's winning?\" with game_state.";
 
-/** The `mcp_servers` entry that lets a chat's computer call this server as the conversation it is running. */
+/**
+ * The `mcp_servers` entry that lets a chat's computer call this server as the conversation it is running.
+ * `"auth": "conversation"` has Managoat send the conversation's own key and id as headers when the
+ * session opens, on every runtime; the key never sits in the agent (Managoat ADR 0086).
+ */
 export function salonServer(publicUrl: string): Record<string, unknown> {
-  // `$${…}` is Fountain's escape: the literal `${…}` reaches the runtime's config, and the claude
-  // runtime expands it from its own environment, where the conversation's key and id are.
-  return {
-    type: "http",
-    url: `${publicUrl}/mcp`,
-    headers: { Authorization: "Bearer $${FOUNTAIN_TOKEN}", "X-Fountain-Conversation-Id": "$${FOUNTAIN_CONVERSATION_ID}" },
-  };
+  return { type: "http", url: `${publicUrl}/mcp`, auth: "conversation" };
 }
 
 export interface Materialised {
@@ -89,17 +87,18 @@ export interface Materialised {
 
 export async function agentFor(client: FountainClient, settings: ChatSettings, publicUrl: string | null, project: ProjectContext | null = null): Promise<Materialised> {
   const runtime = runtimeFor(settings.model);
-  const games = runtime === "claude" && publicUrl ? salonServer(publicUrl) : null;
+  const games = publicUrl ? salonServer(publicUrl) : null;
   const system = `${ROOM_PROMPT}\n\n${SALON_NOTE}${project ? `\n\n${codeNote(project)}` : ""}${games ? `\n\n${GAMES_NOTE}` : ""}`;
 
   const key = derivedKey(settings);
   const agents = await client.agents();
   const existing = agents.find((a) => salonKey(a) === key);
   if (existing) {
-    // An agent from before games, from a server without a public address then, or pointed at an old one: given the server in place. A prompt from before this one likewise.
-    const held = existing.mcp_servers?.salon as { url?: unknown } | undefined;
+    // An agent from before games, from a server without a public address then, pointed at an old one, or carrying the
+    // old `$${FOUNTAIN_TOKEN}` headers: given the server in place. A prompt from before this one likewise.
+    const held = existing.mcp_servers?.salon as Record<string, unknown> | undefined;
     const patch: Record<string, unknown> = {};
-    if (games && held?.url !== games.url) patch.mcp_servers = { ...(existing.mcp_servers ?? {}), salon: games };
+    if (games && !sameServer(held, games)) patch.mcp_servers = { ...(existing.mcp_servers ?? {}), salon: games };
     if (existing.system !== system) patch.system = system;
     if (Object.keys(patch).length) await client.updateAgent(existing.id, patch);
     return { agentId: existing.id, created: false };
@@ -120,6 +119,13 @@ export async function agentFor(client: FountainClient, settings: ChatSettings, p
   if (games) body.mcp_servers = { salon: games };
   const made = await client.createAgent(body);
   return { agentId: made.id, created: true };
+}
+
+/** The same entry, whatever order the stored copy's keys come back in. */
+function sameServer(held: Record<string, unknown> | undefined, want: Record<string, unknown>): boolean {
+  if (!held) return false;
+  const keys = new Set([...Object.keys(held), ...Object.keys(want)]);
+  return [...keys].every((k) => held[k] === want[k]);
 }
 
 export function salonKey(a: AgentSummary): string | null {
