@@ -39,7 +39,7 @@ export function SandboxPage({ id }: { id: string }) {
   }, [client, id, conversations]);
 
   useEffect(() => {
-    document.title = sandbox ? `${sandbox.sprite_name} · Machines` : "Machine";
+    document.title = sandbox ? `${sandbox.machine_name} · Machines` : "Machine";
   }, [sandbox]);
 
   if (notFound) {
@@ -67,7 +67,7 @@ export function SandboxPage({ id }: { id: string }) {
             ‹
           </a>
           <h1>
-            <span className="mono">{sandbox.sprite_name}</span>
+            <span className="mono">{sandbox.machine_name}</span>
           </h1>
           <span className={`pill ${sandbox.status}`}>{sandbox.status}</span>
         </div>

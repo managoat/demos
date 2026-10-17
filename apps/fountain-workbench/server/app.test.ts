@@ -223,7 +223,7 @@ const fountain = Bun.serve({
         if (sb[3] === "files") return Response.json({ data: { path: p, entries: [{ name: "thing", type: "directory", size: 0 }], truncated: false } });
         return Response.json({ data: { path: p, content: "hello\n", encoding: "utf-8", size: 6, truncated: false } });
       }
-      return Response.json({ data: { id: sb[1], sprite_name: `sprite-${sb[1]}`, status: "ready", conversations: on.map((c) => ({ id: c.id, status: c.status, mid_turn: false })) } });
+      return Response.json({ data: { id: sb[1], machine_name: `sprite-${sb[1]}`, status: "ready", conversations: on.map((c) => ({ id: c.id, status: c.status, mid_turn: false })) } });
     }
     if (path === "/api/search") {
       const q = url.searchParams.get("q") ?? "";
@@ -721,7 +721,7 @@ describe("the project-scoped proxy", () => {
     const ok = await call("bob", "GET", `/f/${projectId}/api/sandboxes/sb1`);
     expect(ok.status).toBe(200);
     const rec = (await ok.json()).data;
-    expect(rec.sprite_name).toBe("sprite-sb1");
+    expect(rec.machine_name).toBe("sprite-sb1");
     expect(rec.conversations.map((c: { id: string }) => c.id)).toContain("c1");
     expect((await call("bob", "GET", `/f/${projectId}/api/sandboxes/sb2`)).status).toBe(404);
     expect((await call("bob", "GET", `/f/${projectId}/api/sandboxes/sb3`)).status).toBe(404);

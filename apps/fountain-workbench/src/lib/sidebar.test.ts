@@ -66,9 +66,9 @@ describe("computersOf", () => {
 
   test("the sandbox record overrides: a terminated sandbox is not live", () => {
     const sandboxes = new Map<string, SandboxRecord>([
-      ["sb1", { id: "sb1", status: "terminated", sprite_name: "fountain-50e06232-abc", conversations: [] } as unknown as SandboxRecord],
-      ["sb2", { id: "sb2", status: "ready", sprite_name: "fountain-50e06232-def", conversations: [] } as unknown as SandboxRecord],
-      ["sb3", { id: "sb3", status: "starting", sprite_name: "x", conversations: [] } as unknown as SandboxRecord],
+      ["sb1", { id: "sb1", status: "terminated", machine_name: "fountain-50e06232-abc", conversations: [] } as unknown as SandboxRecord],
+      ["sb2", { id: "sb2", status: "ready", machine_name: "fountain-50e06232-def", conversations: [] } as unknown as SandboxRecord],
+      ["sb3", { id: "sb3", status: "starting", machine_name: "x", conversations: [] } as unknown as SandboxRecord],
     ]);
     const cs = computersOf(
       [conv({ id: "1", sandbox_id: "sb1", status: "idle" }), conv({ id: "2", sandbox_id: "sb2", status: "idle" }), conv({ id: "3", sandbox_id: "sb3", status: "pending" })],

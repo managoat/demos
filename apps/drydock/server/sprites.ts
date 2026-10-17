@@ -7,7 +7,7 @@
  * a Claude Code prompt rendered as scrollback rather than a shell.
  *
  * Drydock goes one layer down. Fountain's sandboxes run on Sprites, and
- * every sandbox tells you the name of its sprite (`sandbox.sprite_name`), so a
+ * every sandbox tells you the name of its sprite (`sandbox.machine_name`), so a
  * server holding a Sprites token can reach the same machine directly. That
  * buys two things a conversation genuinely cannot give you: a **real terminal**
  * — a PTY, with job control and an editor that works — and a **run command**

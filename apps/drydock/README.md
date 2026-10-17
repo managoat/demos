@@ -131,7 +131,7 @@ run a command, send a prompt.* That is the right boundary for Fountain, and it
 is why paddock's terminal is a Claude Code prompt rendered as scrollback.
 
 Drydock goes one layer down. Fountain's sandboxes run on
-[Sprites](https://sprites.dev), and every sandbox reports its `sprite_name` — so
+[Sprites](https://sprites.dev), and every sandbox reports its `machine_name` — so
 a server holding a Sprites token can reach the same machine directly. Exec there
 is a WebSocket with a TTY mode, so the Terminal panel is a login shell: job
 control, `vim`, `top`, all of it. `server/terminal.ts` bridges the browser's

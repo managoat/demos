@@ -38,7 +38,7 @@ function computer(over: Partial<Computer> & { status?: string }): Computer {
     key: "sb1",
     sandboxId: "sb1",
     agentId: "a1",
-    sandbox: { id: "sb1", sprite_name: "quiet-hill", status, conversations: [], url: status === "ready" ? "https://quiet-hill.sprites.app" : null } as unknown as Computer["sandbox"],
+    sandbox: { id: "sb1", machine_name: "quiet-hill", status, conversations: [], url: status === "ready" ? "https://quiet-hill.sprites.app" : null } as unknown as Computer["sandbox"],
     conversations: [],
     live: status === "ready" || status === "suspended",
     busy: false,

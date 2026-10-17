@@ -27,7 +27,7 @@ const conversations = [
   conv({ id: "h2", title: "kai: the iOS half", channel_id: "workbench:p1/hot", sandbox_id: "sb1", status: "idle", inserted_at: "2026-08-24T08:00:00Z" }),
   conv({ id: "a1c", title: "kai: A proposal waiting on you", channel_id: "workbench:p1/ask", sandbox_id: "sb2", status: "terminated" }),
 ];
-const sandbox = (id: string, status: string) => ({ id, sprite_name: `fountain-abcd1234-${id}`, status, provider: "sprites", mode: "ephemeral" }) as SandboxRecord;
+const sandbox = (id: string, status: string) => ({ id, machine_name: `fountain-abcd1234-${id}`, status, provider: "sprites", mode: "ephemeral" }) as SandboxRecord;
 
 const current = {
   project: { id: "p1", name: "Workbench", environmentId: "e1", vaultId: "v1", defaultAgentId: null },

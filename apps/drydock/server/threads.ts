@@ -255,7 +255,7 @@ export async function spriteOf(
     if (sandbox.status !== "ready") {
       throw new HttpError(409, "machine_not_ready", `This thread's machine is ${sandbox.status}.`);
     }
-    sprite = sandbox.sprite_name ?? null;
+    sprite = sandbox.machine_name ?? null;
   } catch (err) {
     if (err instanceof HttpError) throw err;
     throw asHttpError(err, "find this thread's machine");
@@ -286,7 +286,7 @@ function statusOf(c: Conversation): ThreadStatus {
 
 function machineOf(c: Conversation | null): MachineState {
   if (!c?.sandbox) return { sandboxId: c?.sandbox_id ?? null, status: c?.sandbox_id ? "pending" : "none", spriteName: null };
-  return { sandboxId: c.sandbox.id, status: c.sandbox.status, spriteName: c.sandbox.sprite_name ?? null };
+  return { sandboxId: c.sandbox.id, status: c.sandbox.status, spriteName: c.sandbox.machine_name ?? null };
 }
 
 function view(project: ProjectRow, row: ThreadRow, c: Conversation | null, status: ThreadStatus): Thread {

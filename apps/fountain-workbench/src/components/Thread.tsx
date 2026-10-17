@@ -238,7 +238,7 @@ export function Thread({ conversationId, onClose, context, focusTurnId }: { conv
           <div className="sub muted small">
             {context ? <>{context} · </> : null}
             {who}
-            {sandbox ? ` · 🖥 ${sandbox.sprite_name.replace(/^fountain-[0-9a-f]{8}-/, "")} (${sandbox.status})` : ""}
+            {sandbox ? ` · 🖥 ${sandbox.machine_name.replace(/^fountain-[0-9a-f]{8}-/, "")} (${sandbox.status})` : ""}
           </div>
         </div>
         {conversation && <StatusPill status={conversation.status} sandbox={sandbox?.status} />}

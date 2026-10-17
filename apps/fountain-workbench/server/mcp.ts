@@ -3,9 +3,9 @@
  * tools, for an agent that is already inside it. "Split this into three
  * items" stops being something a person has to go and do.
  *
- * A teammate in a sandbox already holds a Fountain key (`$FOUNTAIN_TOKEN`,
+ * A teammate in a sandbox already holds a Fountain key (`$MANAGOAT_TOKEN`,
  * minted per conversation, `sprite` scope) and the id of the conversation
- * it is running (`$FOUNTAIN_CONVERSATION_ID`). That is everything this
+ * it is running (`$MANAGOAT_CONVERSATION_ID`). That is everything this
  * endpoint needs, so nothing new is issued and nothing new is stored. The
  * rule is `server/callers.ts`, shared with the snapshot route; in short:
  *

@@ -193,7 +193,7 @@ export function ShowPage({ id }: { id: string }) {
               <span className="mono">
                 {" · "}
                 <a href={paths.sandbox(current.sandbox.id)} title="The machine this conversation runs on">
-                  {current.sandbox.sprite_name}
+                  {current.sandbox.machine_name}
                 </a>
                 {current.sandbox.provider ? ` (${current.sandbox.provider})` : ""} · {current.sandbox.status}
               </span>
