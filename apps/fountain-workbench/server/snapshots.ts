@@ -17,8 +17,8 @@
  * Fountain's read would not.
  *
  * The hook is a child of the agent's process, so it inherits the
- * per-conversation identity Fountain gives that process — `$FOUNTAIN_TOKEN`
- * and `$FOUNTAIN_CONVERSATION_ID` — and authenticates exactly as `/mcp` does
+ * per-conversation identity Fountain gives that process — `$MANAGOAT_TOKEN`
+ * and `$MANAGOAT_CONVERSATION_ID` — and authenticates exactly as `/mcp` does
  * (`server/callers.ts`). Nothing new is issued. The installer is served by
  * this server (`server/hook.ts`).
  *

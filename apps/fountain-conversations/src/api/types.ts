@@ -7,7 +7,7 @@ export type SandboxStatus = "pending" | "starting" | "ready" | "suspended" | "te
 /** One machine, as a conversation embeds it (`conversation.sandbox`). */
 export interface Sandbox {
   id: string;
-  sprite_name: string;
+  machine_name: string;
   status: SandboxStatus;
   provider?: string | null;
   /** The identity the disk was built from (ADR 0023). */

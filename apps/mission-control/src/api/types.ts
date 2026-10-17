@@ -10,7 +10,7 @@ export interface Usage {
 
 export interface Sandbox {
   id: string;
-  sprite_name?: string | null;
+  machine_name?: string | null;
   status: "pending" | "starting" | "ready" | "suspended" | "terminated" | "failed" | string;
   provider?: string | null;
 }

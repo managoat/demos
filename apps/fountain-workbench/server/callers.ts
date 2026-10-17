@@ -1,9 +1,9 @@
 /**
  * Who is calling from inside a sandbox.
  *
- * A teammate in a sandbox already holds a Fountain key (`$FOUNTAIN_TOKEN`,
+ * A teammate in a sandbox already holds a Fountain key (`$MANAGOAT_TOKEN`,
  * minted per conversation, `sprite` scope) and the id of the conversation it
- * is running (`$FOUNTAIN_CONVERSATION_ID`). Two things on this server accept
+ * is running (`$MANAGOAT_CONVERSATION_ID`). Two things on this server accept
  * that pair instead of a session cookie — the MCP endpoint (`server/mcp.ts`)
  * and the snapshot route (`server/snapshots.ts`) — and they must agree on
  * what it proves, so the rule lives here once:
@@ -63,7 +63,7 @@ export async function authenticate(ctx: AppContext, req: Request): Promise<Calle
   const header = req.headers.get("authorization") ?? "";
   const key = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
   if (!key) {
-    throw new HttpError(401, "unauthenticated", "Send a Managoat API key as `Authorization: Bearer …`; inside a sandbox that is $FOUNTAIN_TOKEN.");
+    throw new HttpError(401, "unauthenticated", "Send a Managoat API key as `Authorization: Bearer …`; inside a sandbox that is $MANAGOAT_TOKEN.");
   }
   const email = await whose(ctx, key);
   const user = ctx.db.getUser(email);
@@ -74,7 +74,7 @@ export async function authenticate(ctx: AppContext, req: Request): Promise<Calle
 /** The pin, for a route that makes no sense without one. */
 export function requirePinned(caller: Caller): Pinned {
   if (!caller.pinned) {
-    throw new HttpError(422, "conversation_required", `Send the conversation this comes from as \`X-Fountain-Conversation-Id\`; inside a sandbox that is $FOUNTAIN_CONVERSATION_ID.`);
+    throw new HttpError(422, "conversation_required", `Send the conversation this comes from as \`X-Fountain-Conversation-Id\`; inside a sandbox that is $MANAGOAT_CONVERSATION_ID.`);
   }
   return caller.pinned;
 }

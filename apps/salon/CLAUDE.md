@@ -333,7 +333,7 @@ tic-tac-toe, me against <guest>"; the transcript gets an
 `mcp__salon__start_game` block and `GET /api/chats/:id/games` shows the
 row. An MCP server that failed at session start is not retried — fix,
 then start a *new* chat. To look inside the computer: `GET /api/sandboxes`
-gives `sprite_name`, and `sprite exec -s <name> --file diag.sh:/tmp/d.sh
+gives `machine_name`, and `sprite exec -s <name> --file diag.sh:/tmp/d.sh
 bash /tmp/d.sh` runs there; the runtime's MCP log is
 `~/.cache/claude-cli-nodejs/-home-sprite/mcp-logs-salon/*.jsonl`. Retire
 the chat afterwards; the derived agent keeps the tunnel URL until the next

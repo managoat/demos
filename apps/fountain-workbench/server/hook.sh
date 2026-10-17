@@ -20,8 +20,8 @@
 # Why these paths (server/hook.ts has the long form): Fountain rewrites
 # ~/.claude/settings.json after the setup script whenever the agent has an
 # MCP server, and claude's cwd is its HOME, so the hook lives in
-# settings.local.json. The identity it authenticates with — $FOUNTAIN_TOKEN
-# and $FOUNTAIN_CONVERSATION_ID — is spawn env on the agent's process, which a
+# settings.local.json. The identity it authenticates with — $MANAGOAT_TOKEN
+# and $MANAGOAT_CONVERSATION_ID — is spawn env on the agent's process, which a
 # hook inherits and a daemon started here would not.
 set -euo pipefail
 mkdir -p /home/sprite/.workbench/git-hooks /home/sprite/.claude
@@ -46,8 +46,8 @@ EVENT="$(printf '%s' "$INPUT" | jq -r '.hook_event_name // empty' 2>/dev/null ||
 TOOL="$(printf '%s' "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null || true)"
 
 URL="${WORKBENCH_URL:-__WORKBENCH_URL__}"
-if [ -z "${FOUNTAIN_TOKEN:-}" ] || [ -z "${FOUNTAIN_CONVERSATION_ID:-}" ]; then
-  echo "no conversation identity in this process ($(env | grep -oE '^FOUNTAIN_[A-Z_]+' | tr '\n' ' ')); giving up"
+if [ -z "${MANAGOAT_TOKEN:-}" ] || [ -z "${MANAGOAT_CONVERSATION_ID:-}" ]; then
+  echo "no conversation identity in this process ($(env | grep -oE '^MANAGOAT_[A-Z_]+' | tr '\n' ' ')); giving up"
   exit 0
 fi
 
@@ -82,7 +82,7 @@ for REPO in $REPOS; do
     --argjson ahead "$AHEAD" --argjson behind "$BEHIND" --rawfile status "$T/status" --arg event "$EVENT" --arg tool "$TOOL" \
     '{repo:$repo, source:$source, branch:$branch, head:$head, upstream:$upstream, ahead:$ahead, behind:$behind, status:$status, meta:{event:$event, tool:$tool}}' > "$T/body.json"
   CODE="$(curl -sS -m 20 -o "$T/resp" -w '%{http_code}' -X POST "$URL/api/snapshots" \
-    -H "authorization: Bearer $FOUNTAIN_TOKEN" -H "x-fountain-conversation-id: $FOUNTAIN_CONVERSATION_ID" \
+    -H "authorization: Bearer $MANAGOAT_TOKEN" -H "x-fountain-conversation-id: $MANAGOAT_CONVERSATION_ID" \
     -H 'content-type: application/json' --data-binary @"$T/body.json" || echo curl-failed)"
   echo "$REPO -> $CODE $(head -c 200 "$T/resp" 2>/dev/null || true)"
   rm -rf "$T"

@@ -220,7 +220,7 @@ ahead/behind and porcelain status to `POST /api/snapshots`, and never a diff
 — a hook posting raw bytes would carry a secret an agent pasted into a file,
 and Fountain's read would not. The hook is a child of the agent's process, so
 it inherits the per-conversation identity Fountain gives that process,
-`$FOUNTAIN_TOKEN` and `$FOUNTAIN_CONVERSATION_ID`, and authenticates exactly
+`$MANAGOAT_TOKEN` and `$MANAGOAT_CONVERSATION_ID`, and authenticates exactly
 as `POST /mcp` does (`server/callers.ts`); nothing new is issued. The server
 keeps the latest per work item, computer and checkout (`server/snapshots.ts`),
 members read it under the item, and a `snapshot` record on the project stream
@@ -480,7 +480,7 @@ MCP tools — `list_projects`, `list_work_items`, `create_work_item`,
 `update_work_item` — so "split this into three items" is something the agent
 you are talking to can just do, and the sidebar fills in while it answers.
 Authentication is a Fountain key in `Authorization: Bearer …`, which is what a
-sandbox already holds in `$FOUNTAIN_TOKEN`: the workbench asks Fountain whose
+sandbox already holds in `$MANAGOAT_TOKEN`: the workbench asks Fountain whose
 key it is and gets that person's projects, exactly as sign-in does. A key
 whose email has never signed in here is refused. Send
 `X-Fountain-Conversation-Id` as well and the session is pinned to that

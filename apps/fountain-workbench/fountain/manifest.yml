@@ -126,7 +126,7 @@ spec:
     your own.
   # The work items as tools (server/mcp.ts). `${VAR}` is resolved by Fountain
   # at provision time, so the sandbox's .mcp.json is written with the key
-  # already in it. Deliberately not `$${FOUNTAIN_TOKEN}` (the sprite's own
+  # already in it. Deliberately not `$${MANAGOAT_TOKEN}` (the sprite's own
   # per-conversation key, left for the runtime to expand): the endpoint
   # accepts that key, but the server never registered — every agent whose
   # MCP servers work here resolves its header this way.

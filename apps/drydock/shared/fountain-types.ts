@@ -9,7 +9,7 @@ export type ConversationStatus = "pending" | "running" | "idle" | "failed" | "te
 /** One machine, as a conversation embeds it (`conversation.sandbox`). */
 export interface Sandbox {
   id: string;
-  sprite_name?: string;
+  machine_name?: string;
   status: SandboxStatus;
   provider?: string | null;
   /**

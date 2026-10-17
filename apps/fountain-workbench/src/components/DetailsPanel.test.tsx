@@ -43,7 +43,7 @@ const conversation: Conversation = {
   vault_id: "v1",
 } as Conversation;
 
-const sandbox: SandboxRecord = { id: "sb1", sprite_name: "fountain-abcd1234-quiet-hill", status: "ready", provider: "sprites", mode: "ephemeral" } as SandboxRecord;
+const sandbox: SandboxRecord = { id: "sb1", machine_name: "fountain-abcd1234-quiet-hill", status: "ready", provider: "sprites", mode: "ephemeral" } as SandboxRecord;
 
 function store(over: { conversations?: Conversation[]; sandboxes?: [string, SandboxRecord][] } = {}) {
   return {

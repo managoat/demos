@@ -24,7 +24,7 @@
  *      before the first turn. `settings.local.json` is the project's local
  *      scope, at the same directory, and Fountain never writes it.
  *
- *   2. `FOUNTAIN_TOKEN` and `FOUNTAIN_CONVERSATION_ID` are spawn env on the
+ *   2. `MANAGOAT_TOKEN` and `MANAGOAT_CONVERSATION_ID` are spawn env on the
  *      agent's process and deliberately kept out of `/home/sprite/.env`
  *      (`Conversations.Identity`, ADR 0023): a machine may serve several
  *      conversations, and the identity is per process. A hook is a child of

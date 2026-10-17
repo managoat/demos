@@ -142,7 +142,7 @@ export function relativeTime(iso: string | null | undefined, now = Date.now()): 
 
 /** The sandbox's name for a label: the sprite, or the id's head. */
 export function computerLabel(c: Pick<Computer, "sandbox" | "sandboxId">): string {
-  if (c.sandbox?.sprite_name) return c.sandbox.sprite_name.replace(/^fountain-[0-9a-f]{8}-/, "");
+  if (c.sandbox?.machine_name) return c.sandbox.machine_name.replace(/^fountain-[0-9a-f]{8}-/, "");
   return c.sandboxId ? c.sandboxId.slice(0, 8) : "no computer";
 }
 

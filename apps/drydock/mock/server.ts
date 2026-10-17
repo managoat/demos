@@ -44,7 +44,7 @@ const conversations = new Map<string, Conversation>();
 
 interface Sandbox {
   id: string;
-  sprite_name: string;
+  machine_name: string;
   status: "pending" | "starting" | "ready";
   agent_id: string;
   environment_id: string | null;
@@ -280,7 +280,7 @@ Bun.serve({
 
       const sandbox: Sandbox = {
         id: uuid(),
-        sprite_name: `fountain-mock0001-${uuid().slice(0, 8)}`,
+        machine_name: `fountain-mock0001-${uuid().slice(0, 8)}`,
         status: "pending",
         agent_id: agentId,
         environment_id: (body.environment_id as string) ?? null,
@@ -358,7 +358,7 @@ Bun.serve({
       settle(s);
       const sub = sb[2] ?? "";
       if (sub === "" && req.method === "GET") {
-        return data({ id: s.id, sprite_name: s.sprite_name, status: s.status, provider: "sprites", mode: s.mode });
+        return data({ id: s.id, machine_name: s.machine_name, status: s.status, provider: "sprites", mode: s.mode });
       }
       // A parked machine is 409 and stays parked, which is what makes a poll
       // on a timer free. Here every sandbox is awake once ready.
@@ -400,7 +400,7 @@ function shape(c: Conversation) {
     id: c.id,
     title: c.title,
     sandbox_id: c.sandbox_id,
-    sandbox: s ? { id: s.id, sprite_name: s.sprite_name, status: s.status, provider: "sprites", mode: s.mode } : null,
+    sandbox: s ? { id: s.id, machine_name: s.machine_name, status: s.status, provider: "sprites", mode: s.mode } : null,
     agent_id: c.agent_id,
     environment_id: c.environment_id,
     vault_id: c.vault_id,
