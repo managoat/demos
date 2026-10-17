@@ -12,4 +12,4 @@ images:
   - name: ghcr.io/managoat/fountain-conversations
     # Pinned by .github/workflows/build.yml on every build of this app. `unpinned` is a placeholder
     # that does not exist: the app does not run until CI has replaced it.
-    newTag: sha-fbfcc97afe1a534d0784dcd60cd04c2163ecb6db
+    newTag: sha-da6929e7808b892dba2bf995909cc0519759ed99
